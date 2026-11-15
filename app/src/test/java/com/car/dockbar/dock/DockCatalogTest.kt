@@ -84,7 +84,7 @@ class DockCatalogTest {
             "fan_down" to "root:fanStep:-1",
             "fan_up" to "root:fanStep:1",
             "fan" to "root:toggleHvacWindow/long:fanOff",
-            "music" to "root:openPlayer|play:playPause/long:mediaNext",
+            "music" to "root:openPlayer/long:toggleLyric|play:playPause|next:mediaNext",
         )
         expected.forEach { (action, gestures) ->
             assertEquals(gestures, describe(DockCatalog.of(action)!!.defaultGestures()))

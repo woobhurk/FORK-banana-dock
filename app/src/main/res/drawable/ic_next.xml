@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 沿用播放键的镂空三角和暂停键的圆角竖条，透明度与现有媒体图标一致。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="35.536dp"
+    android:height="33.051dp"
+    android:viewportWidth="35.536"
+    android:viewportHeight="33.051">
+    <group
+        android:translateX="-15.402"
+        android:translateY="-11.473">
+        <path
+            android:fillColor="#ffffffff"
+            android:fillAlpha="0.9"
+            android:fillType="evenOdd"
+            android:pathData="M38.923,27.998L18.854,16.558L18.854,39.439L38.923,27.998ZM43.238,29.475C44.389,28.819 44.389,27.178 43.238,26.522L17.991,12.129C16.84,11.473 15.402,12.293 15.402,13.606L15.402,42.391C15.402,43.703 16.84,44.524 17.991,43.868L43.238,29.475Z" />
+    </group>
+    <path
+        android:fillColor="#ffffffff"
+        android:fillAlpha="0.9"
+        android:pathData="M32.036,0.776L34.836,0.776A0.7,0.7 0,0 1,35.536 1.476L35.536,31.576A0.7,0.7 0,0 1,34.836 32.276L32.036,32.276A0.7,0.7 0,0 1,31.336 31.576L31.336,1.476A0.7,0.7 0,0 1,32.036 0.776Z" />
+</vector>

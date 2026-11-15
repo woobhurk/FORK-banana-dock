@@ -344,6 +344,9 @@ class DockMusicView @JvmOverloads constructor(
     //   现在这里的 px 就是**屏幕上真正看到的像素高**。
     //   18px 基准 × 1.8 倍 = 32px 实际可见高度（之前 1.8 倍时只有约 18px 可见）。
     val btnPlay = DockIconView(context, R.drawable.ic_pause, (18 * 1.8f * iconScale).toInt())
+    val btnNext = DockIconView(context, R.drawable.ic_next, (18 * 1.8f * iconScale).toInt()).apply {
+        contentDescription = "下一首"
+    }
 
     // 专辑图：原 0.80× 缩到 0.7×（即 0.56× 栏高），左移腾出空间给歌曲信息
     private val albumSize = (barHeightPx * 0.80f * 0.7f).toInt().coerceAtLeast(8)
@@ -404,25 +407,19 @@ class DockMusicView @JvmOverloads constructor(
         )
         addView(textCol, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
 
-        // 播放/暂停
-        // ★ v3.13.3：用户反馈「按钮宽度太窄，容易点到旁边的音乐卡片」
-        //   → 把**点击热区**加宽到「半个 Dock 槽位」。
-        //   音乐卡占 3 槽，所以半个槽 = 卡片宽度的 1/6（默认 1920/20 槽时约 48px）。
-        //   这里 width 先置 0，实际宽度在 onMeasure/onLayout 里按卡片宽度动态算，
-        //   这样改 Dock 总宽或音乐卡 span 都不用改代码。
+        // 两个独立的媒体按钮共用尺寸规格，保留歌曲信息区域的弹性空间。
         addView(btnPlay, LayoutParams(0, LayoutParams.MATCH_PARENT).apply {
             marginStart = (6 * iconScale).toInt()
         })
+        addView(btnNext, LayoutParams(0, LayoutParams.MATCH_PARENT))
 
         renderEmpty()
     }
 
     /**
-     * ★ v3.13.8：播放键**随音乐卡宽度线性伸缩**（用户指定规格）：
-     *   卡宽 295px（下限）→ 图标 32px / 热区 70px
-     *   卡宽 500px（上限）→ 图标 50px / 热区 100px
-     *   中间线性插值；图标另兜一层「不被卡片高度裁掉」的保护。
-     * 热区宽度始终 ≥ 图标 + 12px 余量。
+     * 播放/暂停和下一首使用相同的图标大小与点击热区：
+     * 卡宽 295px → 图标 32px / 热区 48px；卡宽 500px → 图标 40px / 热区 64px。
+     * 两个按钮并排时仍给歌曲信息留出空间，图标同时受卡片高度约束。
      */
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val cardW = MeasureSpec.getSize(widthMeasureSpec)
@@ -430,11 +427,13 @@ class DockMusicView @JvmOverloads constructor(
         val iconPx = lerp(cardW, PLAY_ICON_MIN_PX, PLAY_ICON_MAX_PX)
             .coerceAtMost((cardH - 12).coerceAtLeast(20))
         btnPlay.setIconSizePx(iconPx)
+        btnNext.setIconSizePx(iconPx)
         val hotW = lerp(cardW, PLAY_HOT_MIN_PX, PLAY_HOT_MAX_PX)
             .coerceAtLeast(iconPx + 12)
         // 先把宽度写进 LayoutParams 再交给 LinearLayout 测量，
         // 这样布局/边距都由 LinearLayout 正常处理（保留 marginStart）。
         btnPlay.layoutParams = btnPlay.layoutParams.apply { width = hotW }
+        btnNext.layoutParams = btnNext.layoutParams.apply { width = hotW }
         // ★ v3.13.11：歌名 / 歌手字号随音乐卡宽度自动增加（用户指定）
         //   歌名 295px→14px、500px→20px；歌手 295px→11px、500px→14px（线性）
         //   ※ setTextSize 每次调用都会 requestLayout，必须「值变了才设」，
@@ -465,18 +464,17 @@ class DockMusicView @JvmOverloads constructor(
         tvTitle.text = "暂无播放"
         tvArtist.text = "点此打开播放器"
         btnPlay.visibility = View.INVISIBLE
+        btnNext.visibility = View.INVISIBLE
     }
 
     companion object {
-        /** ★ v3.13.9：播放键自适应规格（px），用户指定 ——
-         *  卡宽 295 → 图标 32 / 热区 70；卡宽 500 → 图标 40 / 热区 100，中间线性
-         *  （v3.13.8 时图标上限是 50，v3.13.9 改 40） */
+        /** 两个媒体按钮的自适应规格（px），热区至少比图标宽 12px。 */
         const val CARD_MIN_WIDTH_PX = 295
         const val CARD_MAX_WIDTH_PX = 500
         const val PLAY_ICON_MIN_PX = 32
         const val PLAY_ICON_MAX_PX = 40
-        const val PLAY_HOT_MIN_PX = 70
-        const val PLAY_HOT_MAX_PX = 100
+        const val PLAY_HOT_MIN_PX = 48
+        const val PLAY_HOT_MAX_PX = 64
 
         /** ★ v3.13.11：歌名 / 歌手字号随卡宽线性伸缩（px，用户指定） */
         const val TITLE_MIN_PX = 14
@@ -485,12 +483,13 @@ class DockMusicView @JvmOverloads constructor(
         const val ARTIST_MAX_PX = 14
     }
 
-    /** 反色切换后重刷歌名 / 歌手 / 音符占位 / 播放键颜色，不改内容 */
+    /** 反色切换后重刷歌名 / 歌手 / 音符占位 / 媒体按钮颜色，不改内容 */
     fun refreshColors() {
         tvTitle.setTextColor(DockIconView.fgColor)
         tvArtist.setTextColor(DockIconView.fgColorDim)
         noteOverlay.setColorFilter(DockIconView.fgColor)
         btnPlay.refreshTint()
+        btnNext.refreshTint()
     }
 
     fun render(
@@ -511,6 +510,8 @@ class DockMusicView @JvmOverloads constructor(
         tvTitle.text = title.ifBlank { "未知曲目" }
         tvArtist.text = artist.ifBlank { "—" }
         btnPlay.visibility = View.VISIBLE
+        btnNext.visibility = View.VISIBLE
         btnPlay.setIcon(if (playing) R.drawable.ic_pause else R.drawable.ic_play)
+        btnPlay.contentDescription = if (playing) "暂停" else "播放"
     }
 }

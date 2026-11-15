@@ -8,8 +8,9 @@ object HitTargets {
     const val VALUE = "value"
     const val PLUS = "plus"
     const val PLAY = "play"
+    const val NEXT = "next"
 
-    val all = setOf(ROOT, MINUS, VALUE, PLUS, PLAY)
+    val all = setOf(ROOT, MINUS, VALUE, PLUS, PLAY, NEXT)
 }
 
 enum class Gesture { TAP, LONG_PRESS }

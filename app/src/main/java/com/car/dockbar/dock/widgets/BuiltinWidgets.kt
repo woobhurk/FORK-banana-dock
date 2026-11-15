@@ -204,8 +204,9 @@ private object MusicWidget : DockWidget {
         flexMaxPx = DockMetrics.MUSIC_MAX_WIDTH_PX,
     )
     override fun defaultGestures() = linkedMapOf(
-        HitTargets.ROOT to tap(DockAction.OpenPlayer),
-        HitTargets.PLAY to tapLong(DockAction.PlayPause, DockAction.MediaNext),
+        HitTargets.ROOT to tapLong(DockAction.OpenPlayer, DockAction.ToggleLyric),
+        HitTargets.PLAY to tap(DockAction.PlayPause),
+        HitTargets.NEXT to tap(DockAction.MediaNext),
     )
     override fun bind(mounted: MountedEntry, snapshot: DockSnapshot) {
         val music = mounted.view as? DockMusicView ?: return
@@ -221,7 +222,11 @@ private object MusicWidget : DockWidget {
         )
         return mounted(
             this, entry, view,
-            linkedMapOf(HitTargets.ROOT to view, HitTargets.PLAY to view.btnPlay),
+            linkedMapOf(
+                HitTargets.ROOT to view,
+                HitTargets.PLAY to view.btnPlay,
+                HitTargets.NEXT to view.btnNext,
+            ),
             null,
         )
     }
