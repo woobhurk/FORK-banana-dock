@@ -7,6 +7,7 @@ internal data class ResidentAppChoice(val app: ResidentAppItem, val selected: Bo
 internal object ResidentAppList {
     fun choices(apps: List<ResidentAppItem>, blacklist: Set<String>): List<ResidentAppChoice> =
         apps.map { ResidentAppChoice(it, it.pkg in blacklist) }
+            .sortedByDescending { it.selected }
 
     fun blacklistedApps(
         apps: List<ResidentAppItem>,

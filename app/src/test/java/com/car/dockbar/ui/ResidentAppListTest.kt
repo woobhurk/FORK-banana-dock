@@ -83,6 +83,46 @@ class ResidentAppListTest {
     }
 
     @Test
+    fun pickerPlacesSelectedAppsFirstAndPreservesRelativeOrderWithinEachGroup() {
+        val anotherSystemApp = ResidentAppItem("com.system.radio", "Radio", true)
+        val apps = installedApps + anotherSystemApp
+        val choices = ResidentAppList.choices(apps, setOf(anotherSystemApp.pkg, personalApp.pkg))
+
+        assertEquals(
+            listOf(personalApp, anotherSystemApp, systemApp, otherApp),
+            choices.map { it.app }
+        )
+        assertEquals(listOf(true, true, false, false), choices.map { it.selected })
+        assertEquals(listOf(systemApp, personalApp, otherApp, anotherSystemApp), apps)
+    }
+
+    @Test
+    fun pickerPlacesSelectedAppsFirstWithinSystemAndPersonalColumns() {
+        val anotherSystemApp = ResidentAppItem("com.system.radio", "Radio", true)
+        val choices = ResidentAppList.choices(
+            installedApps + anotherSystemApp,
+            setOf(otherApp.pkg, anotherSystemApp.pkg)
+        )
+
+        assertEquals(
+            listOf(anotherSystemApp, systemApp),
+            choices.filter { it.app.system }.map { it.app }
+        )
+        assertEquals(
+            listOf(otherApp, personalApp),
+            choices.filterNot { it.app.system }.map { it.app }
+        )
+    }
+
+    @Test
+    fun pickerPreservesCatalogOrderWhenAllAppsAreSelected() {
+        val choices = ResidentAppList.choices(installedApps, installedApps.map { it.pkg }.toSet())
+
+        assertEquals(installedApps, choices.map { it.app })
+        assertTrue(choices.all { it.selected })
+    }
+
+    @Test
     fun removedSystemAppRemainsAvailableForAddingAgain() {
         val blacklist = mutableSetOf(systemApp.pkg)
         assertTrue(ResidentAppList.choices(installedApps, blacklist).first().selected)

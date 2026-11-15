@@ -224,7 +224,7 @@ class ResidentSettingsPage(activity: MainActivity) : SettingsPage(activity, Main
                 loadAppIconAsync(candidate.pkg, this)
             })
             row.addView(CheckBox(this).apply {
-                text = "${candidate.label}${if (alreadyAdded) "（已添加）" else ""}\n${candidate.pkg}"
+                text = "${candidate.label}\n${candidate.pkg}"
                 setTextColor(0xFFEDEFF3.toInt())
                 textSize = 14f
                 isChecked = alreadyAdded
