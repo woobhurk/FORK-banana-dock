@@ -2,6 +2,7 @@
 .gradle/
 .kotlin/
 .superpowers/
+apks/
 build/
 app/build/
 local.properties

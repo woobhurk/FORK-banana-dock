@@ -14,8 +14,8 @@ android {
         applicationId "com.car.dockbar"
         minSdk 28
         targetSdk 34
-        versionCode 461
-        versionName "4.6.1"
+        versionCode 465
+        versionName "4.6.5"
         resConfigs "zh", "en"
 
         ndk {
