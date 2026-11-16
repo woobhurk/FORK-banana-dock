@@ -26,6 +26,8 @@ data class WidgetSpec(
     val iconScale: Float = 1f,
     val preserveColors: Boolean = false,
     val arrowPx: Int = 0,
+    /** 箭头点击列宽。0 表示与数值三等分。 */
+    val arrowHitPx: Int = 0,
     val bindKind: BindKind = BindKind.NONE,
 )
 
@@ -51,8 +53,14 @@ interface DockWidget {
 }
 
 object DockMetrics {
-    const val FAN_COMBO_FIXED_WIDTH_PX = 220
+    /** 风速箭头图标边长。 */
     const val FAN_COMBO_ARROW_PX = 40
+    /** 风速箭头点击列：图标两侧各留 4px，避免贴边。 */
+    const val FAN_COMBO_ARROW_HIT_PX = FAN_COMBO_ARROW_PX + 8
+    /** 风速数值列。默认字号下能放下「AUTO」，短档位居中后仍和箭头分开。 */
+    const val FAN_COMBO_VALUE_PX = 80
+    /** 风速组合总宽 = 两侧点击列 + 数值列。 */
+    const val FAN_COMBO_FIXED_WIDTH_PX = FAN_COMBO_ARROW_HIT_PX * 2 + FAN_COMBO_VALUE_PX
     const val SLOT_FIXED_PX = 98
     const val SPAN3_FIXED_PX = 290
     const val MUSIC_MIN_WIDTH_PX = 295

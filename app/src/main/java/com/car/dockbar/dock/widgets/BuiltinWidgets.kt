@@ -35,6 +35,7 @@ private fun spec(
     iconScale: Float = 1f,
     preserveColors: Boolean = false,
     arrowPx: Int = 0,
+    arrowHitPx: Int = 0,
 ) = WidgetSpec(
     action = builtin.action,
     label = builtin.label,
@@ -51,6 +52,7 @@ private fun spec(
     iconScale = iconScale,
     preserveColors = preserveColors,
     arrowPx = arrowPx,
+    arrowHitPx = arrowHitPx,
 )
 
 private fun root(binding: GestureBinding) = linkedMapOf(HitTargets.ROOT to binding)
@@ -126,10 +128,11 @@ private fun comboWidget(
     bindKind: BindKind,
     fixedWidthPx: Int = 0,
     arrowPx: Int = 0,
+    arrowHitPx: Int = 0,
 ): DockWidget = object : DockWidget {
     override val spec = spec(
         builtin, iconFor(builtin.action), bindKind,
-        fixedWidthPx = fixedWidthPx, arrowPx = arrowPx,
+        fixedWidthPx = fixedWidthPx, arrowPx = arrowPx, arrowHitPx = arrowHitPx,
     )
     override fun bind(mounted: MountedEntry, snapshot: DockSnapshot) {
         mounted.valueView?.let { paintValue(it, spec.bindKind, snapshot) }
@@ -149,10 +152,19 @@ private fun comboWidget(
         val minusView = DockIconView(ctx, R.drawable.ic_chevron_left, arrow)
         val value = DockValueView(ctx, 25f * text, 16f * text, 12f * text)
         val plusView = DockIconView(ctx, R.drawable.ic_chevron_right, arrow)
-        val cell = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f)
-        box.addView(minusView, LinearLayout.LayoutParams(cell))
-        box.addView(value, LinearLayout.LayoutParams(cell))
-        box.addView(plusView, LinearLayout.LayoutParams(cell))
+        if (spec.arrowHitPx > 0) {
+            // 风速：箭头列按点击宽度固定，数值列吃掉剩余空间，避免三等分把两侧撑空。
+            val side = LinearLayout.LayoutParams(spec.arrowHitPx, LinearLayout.LayoutParams.MATCH_PARENT)
+            val middle = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f)
+            box.addView(minusView, side)
+            box.addView(value, middle)
+            box.addView(plusView, LinearLayout.LayoutParams(side))
+        } else {
+            val cell = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f)
+            box.addView(minusView, LinearLayout.LayoutParams(cell))
+            box.addView(value, LinearLayout.LayoutParams(cell))
+            box.addView(plusView, LinearLayout.LayoutParams(cell))
+        }
         return mounted(
             this, entry, box,
             linkedMapOf(
@@ -286,6 +298,7 @@ internal object BuiltinWidgets {
             BindKind.FAN,
             fixedWidthPx = DockMetrics.FAN_COMBO_FIXED_WIDTH_PX,
             arrowPx = DockMetrics.FAN_COMBO_ARROW_PX,
+            arrowHitPx = DockMetrics.FAN_COMBO_ARROW_HIT_PX,
         ),
         iconWidget(Builtin.TEMP_DOWN_DRIVER, root(tap(DockAction.TempStep(true, -1)))),
         valueWidget(Builtin.TEMP_DRIVER, root(tapLong(DockAction.ToggleHvacWindow, DockAction.ToggleAc)), BindKind.TEMP_DRIVER),

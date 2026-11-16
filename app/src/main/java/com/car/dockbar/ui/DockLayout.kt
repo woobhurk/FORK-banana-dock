@@ -17,7 +17,7 @@ import kotlin.math.roundToInt
  * Dock 栏根容器。
  *
  * ★ v3.13.8 布局模型（用户指定规格）：**固定项 + 唯一弹性项**。
- *  - 固定项：1 槽 98px、3 槽温度组合 290px、D08 风速 250px —— 恒定不伸缩；
+ *  - 固定项：1 槽 98px、3 槽温度组合 290px、风速组合 176px —— 恒定不伸缩；
  *  - 弹性项（音乐卡）：宽度 = 总宽 - 全部固定项，钳到 295~500px。
  * 条目宽度由 [Lp.fixedWidthPx] / [Lp.flexMinPx]+[Lp.flexMaxPx] 决定，
  * [Lp.span] 退化为纯元数据（设置页与配置迁移还在读）。
@@ -35,7 +35,7 @@ class DockLayout @JvmOverloads constructor(
      * ★ v3.13.8 布局模型：**固定项 + 唯一弹性项（音乐卡）**。
      *
      * @param fixedWidthPx >0 = 该条目锁死固定宽度（px）。
-     *   1 槽项 98、3 槽温度组合 290、D08 风速 250 —— 这些宽度**不随音乐卡伸缩**。
+     *   1 槽项 98、3 槽温度组合 290、风速组合 176 —— 这些宽度**不随音乐卡伸缩**。
      * @param flexMinPx / flexMaxPx >0 = 弹性区间：该条目宽度 = 总宽 - 全部固定项，
      *   再钳到 [flexMinPx, flexMaxPx]。当前只有音乐卡用（295~500px）。
      *   音乐卡钳到上限后多出的空间、或保住下限后缺的空间，

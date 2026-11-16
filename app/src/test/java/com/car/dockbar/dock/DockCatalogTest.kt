@@ -49,6 +49,21 @@ class DockCatalogTest {
     }
 
     @Test
+    fun fanComboIsNarrowerThanTheTemperatureCombo() {
+        val fan = DockCatalog.of(Builtin.FAN_COMBO.action)!!.spec
+        assertEquals(DockMetrics.FAN_COMBO_FIXED_WIDTH_PX, fan.fixedWidthPx)
+        assertEquals(DockMetrics.FAN_COMBO_ARROW_PX, fan.arrowPx)
+        assertEquals(DockMetrics.FAN_COMBO_ARROW_HIT_PX, fan.arrowHitPx)
+        assertEquals(
+            DockMetrics.FAN_COMBO_ARROW_HIT_PX * 2 + DockMetrics.FAN_COMBO_VALUE_PX,
+            fan.fixedWidthPx,
+        )
+        assertTrue(fan.fixedWidthPx < DockMetrics.SPAN3_FIXED_PX)
+        assertTrue(fan.arrowHitPx > fan.arrowPx)
+        assertEquals(0, DockCatalog.of(Builtin.TEMP_DRIVER_COMBO.action)!!.spec.arrowHitPx)
+    }
+
+    @Test
     fun spanHonorsEntryWidthExceptLyric() {
         assertEquals(1, DockCatalog.spanOf(Builtin.LYRIC, 3))
         assertEquals(3, DockCatalog.spanOf(Builtin.MUSIC, 3))
