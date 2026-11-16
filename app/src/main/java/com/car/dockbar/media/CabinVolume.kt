@@ -19,22 +19,32 @@ object CabinVolume {
     val NAVI = Channel("导航", 1, 15)
 
     private val mediaShownListeners = mutableListOf<(Int) -> Unit>()
+    private val mediaLock = Any()
+    private var cachedMediaLevel: Level? = null
+    private var mediaWriteGeneration = 0L
 
     fun addMediaShownListener(listener: (Int) -> Unit) {
-        if (listener !in mediaShownListeners) mediaShownListeners += listener
+        synchronized(mediaLock) {
+            if (listener !in mediaShownListeners) mediaShownListeners += listener
+        }
     }
 
     fun removeMediaShownListener(listener: (Int) -> Unit) {
-        mediaShownListeners -= listener
+        synchronized(mediaLock) { mediaShownListeners -= listener }
     }
 
     data class Level(val value: Int, val max: Int)
 
-    /** 读到的流索引原样显示，上限用系统自己的 getStreamMaxVolume。 */
+    /** 读取流索引，并在媒体流读取成功时更新缓存；上限用系统自己的 getStreamMaxVolume。 */
     fun read(ctx: Context, channel: Channel): Level {
         val max = streamMax(ctx, channel)
-        val raw = streamVolume(ctx, channel).coerceIn(0, max)
-        return Level(raw, max)
+        val readGeneration = if (channel == MEDIA) {
+            synchronized(mediaLock) { mediaWriteGeneration }
+        } else null
+        val observed = runCatching { audio(ctx).getStreamVolume(channel.stream) }.getOrNull()
+        val level = Level((observed ?: 0).coerceIn(0, max), max)
+        if (observed != null && channel == MEDIA) recordMediaLevel(level, readGeneration)
+        return level
     }
 
     fun step(ctx: Context, channel: Channel, delta: Int) {
@@ -46,19 +56,60 @@ object CabinVolume {
     fun write(ctx: Context, channel: Channel, shown: Int) {
         val max = streamMax(ctx, channel)
         val written = shown.coerceIn(0, max)
+        val writeGeneration = if (channel == MEDIA) {
+            synchronized(mediaLock) {
+                mediaWriteGeneration++
+                mediaWriteGeneration
+            }
+        } else null
         runCatching {
             audio(ctx).setStreamVolume(channel.stream, written, 0)
         }.onFailure { Logx.e("音量：setStreamVolume(${channel.stream}) 失败", it) }
-        val raw = streamVolume(ctx, channel).coerceIn(0, max)
-        if (channel == MEDIA) mediaShownListeners.toList().forEach { it(raw) }
-        Logx.d("音量 ${channel.title} 流${channel.stream} 写入 $written 读回 $raw 上限 $max")
+        val observed = runCatching { audio(ctx).getStreamVolume(channel.stream) }.getOrNull()
+        val raw = observed?.coerceIn(0, max)
+        val listeners = if (channel == MEDIA) {
+            finishMediaWrite(writeGeneration!!, raw, max)
+        } else emptyList()
+        listeners.forEach { it(raw ?: written) }
+        Logx.d("音量 ${channel.title} 流${channel.stream} 写入 $written 读回 ${raw ?: "失败"} 上限 $max")
+    }
+
+    /** 返回媒体缓存；冷启动没有缓存时只进行一次真实读取。 */
+    fun cachedMediaLevel(ctx: Context): Level {
+        synchronized(mediaLock) {
+            cachedMediaLevel?.let { return it }
+        }
+        return read(ctx, MEDIA)
+    }
+
+    private fun recordMediaLevel(level: Level, expectedGeneration: Long?) {
+        val listeners = synchronized(mediaLock) {
+            if (expectedGeneration != null && expectedGeneration != mediaWriteGeneration) {
+                return@synchronized emptyList<(Int) -> Unit>()
+            }
+            val changed = cachedMediaLevel?.value != level.value
+            cachedMediaLevel = level
+            if (changed) mediaShownListeners.toList() else emptyList()
+        }
+        listeners.forEach { it(level.value) }
+    }
+
+    private fun finishMediaWrite(generation: Long, raw: Int?, max: Int): List<(Int) -> Unit> {
+        val listeners = synchronized(mediaLock) {
+            if (mediaWriteGeneration != generation) return@synchronized emptyList<(Int) -> Unit>()
+            mediaWriteGeneration++
+            if (raw == null) return@synchronized emptyList<(Int) -> Unit>()
+            val level = Level(raw, max)
+            val changed = cachedMediaLevel?.value != level.value
+            cachedMediaLevel = level
+            if (changed) mediaShownListeners.toList() else emptyList()
+        }
+        return listeners
     }
 
     private fun streamMax(ctx: Context, channel: Channel): Int =
         runCatching { audio(ctx).getStreamMaxVolume(channel.stream) }.getOrDefault(1).coerceAtLeast(1)
 
-    private fun streamVolume(ctx: Context, channel: Channel): Int =
-        runCatching { audio(ctx).getStreamVolume(channel.stream) }.getOrDefault(0)
 
     private fun audio(ctx: Context): AudioManager =
         ctx.applicationContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager

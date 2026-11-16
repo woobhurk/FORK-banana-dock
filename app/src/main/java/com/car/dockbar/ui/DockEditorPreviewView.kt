@@ -81,12 +81,14 @@ internal class DockEditorPreviewView(context: Context) : View(context) {
                 }
             }
         }
-        // Match the live Dock's palette without changing its global foreground colors.
+        // 每次显式渲染刷新一次媒体真实读值，整批条目复用同一快照。
         val darkIcons = Color.red(DockIconView.fgColor) < 128
+        CabinVolume.read(ctx, CabinVolume.MEDIA)
+        val snapshot = DockSnapshots.capture(ctx, darkIcons)
         items.forEach { entry ->
             val iconPx = (65 * Prefs.iconScale(ctx)).toInt().coerceAtLeast(12)
             val mounted = DockCatalog.mount(ctx, entry, SilentDockHost, attachGestures = false, iconPx)
-            mounted.widget.bind(mounted, DockSnapshots.capture(ctx, darkIcons))
+            mounted.widget.bind(mounted, snapshot)
             layout.addItem(mounted.view, mounted.span, mounted.separator, mounted.fixedWidthPx,
                 mounted.flexMinPx, mounted.flexMaxPx)
         }

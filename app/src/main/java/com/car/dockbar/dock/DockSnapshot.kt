@@ -49,7 +49,7 @@ object DockSnapshots {
             seatHeat = state.seatHeat,
             steeringHeat = state.steeringHeat,
             darkIcons = darkIcons,
-            volumeLevel = CabinVolume.read(ctx, CabinVolume.MEDIA).value,
+            volumeLevel = CabinVolume.cachedMediaLevel(ctx).value,
             lyricOn = LyricOverlayService.alive && LyricOverlayService.attached,
             mediaHasSession = media.hasSession,
             mediaTitle = media.title,

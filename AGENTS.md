@@ -82,6 +82,7 @@
 | 媒体会话和通知补充信息 | `media/MediaBridge.kt`、`media/DockNotificationListener.kt` |
 | 车控通道配置 | `config/VehicleChannels.kt` |
 | 车控读写和状态 | `vehicle/VehicleController.kt`、`vehicle/VehicleBridge.kt` |
+| 车控分组轮询、合并和公平调度 | `vehicle/VehicleRefreshQueue.kt` |
 | 传感器 | `vehicle/SensorBridge.kt` |
 | 日志、崩溃和上传 | `util/Logx.kt`、`util/LogUploader.kt`、`util/NativeCrashHandler.kt` |
 | 偏好设置兼容入口与启动 | `util/Prefs.kt`、`App.kt` |
@@ -225,6 +226,18 @@
 - 全局空闲自动隐藏已经移除，`SHOWN` 状态不会因为无操作而倒计时消失；`pauseAutoHide()`、`onUserIdle()` 等沿用的名称不能作为该功能仍存在的依据。
 - 底部手势或弹窗触发的 `TEMP_SHOW` 临时显示倒计时仍保留。`DockStateMachine.onTempShowTimeout()` 到时仅在 `hiddenByApp=true` 时隐藏，否则转为 `SHOWN`，不得将其与已删除的全局空闲自动隐藏混淆。
 - 黑名单默认值和迁移分别见 `util/DockBlacklistDefaults.kt`、`util/DockBlacklistMigration.kt`；日常读写经 `Prefs` 转发至 `DockBlacklistPreferences`，不改变上述未知前台默认显示策略。
+
+### 5.6 车控分组刷新与快照缓存（当前）
+
+- `VehicleController` 按风量、空调状态、设定温度、舒适功能和环境传感器分组读取；`VehicleRefreshQueue` 统一安排期限与合并请求，所有厂商分组读取继续使用既有单条 HAL I/O 队列，不为每个通道创建线程，也不默认开启新的 watcher。
+- 风量组包含手动和 AUTO 风量；空调状态组包含 AC、循环和风向；舒适组包含四路座椅通风/加热、前后挡和方向盘加热。点火、舱温、外温归传感器组；点火沿用 2500ms 基准，实际更新仍受单队列排队和读取耗时影响。
+- 各组完成后的最短轮询间隔：风量 500ms，空调状态 1000ms，设定温度、舒适功能和传感器 2500ms。Dock 每 250ms 只检查调度期限；正在执行的慢 IPC 不能被抢占，因此这些数字不是车机显示延迟上限。
+- 每组最多保留一个待执行请求；执行中的显式刷新只合并保留一次后续读取。轮转取组避免高频风量请求饿死其它组。媒体和音量保留独立的 2500ms 后台刷新，不在车控分组里读取，也不因调度 tick 强制重绑整栏。
+- 分组结果回主线程后只合并本组字段；回调和用户操作统一基于最新 `State` 更新，并推进相应分组修订号。读取期间出现更晚的同组更新时，旧读取结果丢弃；同值的有效回调也可阻止旧读取覆盖，但不重复通知界面。读取结果发布不推进意图修订号，避免较早轮询废弃稍后执行的最终温度回读。
+- 本地操作的 900ms 写后刷新只包含受影响分组；不同组的请求合并保留，不再每次读取全部通道。风量的既有 1500ms 乐观值保护及权限、写入门禁、哨兵处理和崩溃熔断保留。
+- 周期读取始终读当前配置 zone；对无效结果的完整备用 zone 探测不随高频组反复执行，周期探测最短间隔仍为 2500ms，显式刷新可立即重新探测。
+- `CabinVolume` 缓存最近一次真实媒体音量观测，用写入代际拒绝写前或写中启动的旧读取覆盖写后缓存。后台读取和写后回读仅在数值改变时通知既有监听；`DockSnapshots.capture()` 复用缓存，冷启动尚无观测时允许一次真实读取。独立编辑预览在每次显式 `render()` 开始时采样一次音量，整批条目共用一份快照，不依赖 Dock 服务轮询，也不在绘制或逐条目绑定时重复读取。`DockOverlayService` 对相同快照跳过重绑，重挂载会清除旧快照缓存。
+- 提高风量和空调组采样频率会增加这两组的基础读取次数，不能据此声称总 IPC、CPU 或功耗一定下降。具体收益须依据日志中的分组 `wait` / `io` 耗时和真车回归判断；本机验证不能代替厂商接口及真实车辆效果验证。
 
 ## 6. 车控接口和安全边界
 

@@ -2,6 +2,7 @@ package com.car.dockbar.ui
 
 import com.car.dockbar.dock.airDirectionIcon
 import com.car.dockbar.dock.DockCatalog
+import com.car.dockbar.dock.DockSnapshot
 import com.car.dockbar.dock.DockSnapshots
 import com.car.dockbar.dock.MountedEntry
 import com.car.dockbar.dock.DockHost
@@ -25,6 +26,7 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.os.IBinder
 import android.os.Looper
+import android.os.SystemClock
 import android.provider.Settings
 import android.view.Gravity
 import android.view.MotionEvent
@@ -89,8 +91,8 @@ class DockOverlayService : Service() {
         var hiddenByApp: Boolean = false
         private const val NOTIF_ID = 2001
         private const val CHANNEL_ID = "dock_overlay"
-        private const val REFRESH_INTERVAL_MS = 2500L
-
+        private const val TICK_INTERVAL_MS = 250L
+        private const val MEDIA_REFRESH_INTERVAL_MS = 2500L
         /** 反色采样间隔：每秒截取 dock 条带算亮度，屏幕内容变了最多 1 秒内换色 */
         private const val CONTRAST_INTERVAL_MS = 1000L
 
@@ -128,7 +130,7 @@ class DockOverlayService : Service() {
 
     // --- 各控件引用（同一控件可能被用户重复添加，用列表保存） ---
     private val mountedEntries = mutableListOf<MountedEntry>()
-
+    private var lastBoundSnapshot: DockSnapshot? = null
     private val mediaLevelListener: (Int) -> Unit = { _ ->
         main.post { rebind() }
     }
@@ -188,41 +190,68 @@ class DockOverlayService : Service() {
 
     private val ticker = object : Runnable {
         override fun run() {
-            // 车控 / 媒体读取都是 binder IPC，放主线程会掉帧甚至 ANR。
-            // 结果通过 VehicleController/MediaBridge 内部的 main.post 回到主线程渲染。
-            work?.post {
-                runCatching { VehicleController.refresh(this@DockOverlayService) }
-                    .onFailure { Logx.e("车控刷新异常", it) }
-                runCatching { MediaBridge.refresh(this@DockOverlayService) }
-                    .onFailure { Logx.e("媒体刷新异常", it) }
-                val level = runCatching {
-                    CabinVolume.read(this@DockOverlayService, CabinVolume.MEDIA).value
-                }.getOrNull()
-                if (level != null) main.post { rebind() }
-            }
-            refreshLyricIcons()
-            main.postDelayed(this, REFRESH_INTERVAL_MS)
+            runCatching { VehicleController.poll(this@DockOverlayService) }
+                .onFailure { Logx.e("车控轮询调度异常", it) }
+            scheduleMediaRefreshIfDue()
+            main.postDelayed(this, TICK_INTERVAL_MS)
         }
     }
 
-    // --- 后台工作线程（车控 / 媒体 IO） ---
+    private fun scheduleMediaRefreshIfDue() {
+        val now = SystemClock.uptimeMillis()
+        val handler = work ?: return
+        val generation = workGeneration
+        if (mediaTaskGeneration != null || now < nextMediaRefreshAt) return
+        mediaTaskGeneration = generation
+        nextMediaRefreshAt = now + MEDIA_REFRESH_INTERVAL_MS
+        val posted = handler.post {
+            if (mediaTaskGeneration != generation || workGeneration != generation) return@post
+            try {
+                runCatching { MediaBridge.refresh(this@DockOverlayService) }
+                    .onFailure { Logx.e("媒体刷新异常", it) }
+                runCatching { CabinVolume.read(this@DockOverlayService, CabinVolume.MEDIA) }
+                    .onFailure { Logx.e("音量刷新异常", it) }
+            } finally {
+                main.post {
+                    if (workGeneration == generation && mediaTaskGeneration == generation) {
+                        mediaTaskGeneration = null
+                    }
+                }
+            }
+        }
+        if (!posted && workGeneration == generation && mediaTaskGeneration == generation) {
+            mediaTaskGeneration = null
+        }
+    }
+
+    // --- 后台媒体刷新只保留一个待执行任务，代际标记避免旧回调影响新实例 ---
+    @Volatile
+    private var workGeneration = 0
+    @Volatile
+    private var mediaTaskGeneration: Int? = null
+    private var nextMediaRefreshAt = 0L
     private var workThread: HandlerThread? = null
     private var work: Handler? = null
 
     private fun startWork() {
         if (workThread != null) return
+        workGeneration++
+        mediaTaskGeneration = null
+        nextMediaRefreshAt = SystemClock.uptimeMillis() + MEDIA_REFRESH_INTERVAL_MS
         workThread = HandlerThread("dock-vehicle").apply { start() }
         work = Handler(workThread!!.looper)
     }
 
     private fun stopWork() {
+        workGeneration++
+        mediaTaskGeneration = null
         work?.removeCallbacksAndMessages(null)
         workThread?.quitSafely()
         workThread = null
         work = null
     }
 
-    /** 「歌词」按钮点亮状态跟随歌词悬浮窗的实际运行状态 */
+    /** 歌词窗口状态变化时由监听立即刷新图标。 */
     private fun refreshLyricIcons() {
         rebind()
     }
@@ -270,7 +299,7 @@ class DockOverlayService : Service() {
         buildDock()
         startWork()
         work?.post { initVehicleAndMedia() }
-        main.postDelayed(ticker, REFRESH_INTERVAL_MS)
+        main.postDelayed(ticker, TICK_INTERVAL_MS)
         // 活过 15 秒 → 认为本次启动「稳定」，下次启动据此把连续崩溃计数清零
         main.postDelayed({
             runCatching { LogUploader.markStable(this) }
@@ -360,7 +389,7 @@ class DockOverlayService : Service() {
             buildDock()
             startWork()
             work?.post { initVehicleAndMedia() }
-            main.postDelayed(ticker, REFRESH_INTERVAL_MS)
+            main.postDelayed(ticker, TICK_INTERVAL_MS)
             running = true
         }
         return START_STICKY
@@ -426,7 +455,8 @@ class DockOverlayService : Service() {
 
     private fun clearBindings() {
         mountedEntries.clear()
-                lastAcState = null   // 重建后重置首帧判定，避免旧状态误触发弹窗
+        lastBoundSnapshot = null
+        lastAcState = null   // 重建后重置首帧判定，避免旧状态误触发弹窗
         animating = false
     }
 
@@ -1424,7 +1454,9 @@ class DockOverlayService : Service() {
     private fun rebind() {
         if (mountedEntries.isEmpty()) return
         val snapshot = DockSnapshots.capture(this, darkIcons = !darkText)
+        if (lastBoundSnapshot == snapshot) return
         mountedEntries.forEach { it.widget.bind(it, snapshot) }
+        lastBoundSnapshot = snapshot
     }
 
     private fun bindVehicle(st: VehicleController.State) {

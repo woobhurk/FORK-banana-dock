@@ -132,7 +132,13 @@ class DockLyricStateTest {
         assertNotificationBinds(widget, alive = true, attached = true, expected = true)
         // 服务仍存活但窗口挂载失败或已摘除时，必须立即熄灭。
         assertNotificationBinds(widget, alive = true, attached = false, expected = false)
-        assertNotificationBinds(widget, alive = false, attached = true, expected = false)
+        // 实际亮灭状态未变时不重复绑定，但控件必须继续保持熄灭。
+        val before = SystemClock.uptimeMillis()
+        publishLyricState(alive = false, attached = true)
+        idleMain()
+        assertEquals(before, SystemClock.uptimeMillis())
+        assertEquals(1, widget.bindings.size)
+        assertFalse(widget.bindings.single().snapshot.lyricOn)
     }
 
     @Test

@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import com.car.dockbar.config.VehicleChannels
 import com.car.dockbar.ui.AirFlowDrawable
 import com.car.dockbar.util.Logx
@@ -171,21 +172,44 @@ object VehicleController {
         Thread(r, "dock-hvac-write").apply { isDaemon = true; priority = Thread.NORM_PRIORITY }
     }
 
-    // ===== ★ v1.4.97 #2/#3：写后刷新「合并」 =====
-    //
-    // 原来每次点 ± 都 `main.postDelayed({ refresh(ctx) }, 400)` —— refresh() 会
-    // 挨个读 14 个通道（14 次 binder IPC）+ 2 次 ISensor，而它是跑在**主线程**上的。
-    // 连点 10 次 = 400ms 后排队跑 10 次全量读 → 主线程被 binder 堵住 → 点着点着就卡。
-    // 现在改成：连点只保留最后一次，停手 [REFRESH_DEBOUNCE_MS] 后才读一次。
+    // 写后合并只包含受影响分组，不再触发整车全量读取。
     private const val REFRESH_DEBOUNCE_MS = 900L
-    private var refreshCtx: Context? = null
-    private val pendingRefresh = Runnable { refreshCtx?.let { refresh(it) } }
+    private const val FALLBACK_PROBE_INTERVAL_MS = 2500L
+    private val REFRESH_GROUPS = VehicleRefreshGroup.values()
+    private val FAN_GROUP = 1 shl VehicleRefreshGroup.FAN.ordinal
+    private val CLIMATE_GROUP = 1 shl VehicleRefreshGroup.CLIMATE.ordinal
+    private val TEMPERATURE_GROUP = 1 shl VehicleRefreshGroup.TEMPERATURE.ordinal
+    private val COMFORT_GROUP = 1 shl VehicleRefreshGroup.COMFORT.ordinal
+    private val ALL_GROUPS = (1 shl REFRESH_GROUPS.size) - 1
+    private val refreshQueue = VehicleRefreshQueue()
+    private val refreshRevisions = LongArray(REFRESH_GROUPS.size)
+    private val refreshKeys = arrayOf(
+        arrayOf("fan_auto", "fan_manual"),
+        arrayOf("recirc", "air_direction", "ac"),
+        arrayOf("temp_driver", "temp_passenger"),
+        arrayOf("seat_vent", "seat_heat", "seat_vent_passenger", "seat_heat_passenger",
+            "defrost_front", "defrost_rear", "steering_heat"),
+        emptyArray()
+    )
+    private val nextFallbackProbeAt = Array(REFRESH_GROUPS.size) { LongArray(refreshKeys[it].size) }
+    private val nextRefreshLogAt = LongArray(REFRESH_GROUPS.size)
+    private var forcedProbeGroups = 0
+    private var pendingRefreshGroups = 0
+    private val pendingRefresh = Runnable {
+        val ctx = appCtx ?: return@Runnable
+        val groups = pendingRefreshGroups
+        pendingRefreshGroups = 0
+        requestRefresh(ctx, groups)
+    }
 
-    /** 合并刷新：重复调用只生效最后一次 */
-    private fun scheduleRefresh(ctx: Context, delayMs: Long = REFRESH_DEBOUNCE_MS) {
-        refreshCtx = ctx
-        main.removeCallbacks(pendingRefresh)
-        main.postDelayed(pendingRefresh, delayMs)
+    /** 连点合并为一次定向回读；不同分组的请求不会互相丢失。 */
+    private fun scheduleRefresh(ctx: Context, groups: Int, delayMs: Long = REFRESH_DEBOUNCE_MS) {
+        onMain {
+            appCtx = ctx.applicationContext
+            pendingRefreshGroups = pendingRefreshGroups or groups
+            main.removeCallbacks(pendingRefresh)
+            main.postDelayed(pendingRefresh, delayMs)
+        }
     }
 
     @Volatile
@@ -233,33 +257,35 @@ object VehicleController {
         if ((state.driverTempC == null && cachedDriverTemp != null) ||
             (state.passengerTempC == null && cachedPassengerTemp != null)
         ) {
-            update(
-                state.copy(
-                    driverTempC = state.driverTempC ?: cachedDriverTemp,
-                    passengerTempC = state.passengerTempC ?: cachedPassengerTemp
+            update(TEMPERATURE_GROUP) { current ->
+                current.copy(
+                    driverTempC = current.driverTempC ?: cachedDriverTemp,
+                    passengerTempC = current.passengerTempC ?: cachedPassengerTemp
                 )
-            )
+            }
         }
         // ★★ v1.4.51 一级隔离开关：完全不碰厂商 API。
         //   连 Car.create() 都不调 —— 用于二分「闪退是不是厂商车控库 abort 引起的」。
         if (!Prefs.vehicleApiEnabled(ctx)) {
             Logx.w("车控通道已整体关闭（二分开关）：本次不调用任何厂商接口，空调状态保持上次缓存值")
-            update(state.copy(connected = false, backend = "已关闭（排查闪退）"))
+            update { current -> current.copy(connected = false, backend = "已关闭（排查闪退）") }
             return
         }
         if (Prefs.simulate(ctx)) {
             Logx.d("车控：模拟模式，跳过厂商通道")
             // 给一组看起来合理的初值，方便直接调 UI
-            if (state.driverTempC == null) {
-                state = state.copy(
-                    driverTempC = 22.0f,
-                    passengerTempC = 22.0f,
-                    fanLevel = 3,
-                    fanMax = 9,
-                    fanAuto = false
-                )
+            update(FAN_GROUP or TEMPERATURE_GROUP) { current ->
+                if (current.driverTempC == null) {
+                    current.copy(
+                        driverTempC = 22.0f,
+                        passengerTempC = 22.0f,
+                        fanLevel = 3,
+                        fanMax = 9,
+                        fanAuto = false
+                    )
+                } else current
             }
-            update(state.copy(connected = true, backend = "模拟数据"))
+            update { current -> current.copy(connected = true, backend = "模拟数据") }
             return
         }
         dumpCarPermissions(ctx)
@@ -297,11 +323,11 @@ object VehicleController {
                 }
                 refresh(ctx)
             } else {
-                update(state.copy(connected = false, backend = "未连接"))
+                update { current -> current.copy(connected = false, backend = "未连接") }
             }
         }.onFailure {
             Logx.e("车控初始化失败（真实通道）：${it.javaClass.simpleName} ${it.message}", it)
-            update(state.copy(connected = false, backend = "未连接"))
+            update { current -> current.copy(connected = false, backend = "未连接") }
         }
     }
 
@@ -365,10 +391,10 @@ object VehicleController {
                         return@runCatching
                     }
                     Logx.d("温度事件 ${if (key == "temp_driver") "主驾" else "副驾"} = ${"%.1f".format(norm)}℃")
-                    update(
-                        if (key == "temp_driver") state.copy(driverTempC = norm)
-                        else state.copy(passengerTempC = norm)
-                    )
+                    update(TEMPERATURE_GROUP) { current ->
+                        if (key == "temp_driver") current.copy(driverTempC = norm)
+                        else current.copy(passengerTempC = norm)
+                    }
                 }.onFailure { Logx.e("温度事件处理异常", it) }
             }
         }
@@ -436,10 +462,10 @@ object VehicleController {
                     // 温度走 onCustomizeFunctionValueChanged（Float），其余走 onFunctionValueChanged（Int）
                     if (value is Float && (key == "temp_driver" || key == "temp_passenger")) {
                         val t = normalizeTempC(value)
-                        update(
-                            if (key == "temp_driver") state.copy(driverTempC = t)
-                            else state.copy(passengerTempC = t)
-                        )
+                        update(TEMPERATURE_GROUP) { current ->
+                            if (key == "temp_driver") current.copy(driverTempC = t)
+                            else current.copy(passengerTempC = t)
+                        }
                     } else {
                         val v = (value as? Number)?.toInt() ?: return@runCatching
                         applyRaw(key, v)
@@ -454,143 +480,194 @@ object VehicleController {
     /** watcher 回调：把某个通道的原始值并入当前 State（无效读数不覆盖已知状态） */
     private fun applyRaw(key: String, raw: Int) {
         val c = appCtx ?: return
-        update(withRaw(state, key, raw, c))
+        update(groupMaskOf(key)) { current -> withRaw(current, key, raw, c) }
     }
 
     // =====================================================================
     // 刷新
     // =====================================================================
 
-    /**
-     * ★ v3.4：刷新入口。**在主线程被调用时整体丢到后台线程**再跑。
-     *
-     * refresh() 要读 14 个通道（14 次 binder IPC）+ 2 个 ISensor + 1 次点火状态，
-     * 跑在主线程上会让「点温度 ±」顿一下；连点时更糟（v1.4.97 只合并了调用次数，
-     * 没解决"单次就很慢"的问题）。
-     *
-     * 为什么可以安全地丢后台：
-     *  - 所有 State 监听器都自己 `main.post { ... }` 回主线程（DockOverlayService /
-     *    AirDirection / HvacControl / Seat / Temperature 五个都是），
-     *    或走 `sendBroadcast`（VehicleControlService）→ 后台线程调用是安全的；
-     *  - 所有写操作本来就跑在 [hal] 这条单线程上，天然串行，不会出现并发交错。
-     */
+    private data class GroupReading(
+        val values: IntArray,
+        val present: Int,
+        val ignition: Int? = null,
+        val indoor: Float? = null,
+        val ambient: Float? = null
+    )
+
+    private val EMPTY_READING = GroupReading(IntArray(0), 0)
+
+    /** 显式刷新仍覆盖全部分组，但每组独立读取和发布，不再携带整份旧状态。 */
     fun refresh(ctx: Context? = null) {
         val c = ctx ?: appCtx ?: return
-        // 一级隔离开关：整体关闭时一次厂商接口都不调
-        if (!Prefs.vehicleApiEnabled(c)) return
-        if (Looper.myLooper() == Looper.getMainLooper()) {
-            hal.execute { refreshInner(c) }
-            return
-        }
-        refreshInner(c)
+        requestRefresh(c, ALL_GROUPS)
     }
 
-    /** 真正干活的刷新（可在任意线程跑） */
-    private fun refreshInner(c: Context) {
-        // ★ v1.4.72：读一次点火状态（0x200100，事件量）。
-        //   熄火时车机侧不响应写入 —— 与其白发 10 次写不如跳过。
-        SensorBridge.readIgnitionState()?.let { ignitionState = it }
+    /** 高频调用只检查期限；实际厂商读取仍由唯一 HAL 队列串行执行。 */
+    internal fun poll(ctx: Context) {
+        onMain {
+            val c = ctx.applicationContext
+            if (!Prefs.vehicleApiEnabled(c)) return@onMain
+            appCtx = c
+            refreshQueue.poll(SystemClock.elapsedRealtime())
+            pumpRefreshQueue(c)
+        }
+    }
 
-        // ★★ v1.4.74：温度改用 **ISensor 主动读**。
-        //   之前温度只靠 watcher 回调（onCustomizeFunctionValueChanged），
-        //   而回调**只在温度变化时**才推送 → 不调温就永远没数据，显示一直 15.5。
-        //   真车 ISensor 扫描实锤：0x100C00 = 29.7（车内实际温度）、0x100B00 = 20.0（车外），
-        //   这是**稳定可读**的连续量，直接主动读即可。
-        //   （0x10060100 读回恒 0xff，那是「设定温度」通道，本车读不出来。）
-        val indoorT = SensorBridge.readFloat(SensorBridge.TEMP_INDOOR)
-        val ambientT = SensorBridge.readFloat(SensorBridge.TEMP_AMBIENT)
-        // ★★ v1.4.75：**只更新「车内实际温度」，不碰「空调设定温度」**。
-        //   之前直接覆盖 driverTempC → Dock 上显示的设定温度被实际舱温顶掉了
-        //   （用户反馈「你把车内温度跟空调温度绑定了」）。
-        //   设定温度（driverTempC）只来自 0x10060100 的 watcher 回调 / Customize 读。
-        if (indoorT != null && indoorT > -40f && indoorT < 90f) {
-            val cur = cabinTempC
-            if (cur == null || Math.abs(cur - indoorT) >= 0.05f) cabinTempC = indoorT
+    private fun requestRefresh(ctx: Context, groups: Int) {
+        onMain {
+            val c = ctx.applicationContext
+            if (!Prefs.vehicleApiEnabled(c)) return@onMain
+            appCtx = c
+            forcedProbeGroups = forcedProbeGroups or groups
+            for (group in REFRESH_GROUPS) {
+                if (groups and (1 shl group.ordinal) != 0) refreshQueue.request(group)
+            }
+            pumpRefreshQueue(c)
         }
-        if (ambientT != null && ambientT > -40f && ambientT < 90f) {
-            ambientTempC = ambientT
-        }
-        if (Prefs.simulate(c)) {
-            update(state.copy(connected = true, backend = "模拟数据"))
-            return
-        }
-        if (!VehicleBridge.isReady) {
-            update(state.copy(connected = false, backend = "未连接"))
-            return
-        }
+    }
 
-        // 真实通道：记录每个通道的原始返回值，方便在车机上对照硬件校准编码
-        val raws = mutableMapOf<String, Int>()
-
-        // 逐个通道读取，但只读有效值并入 State；
-        // 读到 255 / 0xFF / 0 这类"无效哨兵"时保留现有状态，避免把已知状态冲掉
-        // （本机 getFunctionValue 对未读通道统一返回 255，刷新里若直接覆盖会让风速被清成 --、recirc 误显开启）
-        var s = state.copy(connected = true, backend = VehicleBridge.backend.label)
-        fun apply(key: String) {
-            val raw = read(key, c) ?: return
-            raws[key] = raw
-            s = withRaw(s, key, raw, c)
+    private fun pumpRefreshQueue(c: Context) {
+        if (!Prefs.vehicleApiEnabled(c)) return
+        val group = refreshQueue.take() ?: return
+        val revision = refreshRevisions[group.ordinal]
+        val bit = 1 shl group.ordinal
+        val forceProbe = forcedProbeGroups and bit != 0
+        forcedProbeGroups = forcedProbeGroups and bit.inv()
+        val queuedAt = SystemClock.elapsedRealtime()
+        hal.execute {
+            val startedAt = SystemClock.elapsedRealtime()
+            val reading = runCatching { readGroup(c, group, forceProbe) }
+                .onFailure { Logx.e("车控分组读取失败：$group", it) }.getOrNull()
+            val ioMs = SystemClock.elapsedRealtime() - startedAt
+            main.post {
+                try {
+                    if (reading != null) {
+                        applyReading(c, group, revision, reading, startedAt - queuedAt, ioMs)
+                    }
+                } finally {
+                    refreshQueue.complete(group, SystemClock.elapsedRealtime())
+                    pumpRefreshQueue(c)
+                }
+            }
         }
-        apply("fan_auto")
-        apply("fan_manual")
-        apply("recirc")
-        apply("air_direction")
-        apply("ac")
-        apply("seat_vent")
-        apply("seat_heat")
-        apply("seat_vent_passenger")
-        apply("seat_heat_passenger")
+    }
 
-        // ★ v3.7：**取证窗口内**才做额外取证（默认关闭 → 平时零额外 binder 调用）
-        if (evidenceOn()) evidencePoll(c)
-
-        // ★ v1.4.35：除霜 / 方向盘加热（报告 funcId，zone=1 主驾区；裸值 10/11 开关、0..3 档位）
-        readBare(FUNC_DEFROST_FRONT)?.let { raw ->
-            raws["defrost_front"] = raw
-            boolOf(raw)?.let { b -> s = s.copy(defrostFront = b) }
+    /** 这里只读厂商接口，不修改可观察状态；分组结果回主线程后才归并。 */
+    private fun readGroup(c: Context, group: VehicleRefreshGroup, forceProbe: Boolean): GroupReading {
+        if (!Prefs.vehicleApiEnabled(c) || Prefs.simulate(c)) return EMPTY_READING
+        if (group == VehicleRefreshGroup.SENSORS) {
+            return GroupReading(
+                EMPTY_READING.values, 0, SensorBridge.readIgnitionState(),
+                SensorBridge.readFloat(SensorBridge.TEMP_INDOOR),
+                SensorBridge.readFloat(SensorBridge.TEMP_AMBIENT)
+            )
         }
-        readBare(FUNC_DEFROST_REAR)?.let { raw ->
-            raws["defrost_rear"] = raw
-            boolOf(raw)?.let { b -> s = s.copy(defrostRear = b) }
+        if (!VehicleBridge.isReady) return EMPTY_READING
+        val keys = refreshKeys[group.ordinal]
+        val values = IntArray(keys.size)
+        var present = 0
+        for (i in keys.indices) {
+            val key = keys[i]
+            val raw = when (key) {
+                "defrost_front" -> readBare(FUNC_DEFROST_FRONT)
+                "defrost_rear" -> readBare(FUNC_DEFROST_REAR)
+                "steering_heat" -> readBare(FUNC_STEERING_HEAT)
+                else -> {
+                    val now = SystemClock.elapsedRealtime()
+                    val probe = forceProbe || now >= nextFallbackProbeAt[group.ordinal][i]
+                    if (probe) nextFallbackProbeAt[group.ordinal][i] = now + FALLBACK_PROBE_INTERVAL_MS
+                    read(key, c, allowZoneFallback = probe)
+                }
+            }
+            if (raw != null) {
+                values[i] = raw
+                present = present or (1 shl i)
+            }
         }
-        readBare(FUNC_STEERING_HEAT)?.let { raw ->
-            raws["steering_heat"] = raw
-            val idx = raw and 0xFF
-            if (idx in 0..SEAT_LEVEL_MAX) s = s.copy(steeringHeat = idx)
+        if (group == VehicleRefreshGroup.CLIMATE && evidenceOn()) evidencePoll(c)
+        return GroupReading(values, present)
+    }
+
+    private fun applyReading(
+        c: Context,
+        group: VehicleRefreshGroup,
+        revision: Long,
+        reading: GroupReading,
+        waitMs: Long,
+        ioMs: Long
+    ) {
+        if (!Prefs.vehicleApiEnabled(c)) return
+        // 同组回调或用户操作比本次读取新时，整组旧结果不得覆盖新状态。
+        if (refreshRevisions[group.ordinal] != revision) return
+        val simulated = Prefs.simulate(c)
+        val connected = simulated || VehicleBridge.isReady
+        val backend = if (simulated) "模拟数据" else if (connected) VehicleBridge.backend.label else "未连接"
+        val previous = state
+        var sensorsChanged = false
+        if (group == VehicleRefreshGroup.SENSORS && !simulated) {
+            reading.ignition?.let {
+                if (ignitionState != it) { ignitionState = it; sensorsChanged = true }
+            }
+            reading.indoor?.takeIf { it.isFinite() && it > -40f && it < 90f }?.let {
+                if (cabinTempC == null || kotlin.math.abs(cabinTempC!! - it) >= 0.05f) {
+                    cabinTempC = it
+                    sensorsChanged = true
+                }
+            }
+            reading.ambient?.takeIf { it.isFinite() && it > -40f && it < 90f }?.let {
+                if (ambientTempC != it) { ambientTempC = it; sensorsChanged = true }
+            }
         }
-
-        // ===== 温度 =====
-        // ⚠ 温度**只走 int 通道**，不再使用 getCustomizeFunctionValue。
-        //   原因：Customize 系列接口在普通 App 上会触发厂商库 native SIGSEGV（详见 VehicleBridge 注释），
-        //   且实测空调关闭时它返回伪值 5.0。
-        //   int 通道编码：低 8 位 = round(℃ / 0.2)，实测 128 → 25.6℃、119 → 23.8℃。
-        //
-        // 每一侧独立判定：读到合法值就覆盖；读到哨兵（0xfd/0xfe/0xff）保留原值。
-        // 温度置 null（UI 显示 OFF）只在浮点/整型都给出明确「无效」时发生。
-        val rawTempD = read("temp_driver", c)
-        val rawTempP = read("temp_passenger", c)
-        if (rawTempD != null) raws["temp_driver"] = rawTempD
-        if (rawTempP != null) raws["temp_passenger"] = rawTempP
-
-        if (!isSentinel(rawTempD ?: -1) && rawTempD != null) {
-            tempFromRaw("temp_driver", rawTempD, c)?.let { t -> s = s.copy(driverTempC = t) }
+        update(forceNotify = sensorsChanged, invalidateReads = false) { current ->
+            var next = current
+            if (connected && !simulated) {
+                val keys = refreshKeys[group.ordinal]
+                for (i in keys.indices) {
+                    if (reading.present and (1 shl i) == 0) continue
+                    val raw = reading.values[i]
+                    if (isSentinel(raw)) continue
+                    next = when (keys[i]) {
+                        "defrost_front" -> boolOf(raw)?.let { next.copy(defrostFront = it) } ?: next
+                        "defrost_rear" -> boolOf(raw)?.let { next.copy(defrostRear = it) } ?: next
+                        "steering_heat" -> {
+                            val level = raw and 0xFF
+                            if (level in 0..SEAT_LEVEL_MAX) next.copy(steeringHeat = level) else next
+                        }
+                        else -> withRaw(next, keys[i], raw, c)
+                    }
+                }
+            }
+            if (next.connected != connected || next.backend != backend) {
+                next = next.copy(connected = connected, backend = backend)
+            }
+            next
         }
-        if (!isSentinel(rawTempP ?: -1) && rawTempP != null) {
-            tempFromRaw("temp_passenger", rawTempP, c)?.let { t -> s = s.copy(passengerTempC = t) }
+        if (group == VehicleRefreshGroup.SENSORS && connected && !simulated) applyAmbientSeatOnce(c)
+        val now = SystemClock.elapsedRealtime()
+        if (previous != state || sensorsChanged || now >= nextRefreshLogAt[group.ordinal]) {
+            nextRefreshLogAt[group.ordinal] = now + FALLBACK_PROBE_INTERVAL_MS
+            Logx.d(buildString {
+                append("车控分组刷新 ").append(group).append(" wait=").append(waitMs)
+                    .append("ms io=").append(ioMs).append("ms raw:")
+                val keys = refreshKeys[group.ordinal]
+                for (i in keys.indices) {
+                    if (reading.present and (1 shl i) != 0) {
+                        append(' ').append(keys[i]).append("=0x").append(reading.values[i].toString(16))
+                    }
+                }
+                append(" | 风速=").append(state.fanLevel).append(if (state.fanAuto) "(AUTO)" else "")
+            })
         }
+    }
 
-        update(s)
-        applyAmbientSeatOnce(c)
-
-        // 真实模式诊断：把每个通道的原始值打到日志（每 2.5s 一次，不刷屏），
-        // 车机没 adb 时据此核对编码即可校准，是修「数值不对」的关键依据。
-        Logx.d(
-            "车控刷新 raw: " + raws.map { "${it.key}=0x${it.value.toString(16)}" }.joinToString(" ") +
-                " | 解析: 主驾温=${s.driverTempC ?: "—"} 副驾温=${s.passengerTempC ?: "—"} " +
-                "风速=${s.fanLevel}${if (s.fanAuto) "(AUTO)" else ""} " +
-                "循环=${if (s.recircInside) "内" else "外"} 风向=${s.airDirection} " +
-                "座椅通风=${s.seatVent} 座椅加热=${s.seatHeat}"
-        )
+    private fun groupMaskOf(key: String): Int = when (key) {
+        "fan_manual", "fan_auto" -> FAN_GROUP
+        "recirc", "air_direction", "ac" -> CLIMATE_GROUP
+        "temp_driver", "temp_passenger" -> TEMPERATURE_GROUP
+        "seat_vent", "seat_heat", "seat_vent_passenger", "seat_heat_passenger",
+        "defrost_front", "defrost_rear", "steering_heat" -> COMFORT_GROUP
+        else -> 0
     }
 
     /**
@@ -738,12 +815,13 @@ object VehicleController {
         }
     }
 
-    private fun read(key: String, ctx: Context): Int? {
+    private fun read(key: String, ctx: Context, allowZoneFallback: Boolean = true): Int? {
         val f = VehicleChannels.funcOf(ctx, key)
         if (f <= 0) return null
         val zone = VehicleChannels.zoneOf(ctx, key)
         val v = VehicleBridge.readInt(f, zone)
         if (v != null && v != 0xff && v != 0xfe && v != 0xfd) return v
+        if (!allowZoneFallback) return v
         // ★ v1.4.53：读也做 zone 回退。
         //   真车实证：内外循环 0x10030100 在 zone=0x8 读回 0xff，
         //   但 watcher 回调给的是 `zone=-2147483648（全局）value=0`；
@@ -839,10 +917,10 @@ object VehicleController {
         val next = target.coerceIn(TEMP_MIN_C, TEMP_MAX_C)
         val key = if (driver) "temp_driver" else "temp_passenger"
         if (Prefs.simulate(ctx)) {
-            update(
-                if (driver) state.copy(driverTempC = next, connected = true)
-                else state.copy(passengerTempC = next, connected = true)
-            )
+            update(TEMPERATURE_GROUP) { current ->
+                if (driver) current.copy(driverTempC = next, connected = true)
+                else current.copy(passengerTempC = next, connected = true)
+            }
             return
         }
         // ★★ v1.4.77：**直接写目标值**，不再「逐档步进」。
@@ -894,7 +972,7 @@ object VehicleController {
         val v = target.coerceIn(TEMP_MIN_C, TEMP_MAX_C)
 
         // ① 乐观更新（无条件）—— 先让 Dock 显示跟上操作
-        update(if (driver) state.copy(driverTempC = v) else state.copy(passengerTempC = v))
+        update(TEMPERATURE_GROUP) { current -> if (driver) current.copy(driverTempC = v) else current.copy(passengerTempC = v) }
 
         // ② 写入
         var wrote = false
@@ -963,42 +1041,42 @@ object VehicleController {
     fun toggleDefrostFront(ctx: Context) {
         val next = !state.defrostFront
         if (Prefs.simulate(ctx)) {
-            update(state.copy(defrostFront = next, connected = true))
+            update(COMFORT_GROUP) { current -> current.copy(defrostFront = next, connected = true) }
             return
         }
-        update(state.copy(defrostFront = next))   // 乐观更新
+        update(COMFORT_GROUP) { current -> current.copy(defrostFront = next) }   // 乐观更新
         // ★ v1.4.60：改走 writeSwitch（复合编码优先，裸值兜底）。
         //   旧实现 writeBareGuarded 只发裸值 0/1，真车 40 次全 FAIL。
         val ctxBg = ctx
         hal.execute { writeSwitch(ctxBg, "defrost_front", FUNC_DEFROST_FRONT, ZONE_GLOBAL, next, "前挡加热") }
-        scheduleRefresh(ctx)   // ★ v3.4：合并刷新（连点只跑最后一次）
+        scheduleRefresh(ctx, COMFORT_GROUP)   // ★ v3.4：合并刷新（连点只跑最后一次）
     }
 
     /** ★ v1.4.35：后挡加热 开/关（0x10040300） */
     fun toggleDefrostRear(ctx: Context) {
         val next = !state.defrostRear
         if (Prefs.simulate(ctx)) {
-            update(state.copy(defrostRear = next, connected = true))
+            update(COMFORT_GROUP) { current -> current.copy(defrostRear = next, connected = true) }
             return
         }
-        update(state.copy(defrostRear = next))
+        update(COMFORT_GROUP) { current -> current.copy(defrostRear = next) }
         // ★ v1.4.60：同前挡，改走 writeSwitch（复合编码优先）
         val ctxBg = ctx
         hal.execute { writeSwitch(ctxBg, "defrost_rear", FUNC_DEFROST_REAR, ZONE_GLOBAL, next, "后挡加热") }
-        scheduleRefresh(ctx)   // ★ v3.4：合并刷新（连点只跑最后一次）
+        scheduleRefresh(ctx, COMFORT_GROUP)   // ★ v3.4：合并刷新（连点只跑最后一次）
     }
 
     /** ★ v1.4.35：方向盘加热 —— 默认关；打开即 3 档，再点 2 档 → 1 档 → 关（用户要求从高档往低调） */
     fun steeringHeatCycle(ctx: Context) {
         val next = if (state.steeringHeat <= 0) SEAT_LEVEL_MAX else state.steeringHeat - 1
         if (Prefs.simulate(ctx)) {
-            update(state.copy(steeringHeat = next, connected = true))
+            update(COMFORT_GROUP) { current -> current.copy(steeringHeat = next, connected = true) }
             return
         }
-        update(state.copy(steeringHeat = next))
+        update(COMFORT_GROUP) { current -> current.copy(steeringHeat = next) }
         // ★ v1.4.60：方向盘加热是档位（0..N）不是布尔，走 writeChannel（复合编码优先）
         val ok = writeChannel(ctx, "steering_heat", next)
-        scheduleRefresh(ctx)   // ★ v3.4：合并刷新（连点只跑最后一次）
+        scheduleRefresh(ctx, COMFORT_GROUP)   // ★ v3.4：合并刷新（连点只跑最后一次）
     }
 
     /**
@@ -1009,16 +1087,16 @@ object VehicleController {
         val next = level.coerceIn(0, SEAT_LEVEL_MAX)
         if (next == state.steeringHeat) return
         if (Prefs.simulate(ctx)) {
-            update(state.copy(steeringHeat = next, connected = true))
+            update(COMFORT_GROUP) { current -> current.copy(steeringHeat = next, connected = true) }
             return
         }
-        update(state.copy(steeringHeat = next))
+        update(COMFORT_GROUP) { current -> current.copy(steeringHeat = next) }
         val ctxBg = ctx
         hal.execute {
             val ok = writeChannel(ctxBg, "steering_heat", next)
             Logx.d("写 方向盘加热 idx=$next → ${if (ok) "OK" else "FAIL（本地状态已更新）"}")
         }
-        scheduleRefresh(ctx)
+        scheduleRefresh(ctx, COMFORT_GROUP)
     }
 
     /**
@@ -1056,7 +1134,7 @@ object VehicleController {
         // ★ v1.4.97 #12：车机的「当前记忆位」通道在这台车上读不回来，
         //   所以把我们自己刚调用的这个位置记到本地，弹窗下次打开就知道该高亮哪个。
         Prefs.setSeatMemoryIndex(ctx, pos)
-        scheduleRefresh(ctx)   // ★ v3.4：合并刷新（连点只跑最后一次）
+        scheduleRefresh(ctx, COMFORT_GROUP)   // ★ v3.4：合并刷新（连点只跑最后一次）
     }
 
     /**
@@ -1150,12 +1228,12 @@ object VehicleController {
      */
     fun fastCool(ctx: Context) {
         if (Prefs.simulate(ctx)) {
-            update(
-                state.copy(
+            update(FAN_GROUP or CLIMATE_GROUP or TEMPERATURE_GROUP) { current ->
+                current.copy(
                     acOn = true, fanAuto = false, fanLevel = 9,
                     driverTempC = TEMP_MIN_C, passengerTempC = TEMP_MIN_C, connected = true
                 )
-            )
+            }
             return
         }
         runCatching {
@@ -1182,14 +1260,14 @@ object VehicleController {
                 )
             }
         }
-        update(
-            state.copy(
+        update(FAN_GROUP or CLIMATE_GROUP or TEMPERATURE_GROUP) { current ->
+            current.copy(
                 acOn = true, fanAuto = false, fanLevel = 9,
                 driverTempC = TEMP_MIN_C, passengerTempC = TEMP_MIN_C
             )
-        )
+        }
         Logx.d("极速降温：AC 开 + 风量最大 + 主副驾温度最低")
-        scheduleRefresh(ctx)   // ★ v3.4：合并刷新（连点只跑最后一次）
+        scheduleRefresh(ctx, FAN_GROUP or CLIMATE_GROUP or TEMPERATURE_GROUP)   // ★ v3.4：合并刷新（连点只跑最后一次）
     }
 
     /**
@@ -1200,12 +1278,12 @@ object VehicleController {
      */
     fun fastHeat(ctx: Context) {
         if (Prefs.simulate(ctx)) {
-            update(
-                state.copy(
+            update(FAN_GROUP or TEMPERATURE_GROUP) { current ->
+                current.copy(
                     fanAuto = false, fanLevel = 9,
                     driverTempC = TEMP_MAX_C, passengerTempC = TEMP_MAX_C, connected = true
                 )
-            )
+            }
             return
         }
         runCatching {
@@ -1229,14 +1307,14 @@ object VehicleController {
                 )
             }
         }
-        update(
-            state.copy(
+        update(FAN_GROUP or TEMPERATURE_GROUP) { current ->
+            current.copy(
                 fanAuto = false, fanLevel = 9,
                 driverTempC = TEMP_MAX_C, passengerTempC = TEMP_MAX_C
             )
-        )
+        }
         Logx.d("极速升温：风量最大 + 主副驾温度最高")
-        scheduleRefresh(ctx)   // ★ v3.4：合并刷新（连点只跑最后一次）
+        scheduleRefresh(ctx, FAN_GROUP or TEMPERATURE_GROUP)   // ★ v3.4：合并刷新（连点只跑最后一次）
     }
 
     /** ★ v1.4.35：副驾座椅通风档位（0..3，通道 seat_vent_passenger / zone=4） */
@@ -1514,28 +1592,36 @@ object VehicleController {
         val f = tempReadFunc
         val zone = tempReadZone
         val target = tempReadTarget
-        val back = VehicleBridge.readTempCustomize(f, zone)
-            ?: VehicleBridge.readTempViaGlyCar(f, zone)
-        if (back == null) {
-            Logx.d("温度回读：读不到 → 保持本地值 %.1f℃".format(target))
-            return@Runnable
-        }
-        if (isPlausibleTemp(back, target)) {
-            update(if (driver) state.copy(driverTempC = back) else state.copy(passengerTempC = back))
-            Logx.d("温度回读：%.1f℃（采信，停手 1 秒后的最终值）".format(back))
-        } else {
-            Logx.d("温度回读：%.1f℃ 不可信（伪值或未生效）→ 保持 %.1f℃".format(back, target))
+        val revision = refreshRevisions[VehicleRefreshGroup.TEMPERATURE.ordinal]
+        hal.execute {
+            val back = VehicleBridge.readTempCustomize(f, zone)
+                ?: VehicleBridge.readTempViaGlyCar(f, zone)
+            main.post {
+                if (refreshRevisions[VehicleRefreshGroup.TEMPERATURE.ordinal] != revision) return@post
+                if (back == null) {
+                    Logx.d("温度回读：读不到 → 保持本地值 %.1f℃".format(target))
+                } else if (isPlausibleTemp(back, target)) {
+                    update(invalidateReads = false) { current ->
+                        if (driver) current.copy(driverTempC = back) else current.copy(passengerTempC = back)
+                    }
+                    Logx.d("温度回读：%.1f℃（采信，停手 1 秒后的最终值）".format(back))
+                } else {
+                    Logx.d("温度回读：%.1f℃ 不可信（伪值或未生效）→ 保持 %.1f℃".format(back, target))
+                }
+            }
         }
     }
 
     /** ★ v1.4.92：安排一次防抖回读（连点只会保留最后一个） */
     private fun scheduleTempReadback(driver: Boolean, f: Int, zone: Int, target: Float) {
-        tempReadDriver = driver
-        tempReadFunc = f
-        tempReadZone = zone
-        tempReadTarget = target
-        main.removeCallbacks(pendingTempReadback)
-        main.postDelayed(pendingTempReadback, TEMP_READBACK_DELAY_MS)
+        onMain {
+            tempReadDriver = driver
+            tempReadFunc = f
+            tempReadZone = zone
+            tempReadTarget = target
+            main.removeCallbacks(pendingTempReadback)
+            main.postDelayed(pendingTempReadback, TEMP_READBACK_DELAY_MS)
+        }
     }
 
     /** ★ v1.4.90：给调温调用栈日志用的当前状态描述 */
@@ -1607,7 +1693,9 @@ object VehicleController {
             return false
         }
         if (Prefs.simulate(ctx)) {
-            update(if (driver) state.copy(driverTempC = next, connected = true) else state.copy(passengerTempC = next, connected = true))
+            update(TEMPERATURE_GROUP) { current ->
+                if (driver) current.copy(driverTempC = next, connected = true) else current.copy(passengerTempC = next, connected = true)
+            }
             return true
         }
 
@@ -1625,7 +1713,7 @@ object VehicleController {
         //   → Dock 显示旧温度 → 「按 ± 按钮不直接显示调节后的温度，跟实际不统一」。
         // ★★ v1.4.78：这一步**只在主线程做状态更新**（瞬时，UI 立即响应），
         //   真正的 HAL 读写全部丢到后台线程 → 消除「点温度 ± 顿一下」。
-        update(if (driver) state.copy(driverTempC = next) else state.copy(passengerTempC = next))
+        update(TEMPERATURE_GROUP) { current -> if (driver) current.copy(driverTempC = next) else current.copy(passengerTempC = next) }
 
         // ★★ v1.4.78：**HAL 读写全部丢到后台线程**（主线程只做上面的乐观更新）。
         //   一次调温要打 4~6 次 binder IPC，跑主线程上会让「点温度 ±」顿一下。
@@ -1712,17 +1800,17 @@ object VehicleController {
                 val ook = VehicleBridge.writeTempViaGlyCar(f, otherZone, target) ||
                     VehicleBridge.writeTempCustomize(f, otherZone, target)
                 if (ook) {
-                    update(
-                        if (driver) state.copy(passengerTempC = target)
-                        else state.copy(driverTempC = target)
-                    )
+                    update(TEMPERATURE_GROUP) { current ->
+                        if (driver) current.copy(passengerTempC = target)
+                        else current.copy(driverTempC = target)
+                    }
                 }
                 // ★★ v1.4.83：调温时不再写 DUAL 通道 —— 该通道在车机侧是「翻转」语义，
                 //   每次调温都写会导致「每第二次调节把双温同步关掉」。
                 //   「同步」的本意是同时写另一侧温度（上面已写），无需重设车机双温开关。
             }
             // ★ v1.4.97 #3：合并刷新（连点只跑最后一次）
-            scheduleRefresh(ctx)
+            scheduleRefresh(ctx, TEMPERATURE_GROUP)
             return
         }
 
@@ -1732,17 +1820,17 @@ object VehicleController {
                 val otherKey = if (driver) "temp_passenger" else "temp_driver"
                 val otherDir = if (step > 0) 1 else 2
                 if (writeChannelCandidates(ctx, otherKey, listOf(otherDir))) {
-                    update(
-                        if (driver) state.copy(passengerTempC = next)
-                        else state.copy(driverTempC = next)
-                    )
+                    update(TEMPERATURE_GROUP) { current ->
+                        if (driver) current.copy(passengerTempC = next)
+                        else current.copy(driverTempC = next)
+                    }
                 }
                 // 双温同步本身也试着告诉车机
                 // ★★ v1.4.83：调温时不再写 DUAL 通道 —— 该通道在车机侧是「翻转」语义，
                 //   每次调温都写会导致「每第二次调节把双温同步关掉」。
                 //   「同步」的本意是同时写另一侧温度（上面已写），无需重设车机双温开关。
             }
-            scheduleRefresh(ctx)   // ★ v3.4：合并刷新（连点只跑最后一次）
+            scheduleRefresh(ctx, TEMPERATURE_GROUP)   // ★ v3.4：合并刷新（连点只跑最后一次）
             Logx.d("调温 ${if (driver) "主驾" else "副驾"} ${if (step > 0) "+" else ""}$step 档 → 档位=$dir OK（本地推算 ${"%.1f".format(next)}℃）")
             return
         }
@@ -1794,7 +1882,9 @@ object VehicleController {
     fun toggleFanAuto(ctx: Context) {
         val next = !state.fanAuto
         if (Prefs.simulate(ctx)) {
-            update(state.copy(fanAuto = next, fanLevel = state.fanLevel.coerceAtLeast(1), fanMax = if (next) 5 else 9, connected = true))
+            update(FAN_GROUP) { current ->
+                current.copy(fanAuto = next, fanLevel = current.fanLevel.coerceAtLeast(1), fanMax = if (next) 5 else 9, connected = true)
+            }
             return
         }
         // ★★ v3.5：**先接 AUTO 总开关 0x10010200**（HVAC_FUNC_AUTO，
@@ -1831,7 +1921,7 @@ object VehicleController {
             val autoLevel = Prefs.fanAutoLevel(ctx)
                 .takeIf { it in 1..5 }
                 ?: ((manualNow + 1) * 5 / 9).coerceIn(1, 5)
-            update(state.copy(fanAuto = true, fanLevel = autoLevel, fanMax = 5))
+            update(FAN_GROUP) { current -> current.copy(fanAuto = true, fanLevel = autoLevel, fanMax = 5) }
             markPendingFan(level = autoLevel, auto = true)
             val ctxBg = ctx
             hal.execute {
@@ -1859,7 +1949,7 @@ object VehicleController {
             //   注意：AUTO 状态下 state.fanLevel = 0（见 withRaw 的 AUTO 识别），
             //   所以不能再从 fanLevel 折算，直接用 3 档（中速）作为退出 AUTO 后的档位。
             val manual = if (state.fanAuto) 3 else state.fanLevel.coerceIn(1, 9)
-            update(state.copy(fanAuto = false, fanLevel = manual, fanMax = 9))
+            update(FAN_GROUP) { current -> current.copy(fanAuto = false, fanLevel = manual, fanMax = 9) }
             markPendingFan(level = manual, auto = false)
             val ctxBg = ctx
             hal.execute {
@@ -1876,6 +1966,7 @@ object VehicleController {
                 )
             }
         }
+        scheduleRefresh(ctx, FAN_GROUP)
     }
 
     /** 风量 ±1。AUTO 开着时只改 AUTO 风道 1..5 档，不退回手动风速。 */
@@ -1891,13 +1982,13 @@ object VehicleController {
         val next = (start + delta).coerceIn(0, 9)
         if (next == start) return
         if (Prefs.simulate(ctx)) {
-            update(state.copy(fanLevel = next, fanAuto = false, fanMax = 9, connected = true))
+            update(FAN_GROUP) { current -> current.copy(fanLevel = next, fanAuto = false, fanMax = 9, connected = true) }
             return
         }
         val f = VehicleChannels.funcOf(ctx, "fan_manual")
         if (f <= 0) return
         // 乐观更新：图标立即响应（解决"调节后 2-3 秒才显示"）
-        update(state.copy(fanLevel = next, fanAuto = false, fanMax = 9))
+        update(FAN_GROUP) { current -> current.copy(fanLevel = next, fanAuto = false, fanMax = 9) }
         // ★ v3.13.18：记下用户刚点的目标档位 —— 1.5s 内的旧回读不许覆盖它
         //   （否则连点时数字会在乐观值与回读旧值之间来回摆，见 withRaw 的 fan_manual 分支）
         markPendingFan(level = next, auto = false)
@@ -1910,14 +2001,14 @@ object VehicleController {
         // ★ v1.4.97 #2：合并刷新。原来固定 400ms 后读一次 —— 车机还没跟上时读到旧值，
         //   把刚做的乐观更新顶回去，要再等 2.5s 的轮询才对上，看起来就是「读取延迟很高」。
         //   现在停手 900ms 后才读一次，且连点只跑最后一次。
-        scheduleRefresh(ctx)
+        scheduleRefresh(ctx, FAN_GROUP)
     }
 
     /** 内外循环切换 */
     fun toggleRecirc(ctx: Context) {
         val target = !state.recircInside
         if (Prefs.simulate(ctx)) {
-            update(state.copy(recircInside = target, connected = true))
+            update(CLIMATE_GROUP) { current -> current.copy(recircInside = target, connected = true) }
             return
         }
         val f = VehicleChannels.funcOf(ctx, "recirc")
@@ -1941,7 +2032,7 @@ object VehicleController {
         //
         //   ⇒ 统一发 `0x10030101`（切换），且**不做回读校验**（切换型通道回读无意义），
         //     以 setFunctionValue 返回值为准。
-        update(state.copy(recircInside = target))
+        update(CLIMATE_GROUP) { current -> current.copy(recircInside = target) }
         // ★★ v1.4.75：改成「写目标值 → 回读验证 → 不行就换编码」。
         //
         // 为什么不能盲写：HAL 的返回值不可信（A/C 通道实测「返回 false 但车机真生效」）。
@@ -1955,7 +2046,7 @@ object VehicleController {
         // ★ v1.4.78：HAL 写入 + 回读对账全放后台（主线程只做上面的乐观更新）
         val ctxBg = ctx
         hal.execute { recircWrite(ctxBg, target) }
-        scheduleRefresh(ctx)   // ★ v3.4：合并刷新（连点只跑最后一次）
+        scheduleRefresh(ctx, CLIMATE_GROUP)   // ★ v3.4：合并刷新（连点只跑最后一次）
         return
     }
 
@@ -2277,7 +2368,7 @@ object VehicleController {
     fun setFanAutoLevel(ctx: Context, level: Int) {
         val l = level.coerceIn(1, 5)
         Prefs.setFanAutoLevel(ctx, l)
-        update(state.copy(fanAuto = true, fanLevel = l, fanMax = 5))
+        update(FAN_GROUP) { current -> current.copy(fanAuto = true, fanLevel = l, fanMax = 5) }
         markPendingFan(level = l, auto = true)
         if (Prefs.simulate(ctx)) return
         val ctxBg = ctx
@@ -2298,6 +2389,7 @@ object VehicleController {
                 " 回读档位=" + backLvl
             )
         }
+        scheduleRefresh(ctx, FAN_GROUP)
     }
 
     /** 把回读的循环状态转成文字（true=内循环 false=外循环 null=读不到） */
@@ -2410,7 +2502,7 @@ object VehicleController {
     fun toggleAc(ctx: Context) {
         val target = !state.acOn
         if (Prefs.simulate(ctx)) {
-            update(state.copy(acOn = target, connected = true))
+            update(CLIMATE_GROUP) { current -> current.copy(acOn = target, connected = true) }
             return
         }
         val f = VehicleChannels.funcOf(ctx, "ac")
@@ -2421,7 +2513,7 @@ object VehicleController {
         // 与内外循环同一套布尔通道：value 用裸枚举 0/1
         val value = if (target) 1 else 0
         // 乐观更新：图标立即响应；写失败仅打日志，不阻塞 UI
-        update(state.copy(acOn = target))
+        update(CLIMATE_GROUP) { current -> current.copy(acOn = target) }
         // ★ v1.4.78：写入放后台（binder IPC 会让点击「顿一下」）
         val ctxBg = ctx
         hal.execute {
@@ -2436,22 +2528,22 @@ object VehicleController {
         //   （拿 0xff 比对永远判「未生效」）。用户 2026-10-20 确认：A/C / 前挡 / 后挡
         //   **车机真实响应**，尽管 setFunctionValue 返回 false。
         //   ⇒ 对这三个通道，setFunctionValue 返回 false 只表示「HAL 未确认」，不代表被拒。
-        scheduleRefresh(ctx)   // ★ v3.4：合并刷新（连点只跑最后一次）
+        scheduleRefresh(ctx, CLIMATE_GROUP)   // ★ v3.4：合并刷新（连点只跑最后一次）
     }
 
     /** 风速直接关到 0 档（长按风速触发）。乐观更新 + 400ms 后回读校准 */
     fun setFanOff(ctx: Context) {
         if (Prefs.simulate(ctx)) {
-            update(state.copy(fanLevel = 0, fanAuto = false, fanMax = 9, connected = true))
+            update(FAN_GROUP) { current -> current.copy(fanLevel = 0, fanAuto = false, fanMax = 9, connected = true) }
             return
         }
         val f = VehicleChannels.funcOf(ctx, "fan_manual")
         if (f <= 0) return
         // 乐观更新：图标立即响应
-        update(state.copy(fanLevel = 0, fanAuto = false, fanMax = 9))
+        update(FAN_GROUP) { current -> current.copy(fanLevel = 0, fanAuto = false, fanMax = 9) }
         val ok = writeChannel(ctx, "fan_manual", 0)
         Logx.d("写 风速 0（OFF）→ ${if (ok) "OK" else "FAIL（本地状态已更新）"}")
-        scheduleRefresh(ctx)   // ★ v3.4：合并刷新（连点只跑最后一次）
+        scheduleRefresh(ctx, FAN_GROUP)   // ★ v3.4：合并刷新（连点只跑最后一次）
     }
 
     /** 风向循环切换（按 7 种组合位掩码循环） */
@@ -2474,7 +2566,7 @@ object VehicleController {
             return
         }
         if (Prefs.simulate(ctx)) {
-            update(state.copy(airDirection = next, connected = true))
+            update(CLIMATE_GROUP) { current -> current.copy(airDirection = next, connected = true) }
             return
         }
         val f = VehicleChannels.funcOf(ctx, "air_direction")
@@ -2483,9 +2575,10 @@ object VehicleController {
             return
         }
         // 乐观更新：图标立即响应
-        update(state.copy(airDirection = next))
+        update(CLIMATE_GROUP) { current -> current.copy(airDirection = next) }
         val ok = writeChannel(ctx, "air_direction", next)
         Logx.d("写 风向 mode=0x${next.toString(16)} (${AirFlowDrawable.label(next)}) → ${if (ok) "OK" else "FAIL（本地状态已更新）"}")
+        scheduleRefresh(ctx, CLIMATE_GROUP)
     }
 
     /** 主驾座椅通风 ±1 档（0 = 关） */
@@ -2535,7 +2628,7 @@ object VehicleController {
         val next = level.coerceIn(0, SEAT_LEVEL_MAX)
         if (next == cur) return
         if (Prefs.simulate(ctx)) {
-            update(set(state, next).copy(connected = true))
+            update(COMFORT_GROUP) { current -> set(current, next).copy(connected = true) }
             return
         }
         val f = VehicleChannels.funcOf(ctx, key)
@@ -2547,39 +2640,78 @@ object VehicleController {
         // （watcher 回传 seat_vent/seat_heat 的 value=0/1/2/3，而非 0x100501xx）。
         // 与内外循环统一：一律写裸档位，失败才回退复合编码。
         // 乐观更新：图标立即响应
-        update(set(state, next))
+        update(COMFORT_GROUP) { current -> set(current, next) }
         val ctxBg = ctx
         hal.execute {
             val ok = writeChannel(ctxBg, key, next)
             Logx.d("写 $label idx=$next → ${if (ok) "OK" else "FAIL（本地状态已更新）"}")
         }
+        scheduleRefresh(ctx, COMFORT_GROUP)
     }
 
     // =====================================================================
 
     fun addListener(l: (State) -> Unit) {
-        listeners.add(l)
-        l(state)
+        onMain {
+            listeners.add(l)
+            l(state)
+        }
     }
 
-    fun removeListener(l: (State) -> Unit) { listeners.remove(l) }
+    fun removeListener(l: (State) -> Unit) {
+        onMain { listeners.remove(l) }
+    }
 
-    private fun update(s: State) {
-        appCtx?.let { ctx ->
-            s.driverTempC
-                ?.takeIf { it.isFinite() && it in 5f..45f }
-                ?.takeIf { it != Prefs.lastDriverTempC(ctx) }
-                ?.let { Prefs.setLastDriverTempC(ctx, it) }
-            s.passengerTempC
-                ?.takeIf { it.isFinite() && it in 5f..45f }
-                ?.takeIf { it != Prefs.lastPassengerTempC(ctx) }
-                ?.let { Prefs.setLastPassengerTempC(ctx, it) }
-        }
-        state = s
-        // 回调统一在主线程派发；快照也在主线程取，避免与 add/removeListener 并发
-        main.post {
-            val snapshot = runCatching { listeners.toList() }.getOrDefault(emptyList())
-            snapshot.forEach { runCatching { it(s) } }
+    private inline fun onMain(crossinline action: () -> Unit) {
+        if (Looper.myLooper() == main.looper) action() else main.post { action() }
+    }
+
+    /** 状态只在主线程归并；只有回调和用户意图推进修订号，读取结果不废弃后续读取。 */
+    private fun update(
+        groups: Int = 0,
+        forceNotify: Boolean = false,
+        invalidateReads: Boolean = true,
+        change: (State) -> State
+    ) {
+        onMain {
+            val previous = state
+            val next = change(previous)
+            if (next === previous && !forceNotify) return@onMain
+            if (invalidateReads) {
+                var changedGroups = groups
+                if (previous.fanLevel != next.fanLevel || previous.fanAuto != next.fanAuto || previous.fanMax != next.fanMax) {
+                    changedGroups = changedGroups or FAN_GROUP
+                }
+                if (previous.acOn != next.acOn || previous.recircInside != next.recircInside || previous.airDirection != next.airDirection) {
+                    changedGroups = changedGroups or CLIMATE_GROUP
+                }
+                if (previous.driverTempC != next.driverTempC || previous.passengerTempC != next.passengerTempC) {
+                    changedGroups = changedGroups or TEMPERATURE_GROUP
+                }
+                if (previous.seatVent != next.seatVent || previous.seatHeat != next.seatHeat ||
+                    previous.seatVentPassenger != next.seatVentPassenger || previous.seatHeatPassenger != next.seatHeatPassenger ||
+                    previous.defrostFront != next.defrostFront || previous.defrostRear != next.defrostRear ||
+                    previous.steeringHeat != next.steeringHeat
+                ) {
+                    changedGroups = changedGroups or COMFORT_GROUP
+                }
+                for (group in REFRESH_GROUPS) {
+                    if (changedGroups and (1 shl group.ordinal) != 0) refreshRevisions[group.ordinal]++
+                }
+            }
+            if (next == previous && !forceNotify) return@onMain
+            appCtx?.let { ctx ->
+                if (next.driverTempC != previous.driverTempC) {
+                    next.driverTempC?.takeIf { it.isFinite() && it in 5f..45f }
+                        ?.let { Prefs.setLastDriverTempC(ctx, it) }
+                }
+                if (next.passengerTempC != previous.passengerTempC) {
+                    next.passengerTempC?.takeIf { it.isFinite() && it in 5f..45f }
+                        ?.let { Prefs.setLastPassengerTempC(ctx, it) }
+                }
+            }
+            state = next
+            listeners.toList().forEach { listener -> runCatching { listener(next) } }
         }
     }
 }
