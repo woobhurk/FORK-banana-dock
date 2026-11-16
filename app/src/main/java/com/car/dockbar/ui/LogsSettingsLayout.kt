@@ -125,7 +125,7 @@ internal class LogsSettingsLayout(activity: Activity) : SettingsPageLayout(activ
         val actionCol = column()
         lower.addView(switchCol, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         lower.addView(actionCol, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = dp(22) })
-        val experiments = card(switchCol, "车控开关", "实验功能存在风险，沿用原有设置与熔断机制")
+        val experiments = card(switchCol, "车控开关", "核心权限始终自动补齐，以下开关保留车控功能与熔断设置")
         switches.filter { it !== uploadSwitch }.forEachIndexed { index, control ->
             (control.getChildAt(0) as? TextView)?.let { label ->
                 label.text = label.text.toString().replace(Regex("[（(][^）)]*[）)]"), "").trim()

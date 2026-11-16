@@ -7,7 +7,7 @@ import com.car.dockbar.util.LogUploader
 import com.car.dockbar.util.Logx
 import com.car.dockbar.util.NativeCrashHandler
 import com.car.dockbar.util.Prefs
-import com.car.dockbar.util.PrivilegeProbe
+import com.car.dockbar.util.StartupPermissions
 
 class App : Application() {
 
@@ -139,7 +139,7 @@ class App : Application() {
 
         Logx.d("Application 启动（SDK_INT=${android.os.Build.VERSION.SDK_INT}）")
         runCatching { AccessibilityKeep.install(this) }
-            .onFailure { Logx.e("写回无障碍失败", it) }
+            .onFailure { Logx.e("安排核心权限恢复检查失败", it) }
         Logx.d("启动补传：$report")
         Logx.d(
             "日志上传：${if (Prefs.logUploadEnabled(this)) "已启用 → ${LogUploader.endpoint(this)}" else "未启用"}" +
@@ -157,13 +157,8 @@ class App : Application() {
                     "　车控写入=${if (Prefs.vehicleWriteEnabled(this)) "开" else "关"}"
         )
 
-        // 提权环境探测：判断本车能不能拿到 adb / root 权限（用户连不了电脑，只能车机本地探）。
-        // 走后台线程 —— 有 socket 与 exec，绝不能在主线程。结果随日志上传，远端据此选型。
-        Thread {
-            runCatching {
-                Logx.d(PrivilegeProbe.report(this))
-            }.onFailure { Logx.e("提权环境探测失败", it) }
-        }.apply { isDaemon = true }.start()
+        // 核心授权缺失即在后台补齐，业务启停和安全熔断保持不变。
+        StartupPermissions.start(this)
     }
 
     companion object {

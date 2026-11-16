@@ -2,37 +2,10 @@ package com.car.dockbar.util
 
 import android.content.Context
 import android.content.pm.PackageManager
-import java.io.DataInputStream
-import java.net.InetSocketAddress
-import java.net.Socket
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
-import java.util.zip.CRC32
-/**
- * 提权环境探测：**在车机本地**判断「能不能拿到 adb / root 权限」，不依赖电脑。
- *
- * ## 为什么需要它
- *
- * 用户连不了电脑 adb，所以无法在 PC 侧跑 `pm grant` / `getprop`。
- * 但以下几件事普通 App 在车机本地**都能自己做**：
- *   - `getprop` 读属性（只读，无需权限）
- *   - 连 `127.0.0.1:5555` 发 adb 握手包，看 adbd 是否可达、是否免认证
- *   - 探测 `su` 是否存在并能否执行
- *
- * 探测结果全部打进日志并随日志上传，我在远端据此选型，用户什么都不用判断。
- *
- * ## 判定标准
- *
- * - `ro.adb.secure = 0` 且 adbd 监听 TCP → **App 内置 adb 客户端即可拿到 shell**，
- *   进而 `pm grant` 自己权限。开机自动，全程不用电脑。★最优
- * - adbd 可达但回 `AUTH` → 需要已授权的 RSA key，我们没有 → 这条路走不通
- * - `su` 可用 → root 可用，可直接 `pm grant`，或把 APK 装进 `/system/priv-app`
- * - 都不行 → 车控写入只能靠跳转原生空调界面
- */
-object PrivilegeProbe {
+import java.util.concurrent.TimeUnit
 
-    private const val A_CNXN = 0x4e584e43   // 'CNXN'
-    private const val A_AUTH = 0x48545541   // 'AUTH'
+/** 本机 ADB 与权限诊断；连接状态不能替代最终授权状态或真车效果验证。 */
+object PrivilegeProbe {
 
     private val PROPS = listOf(
         "ro.adb.secure",          // 0 = adbd 不校验 RSA key（App 可直连）★关键
@@ -44,47 +17,32 @@ object PrivilegeProbe {
         "ro.build.type",          // user / userdebug / eng
     )
 
-    private val PORTS = listOf(5555, 5556, 5037)
-
-    /** 读一个系统属性（普通 App 可执行 getprop，只读不需权限） */
+    /** 读取单个系统属性，限制子进程等待时间，避免启动补权被探测卡住。 */
     fun getprop(name: String): String = runCatching {
-        val p = Runtime.getRuntime().exec(arrayOf("/system/bin/getprop", name))
-        val v = p.inputStream.bufferedReader().readLine()?.trim().orEmpty()
-        p.destroy()
-        v
+        val process = ProcessBuilder("/system/bin/getprop", name).redirectErrorStream(true).start()
+        try {
+            if (!process.waitFor(1, TimeUnit.SECONDS)) "(读取超时)"
+            else process.inputStream.bufferedReader().use { it.readLine()?.trim().orEmpty() }
+        } finally {
+            process.destroy()
+        }
     }.getOrElse { "(读取失败:${it.javaClass.simpleName})" }
 
-    /**
-     * 向本机 [port] 发一个 adb `CNXN` 握手包，看回什么。
-     *
-     * - 回 `CNXN` → adbd 免认证，**直接可用**
-     * - 回 `AUTH` → 需要已授权 RSA key，我们没有，不可用
-     * - 连不上 / 超时 → adbd 没在监听 TCP
-     */
-    fun probeAdbPort(port: Int, timeoutMs: Int = 1500): String = runCatching {
-        Socket().use { s ->
-            s.connect(InetSocketAddress("127.0.0.1", port), timeoutMs)
-            s.soTimeout = timeoutMs
-            s.getOutputStream().apply {
-                write(cnxnPacket("host::features=shell_v2,cmd\u0000"))
-                flush()
-            }
-            val hdr = ByteArray(24)
-            DataInputStream(s.getInputStream()).readFully(hdr)
-            val b = ByteBuffer.wrap(hdr).order(ByteOrder.LITTLE_ENDIAN)
-            val cmd = b.int
-            val arg0 = b.int
-            when (cmd) {
-                A_CNXN -> "★可达且免认证（App 可直接拿 shell）"
-                A_AUTH -> "可达但需认证（AUTH type=$arg0），无已授权 key → 不可用"
-                else -> "有响应但非 adb 协议（cmd=0x${Integer.toHexString(cmd)}）"
-            }
+    /** 探测、执行和恢复共用设备实际端口；5037 是主机服务端口，不作默认 adbd 入口。 */
+    fun localAdbPorts(): List<Int> {
+        val configured = listOf("service.adb.tcp.port", "persist.adb.tcp.port").mapNotNull { key ->
+            getprop(key).toIntOrNull()?.takeIf { it in 1..65535 }
         }
-    }.getOrElse { e ->
-        when (e) {
-            is java.net.ConnectException -> "端口关闭"
-            is java.net.SocketTimeoutException -> "超时（端口开但无 adb 响应）"
-            else -> "不通（${e.javaClass.simpleName}: ${e.message}）"
+        return (configured + listOf(5555, 5556, 5557)).distinct()
+    }
+
+    /** 使用同一客户端执行只读命令，避免握手探测与真实执行采用不同协议。 */
+    fun probeAdbPort(port: Int, timeoutMs: Int = 1500): String {
+        val result = AdbClient.exec(port, "id", timeoutMs)
+        return when {
+            result.ok && result.output.contains("uid=") -> "shell 已验证（${result.output.trim()}）"
+            result.ok -> "命令已结束，但未确认 shell 身份"
+            else -> "不可用（${result.error.take(120)}）"
         }
     }
 
@@ -129,7 +87,7 @@ object PrivilegeProbe {
         for (p in PROPS) append("  $p = ").append(getprop(p)).append('\n')
 
         append("[adb 端口]\n")
-        for (port in PORTS) {
+        for (port in localAdbPorts()) {
             append("  127.0.0.1:$port → ").append(probeAdbPort(port)).append('\n')
         }
 
@@ -143,17 +101,32 @@ object PrivilegeProbe {
         append("========================\n")
     }
 
-    // ---------------- adb 自授权 ----------------
+    /** 容量或传输失败时停止分析，不能把前缀片段误当完整取证结果。 */
+    private fun captureProblem(result: AdbClient.Result): String? {
+        if (result.ok) return null
+        return buildString {
+            append("诊断采集不完整：").append(result.error)
+                .append("；exitCode=").append(result.exitCode).append('\n')
+            append("不能据此推断没有相关日志或调用。\n")
+            if (result.output.isNotEmpty()) {
+                append("已接收片段（仅供排障，最多显示末尾 12000 字符）：\n")
+                    .append(result.output.takeLast(12_000)).append('\n')
+            }
+        }
+    }
 
-    /** adbd 常监听的端口（本机实测 service.adb.tcp.port=5555，persist 是 5556） */
-    private val ADB_PORTS = listOf(5555, 5556, 5557)
+    /** 在设备侧按同一组固定字符串过滤，避免无关日志耗尽传输上限。 */
+    private fun filteredLogcatCommand(keywords: List<String>): String {
+        val patterns = keywords.joinToString(" ") { "-e '" + it.replace("'", "'\"'\"'") + "'" }
+        // grep 的无匹配是正常结果，但 logcat/grep 真正失败仍须保留非零退出码。
+        return "set -o pipefail; logcat -d -v time | { grep -F $patterns; _banana_grep=\$?; [ \"\$_banana_grep\" -le 1 ]; }"
+    }
 
-    /**
-     * 连本机 adbd 拿 shell，然后给自己授予车控权限。
-     *
-     * 返回人类可读的完整过程（成功/失败原因都会写清楚），供主界面展示 + 上传。
-     * 全程不抛异常，任何一步失败都只是记一行。
-     */
+    // ---------------- 显式诊断操作 ----------------
+
+    /** 既有手动诊断共用同一端口列表，不再维护另一套猜测端口。 */
+    private val ADB_PORTS: List<Int> get() = localAdbPorts()
+
     /**
      * ★ v1.4.93：**关闭 ADB**（安全加固）。
      *
@@ -200,59 +173,6 @@ object PrivilegeProbe {
         appendLine("★ 警告：没有电脑 adb 就**无法再打开**，需要在系统侧（recovery/刷机）恢复。")
     }
 
-    fun grantCarPermissionsViaAdb(ctx: Context): String = buildString {
-        val pkg = ctx.packageName
-        append("===== adb 自授权 =====\n")
-
-        var port = -1
-        for (p in ADB_PORTS) {
-            val r = AdbClient.exec(p, "id", 4_000)
-            if (r.ok) {
-                port = p
-                append("adb 端口 $p 已连通\n  id → ${r.text.trim()}\n")
-                val su = AdbClient.exec(p, "su -c id", 6_000)
-                append("  su -c id → ${su.text.trim().take(80)}\n")
-                break
-            } else {
-                append("adb 端口 $p 不可用（${r.error.take(60)}）\n")
-            }
-        }
-        if (port < 0) {
-            append("结论：本机 adbd 不可达，无法自授权。\n")
-            return@buildString
-        }
-
-        val perms = listOf(
-            "android.car.permission.CONTROL_CAR_CLIMATE",
-            "android.car.permission.CAR_ENERGY",
-            "android.car.permission.CAR_INFO",
-            "android.car.permission.CAR_EXTERIOR_ENVIRONMENT",
-            "android.permission.WRITE_SECURE_SETTINGS"
-        )
-        for (perm in perms) {
-            val r = AdbClient.exec(port, "pm grant $pkg $perm", 8_000)
-            val out = r.text.trim()
-            val short = perm.removePrefix("android.car.permission.").removePrefix("android.permission.")
-            // pm grant 成功时静默无输出；失败会带错误信息
-            val verdict = when {
-                !r.ok -> "执行失败（${r.error.take(60)}）"
-                out.isBlank() -> "★成功（无输出即成功）"
-                out.contains("not a changeable permission", true) ||
-                    out.contains("is not a changeable", true) ->
-                    "✗该权限是 signature 级，adb 也授不了 → 需装成系统应用(/system/priv-app)"
-                out.contains("Unknown permission", true) -> "✗权限名不存在"
-                else -> "✗失败：$out"
-            }
-            append("  pm grant $short → $verdict\n")
-        }
-
-        append("[授权后状态]\n")
-        for ((p, ok) in carPermissions(ctx)) {
-            append("  ").append(p.removePrefix("android.car.permission.").removePrefix("android.permission."))
-                .append(" = ").append(if (ok) "★已授予" else "未授予").append('\n')
-        }
-        append("======================\n")
-    }
 
     // ---------------- 竞品取证 ----------------
 
@@ -287,7 +207,8 @@ object PrivilegeProbe {
         append("[安装位置]\n  ").append(path.text.trim().ifBlank { "(查不到该包)" }).append("\n\n")
 
         val dump = AdbClient.exec(port, "dumpsys package $pkg", 12_000)
-        val body = dump.text
+        captureProblem(dump)?.let { append(it); return@buildString }
+        val body = dump.output
         if (body.isBlank()) {
             append("[dumpsys] 无输出（${dump.error.take(80)}）\n")
         } else {
@@ -308,10 +229,10 @@ object PrivilegeProbe {
         }
 
         val ps = AdbClient.exec(port, "ps -A -o PID,UID,NAME 2>/dev/null | grep $pkg", 6_000)
-        if (ps.text.isNotBlank()) append("[进程]\n  ").append(ps.text.trim().take(300)).append("\n\n")
+        if (ps.output.isNotBlank()) append("[进程]\n  ").append(ps.output.trim().take(300)).append("\n\n")
 
         append("[判读]\n")
-        val txt = (path.text + body)
+        val txt = (path.output + body)
         val isSystem = txt.contains("/system/priv-app") || txt.contains("/system/app") ||
             txt.contains("/product/priv-app") || txt.contains("/vendor/app")
         val hasClimate = txt.contains("android.car.permission.CONTROL_CAR_CLIMATE")
@@ -351,9 +272,9 @@ object PrivilegeProbe {
         }
         append("adb 端口 $port\n\n")
 
-        val pid = AdbClient.exec(port, "pidof $pkg", 6_000).text.trim()
+        val pid = AdbClient.exec(port, "pidof $pkg", 6_000).takeIf { it.ok }?.output?.trim().orEmpty()
         append("pid = ${pid.ifBlank { "(未运行，请先在车机上打开它)" }}\n")
-        val path = AdbClient.exec(port, "pm path $pkg", 6_000).text.trim()
+        val path = AdbClient.exec(port, "pm path $pkg", 6_000).takeIf { it.ok }?.output?.trim().orEmpty()
         append("安装路径 = ${path.ifBlank { "(未安装)" }}\n")
         append("\n★ 请在接下来的 ${waitMs / 1000} 秒内，在车机上打开「$pkg」" +
             "并操作它的空调卡片（调温度 / 切内循环 / 开关 A-C）\n\n")
@@ -363,7 +284,8 @@ object PrivilegeProbe {
 
         // 全量抓（不按 pid，因为要看到它拉起别的 app 的痕迹）
         val dump = AdbClient.exec(port, "logcat -d -v time", 60_000)
-        val body = dump.text
+        captureProblem(dump)?.let { append(it); return@buildString }
+        val body = dump.output
         if (body.isBlank()) {
             append("logcat 无输出\n")
             return@buildString
@@ -480,7 +402,7 @@ object PrivilegeProbe {
         // ★ v1.4.58：先查空调 App 的 pid，再按 pid 抓，噪音降一个数量级。
         //   上一轮全量抓 686 万字符，其中 99% 是 AbsCarSignal 的周期回调。
         val hvacPid = runCatching {
-            AdbClient.exec(port, "pidof com.geely.hvac", 6_000).text.trim()
+            AdbClient.exec(port, "pidof com.geely.hvac", 6_000).takeIf { it.ok }?.output?.trim().orEmpty()
         }.getOrDefault("")
         append("空调 App pid = ${hvacPid.ifBlank { "(未运行)" }}\n\n")
 
@@ -489,7 +411,8 @@ object PrivilegeProbe {
         } else {
             AdbClient.exec(port, "logcat -d -v time", 60_000)
         }
-        val body = dump.text
+        captureProblem(dump)?.let { append(it); return@buildString }
+        val body = dump.output
         if (body.isBlank()) {
             append("logcat 无输出（${dump.error.take(80)}）\n")
             return@buildString
@@ -647,15 +570,6 @@ object PrivilegeProbe {
             if (waited % 15_000 == 0L) append("  …已等 ${waited / 1000}s / ${waitMs / 1000}s\n")
         }
 
-        append("\n[2] 抓取 logcat -d …\n")
-        val dump = AdbClient.exec(port, "logcat -d -v time", 60_000)
-        val body = dump.text
-        if (body.isBlank()) {
-            append("logcat 无输出（${dump.error.take(80)}）\n")
-            return@buildString
-        }
-        append("原始日志 ${body.length} 字符\n\n")
-
         // 精准关键词：只要跟循环 / 车控写入 / 我们已知的 functionId 有关的
         val KW = listOf(
             "am/yHqtXCMB9lw==",
@@ -694,13 +608,22 @@ object PrivilegeProbe {
             "am/yHqtWCMN9lw==",
             "am/yHqtWCMB9lw==",
         ).map { Sec.dec(it, "kw_$it") }
+        append("\n[2] 抓取目标关键词日志（设备端过滤）…\n")
+        val dump = AdbClient.exec(port, filteredLogcatCommand(KW), 60_000)
+        captureProblem(dump)?.let { append(it); return@buildString }
+        val body = dump.output
+        if (body.isBlank()) {
+            append("本次关键词采集没有匹配，不代表系统完全不输出车控日志。\n")
+            return@buildString
+        }
+        append("目标日志 ${body.length} 字符（同一组关键词已在设备端筛选）\n\n")
+
         val hits = body.lineSequence()
             .filter { l -> KW.any { l.contains(it) } }
             .toList()
         append("[3] 命中 ${hits.size} 行（按时间顺序）\n\n")
         if (hits.isEmpty()) {
-            append("（一条都没匹配到 —— 系统写车控时可能完全不打日志）\n")
-            append("那就只能靠「我们的日志 + 状态变化」反推。\n")
+            append("本次完整的关键词采集中未发现匹配；仍需结合应用日志与状态变化判断。\n")
         } else {
             hits.take(600).forEach { append("  ").append(it.take(300)).append('\n') }
         }
@@ -779,9 +702,9 @@ object PrivilegeProbe {
         append("  · A/C 按 1 次\n")
         append("  每按一次间隔 1 秒以上，方便区分。\n\n")
 
-        // getevent -lt 会一直输出，靠 socket 超时截断（adbd 随 stream 关闭而终止进程）
+        // getevent 持续输出，到整体期限后停止；失败结果仍保留已接收的原始事件。
         val cap = AdbClient.exec(port, "getevent -lt", (waitMs + 8_000).toInt())
-        val body = cap.text
+        val body = cap.output
         if (body.isBlank()) {
             append("[结果] getevent 无输出（${cap.error.take(120)}）\n")
             append("       若提示 Permission denied，说明 shell 不在 input 组，\n")
@@ -823,7 +746,7 @@ object PrivilegeProbe {
         for (i in 0 until times) {
             val r = AdbClient.exec(port, "input keyevent $keycode", 6_000)
             sb.append("  input keyevent $keycode → ")
-            sb.append(if (r.ok && r.text.isNotBlank() && !r.text.contains("Error")) "已发送" else "异常：${r.error.take(60)}")
+            sb.append(if (r.ok) "已发送" else "异常：${r.error.take(60)}")
             sb.append('\n')
         }
         return sb.toString()
@@ -873,19 +796,4 @@ object PrivilegeProbe {
         "已禁用：盲试 keyevent 会把按键注入当前焦点窗口，可能打断车机界面。" +
             "请改用「抓实体按键」被动抓取真实 keycode。"
 
-    // ---------------- adb 协议 ----------------
-
-    private fun cnxnPacket(payload: String): ByteArray {
-        val data = payload.toByteArray(Charsets.US_ASCII)
-        val crc = CRC32().apply { update(data) }.value
-        return ByteBuffer.allocate(24 + data.size).order(ByteOrder.LITTLE_ENDIAN).apply {
-            putInt(A_CNXN)
-            putInt(0x01000000)                 // protocol version
-            putInt(256)                        // maxdata
-            putInt(data.size)
-            putInt(crc.toInt())
-            putInt(A_CNXN xor -1)              // magic = command ^ 0xffffffff
-            put(data)
-        }.array()
-    }
 }

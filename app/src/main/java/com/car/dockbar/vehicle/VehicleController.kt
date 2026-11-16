@@ -306,20 +306,9 @@ object VehicleController {
     }
 
     /**
-     * 车控权限自检 —— 这是「能不能真的调空调」的决定性开关。
-     *
-     * ★ 2026-10-20 关键发现：对照能控内外循环的第三方 App「领克 OSN 车机助手
-     *   (cn.navitool)」——它是普通 App、无 sharedUserId，但 Manifest 里声明了
-     *   `android.car.permission.CONTROL_CAR_CLIMATE` 等权限，且 App 内有
-     *   「正在授予 ADB 权限...」的流程。它之所以能写成功，不是用了更牛的 API，
-     *   而是**拿到了车控写入权限**；服务端的 uid/权限校验放行，setFunctionValue 才返回 true。
-     *
-     *   反观本项目：权限声明了但**从未被授予**（signature 级权限安装时不会自动授予），
-     *   所以反射调 setFunctionValue 一律被服务端挡回 false。
-     *   这也解释了 osn_fan_widget 为什么「只能读」——读不校验权限，写才校验。
-     *
-     *   授予方式（车机连一次 adb 即可，授予结果写进 packages.xml，**重启不丢**）：
-     *     adb shell pm grant com.car.dockbar android.car.permission.CONTROL_CAR_CLIMATE
+     * 输出本机车控相关权限，不能仅凭声明或取得 ADB shell 判断真实写入能力。
+     * 标准 Android 9 的 CONTROL_CAR_CLIMATE 为 system|signature，普通 pm grant
+     * 可能被系统拒绝；启动补权会按本机定义尝试缺项并回读，厂商接口是否校验另需验证。
      */
     private fun dumpCarPermissions(ctx: Context) {
         val perms = listOf(
@@ -337,8 +326,8 @@ object VehicleController {
             if (granted) {
                 Logx.d("权限 $short = 已授予")
             } else {
-                Logx.w("权限 $short = ★未授予（车控写入大概率被服务端拒绝；" +
-                    "需 adb shell pm grant ${ctx.packageName} $p）")
+                Logx.w("权限 $short = ★未授予（请查看启动权限检查结果；" +
+                    "是否可授予及厂商接口是否校验，以本机系统为准）")
             }
         }
     }

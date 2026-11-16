@@ -23,17 +23,17 @@
         android:name="android.permission.QUERY_ALL_PACKAGES"
         tools:ignore="QueryAllPackagesPermission" />
 
-    <!-- ================= 以下权限为对齐「领克OSN车机助手」(cn.navitool) ================= -->
-    <!-- 车控：ECarX adaptapi 车辆信号读写。
-         CAR_INFO/CONTROL_CAR_CLIMATE/CAR_ENERGY/CAR_EXTERIOR_ENVIRONMENT 是
-         读档位传感器(0x200200)、写空调内外循环(0x10030100)等车控操作的授权基础；
-         这几个是 signature|privileged 权限，只有以系统/特权应用安装时才会真正授予。 -->
+    <!-- 车控权限与设置维护：保护级别以当前车机的实际定义为准。 -->
+    <!-- 标准 Android 9 中 CAR_INFO/外部环境为普通权限，CAR_ENERGY 为危险权限，
+         CONTROL_CAR_CLIMATE 为 system|signature；取得 ADB shell 不保证可动态授予。
+         启动检查会对本机存在且本应用声明的缺项尝试授权，最终以回读为准。 -->
     <uses-permission android:name="android.car.permission.CAR_INFO" />
     <uses-permission android:name="android.car.permission.CONTROL_CAR_CLIMATE" />
     <uses-permission android:name="android.car.permission.CAR_ENERGY" />
     <uses-permission android:name="android.car.permission.CAR_EXTERIOR_ENVIRONMENT" />
-    <!-- 特权写入：Settings.Secure / 平台超级用户通道（系统级安装才生效） -->
+    <!-- 安全设置写入：标准 Android 9 含 development，可通过 ADB shell 尝试授予。 -->
     <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" />
+    <!-- 历史声明不等于取得 root，启动补权不使用超级用户通道。 -->
     <uses-permission android:name="android.permission.ACCESS_SUPERUSER" />
     <!-- 吉利应用商店内容提供者访问 -->
     <uses-permission android:name="com.geely.appstore.APPSTORE_PROVIDER" />

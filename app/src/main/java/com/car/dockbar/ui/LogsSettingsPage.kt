@@ -18,6 +18,7 @@ import com.car.dockbar.util.Logx
 import com.car.dockbar.util.NativeCrashHandler
 import com.car.dockbar.util.Prefs
 import com.car.dockbar.util.PrivilegeProbe
+import com.car.dockbar.util.StartupPermissions
 import com.car.dockbar.vehicle.VehicleBridge
 import com.car.dockbar.vehicle.VehicleController
 
@@ -389,6 +390,7 @@ internal class LogsSettingsPage(activity: MainActivity) :
                     else -> "无"
                 }).append('\n')
                 append("上次结果：").append(LogUploader.lastResult.ifBlank { "尚无上传记录" })
+                append("\n权限检查：").append(StartupPermissions.lastReport.ifBlank { "尚无检查记录" })
             }
         }
         refreshState = ::refresh
@@ -451,19 +453,19 @@ internal class LogsSettingsPage(activity: MainActivity) :
             id = R.id.settingsLogDiagnosticActions
             orientation = LinearLayout.HORIZONTAL
         }
-        actionRow2.addView(smallBtn("一键提权(adb)") { button ->
-            tvState.text = "正在连本机 adbd 并授予车控权限…（约 20 秒）"
+        actionRow2.addView(smallBtn("检查并补齐权限") { button ->
+            tvState.text = "正在检查并补齐核心权限…（最长 45 秒，不修改车控开关）"
             button.isEnabled = false
             button.alpha = 0.45f
             Thread {
-                val result = runCatching { PrivilegeProbe.grantCarPermissionsViaAdb(this) }
-                    .getOrElse { "提权失败：${it.javaClass.simpleName}: ${it.message}" }
+                val result = runCatching { StartupPermissions.grantMissing(this) }
+                    .getOrElse { "权限检查失败：${it.javaClass.simpleName}: ${it.message}" }
                 Logx.d(result)
                 postUi {
                     tvState.text = result
                     button.isEnabled = true
                     button.alpha = 1f
-                    LogUploader.upload(this, "adb_grant", result, "adb 自授权尝试")
+                    LogUploader.upload(this, "adb_grant", result, "核心权限检查与补齐")
                 }
             }.apply { isDaemon = true }.start()
         }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
