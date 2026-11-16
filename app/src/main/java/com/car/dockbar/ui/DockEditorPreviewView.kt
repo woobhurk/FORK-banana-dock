@@ -137,6 +137,13 @@ internal class DockEditorPreviewView(context: Context) : View(context) {
         target.set((width - w) / 2f, (height - h) / 2f, (width + w) / 2f, (height + h) / 2f)
     }
 
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        // 首次渲染早于布局，尺寸确定或变化后需同步绘制与拖拽命中区域。
+        updateTarget()
+        invalidate()
+    }
+
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         val image = bitmap ?: return
