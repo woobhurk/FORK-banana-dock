@@ -255,10 +255,11 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      # Push releases use one v<versionName> tag. Manual releases use a new
-      # v<versionName>-r<run> tag every run. Never upload --clobber: an existing APK
-      # stays downloadable, and versionCode is unchanged so an older build can be
-      # installed over a bad one.
+      # Push releases use one v<versionName> tag and are normal releases.
+      # Manual releases use a new v<versionName>-r<run> tag every run and are
+      # prereleases, so they cannot become Latest. Never upload --clobber: an
+      # existing APK stays downloadable, and versionCode is unchanged so an older
+      # build can be installed over a bad one.
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -280,8 +281,12 @@ jobs:
           fi
           if [[ -n "$RELEASE_BUILD" ]]; then
             release_title="CarDockBar $VERSION_NAME ($RELEASE_BUILD)"
+            # 手动构建发布为 Pre-release。GitHub 不允许它成为 Latest。
+            make_latest=false
+            prerelease=(--prerelease)
           else
             release_title="CarDockBar $VERSION_NAME"
+            prerelease=()
           fi
           # 页面先展示提交说明，GitHub 再把自动 Changelog 接在后面。
           # HTML 注释不显示，下次发布用它判断能否标为 Latest。
@@ -317,7 +322,7 @@ jobs:
           gh release create "$RELEASE_TAG" dist/* \
             --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
             --title "$release_title" --notes-file "$notes_file" \
-            --generate-notes --latest="$make_latest"
+            --generate-notes "${prerelease[@]}" --latest="$make_latest"
 
       - name: Remove signing key
         if: always()
