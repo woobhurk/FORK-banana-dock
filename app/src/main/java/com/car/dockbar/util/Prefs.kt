@@ -651,7 +651,7 @@ object Prefs {
     fun setLyricAlpha(ctx: Context, v: Int) = sp(ctx).edit().putInt("lyric_alpha", v).apply()
 
     /** 歌词字号 sp */
-    fun lyricTextSize(ctx: Context) = sp(ctx).getInt("lyric_text_size", 22)
+    fun lyricTextSize(ctx: Context) = sp(ctx).getInt("lyric_text_size", 26)
     fun setLyricTextSize(ctx: Context, v: Int) = sp(ctx).edit().putInt("lyric_text_size", v).apply()
 
     /** 普通行颜色 ARGB */
