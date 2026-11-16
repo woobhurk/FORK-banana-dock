@@ -235,6 +235,11 @@ class DockOverlayService : Service() {
         main.post { bindMedia(mi) }
     }
 
+    // 歌词窗口挂载或销毁后立即刷新，不再等待定时轮询。
+    private val lyricStateListener: (Boolean) -> Unit = { _ ->
+        main.post { refreshLyricIcons() }
+    }
+
     // =====================================================================
 
     override fun onCreate() {
@@ -253,6 +258,7 @@ class DockOverlayService : Service() {
         registerReceiver()
         VehicleController.addListener(vehicleListener)
         MediaBridge.addListener(mediaListener)
+        LyricOverlayService.addStateListener(lyricStateListener)
         CabinVolume.addMediaShownListener(mediaLevelListener)
 
         if (!canDrawOverlay()) {
@@ -384,6 +390,7 @@ class DockOverlayService : Service() {
         stopWork()
         VehicleController.removeListener(vehicleListener)
         MediaBridge.removeListener(mediaListener)
+        LyricOverlayService.removeStateListener(lyricStateListener)
         CabinVolume.removeMediaShownListener(mediaLevelListener)
         MediaBridge.stop()
         runCatching {
