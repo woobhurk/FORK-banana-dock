@@ -283,7 +283,8 @@ jobs:
           else
             release_title="CarDockBar $VERSION_NAME"
           fi
-          # 页面只展示提交说明。HTML 注释不显示，下次发布用它判断能否标为 Latest。
+          # 页面先展示提交说明，GitHub 再把自动 Changelog 接在后面。
+          # HTML 注释不显示，下次发布用它判断能否标为 Latest。
           # 与 detect 相同：说明以 ci 开头（分隔符或结尾）的发布提交不写入。
           is_release_commit() {
             (
@@ -315,7 +316,8 @@ jobs:
           } > "$notes_file"
           gh release create "$RELEASE_TAG" dist/* \
             --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
-            --title "$release_title" --notes-file "$notes_file" --latest="$make_latest"
+            --title "$release_title" --notes-file "$notes_file" \
+            --generate-notes --latest="$make_latest"
 
       - name: Remove signing key
         if: always()
