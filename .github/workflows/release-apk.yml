@@ -81,6 +81,8 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
+          fetch-depth: 0
+          fetch-tags: true
           persist-credentials: false
 
       # Configure all four repository secrets using the SAME key as existing installs.
@@ -278,15 +280,42 @@ jobs:
           fi
           if [[ -n "$RELEASE_BUILD" ]]; then
             release_title="CarDockBar $VERSION_NAME ($RELEASE_BUILD)"
-            release_lead="Build $RELEASE_BUILD of $VERSION_NAME."
           else
             release_title="CarDockBar $VERSION_NAME"
-            release_lead="Release $VERSION_NAME."
           fi
+          # 页面只展示提交说明。HTML 注释不显示，下次发布用它判断能否标为 Latest。
+          # 与 detect 相同：说明以 ci 开头（分隔符或结尾）的发布提交不写入。
+          is_release_commit() {
+            (
+              shopt -s nocasematch
+              [[ "$1" == ci || "$1" == ci:* || "$1" == ci：* || "$1" == ci[[:space:]]* || "$1" == ci$'\u3000'* ]]
+            )
+          }
+          if previous_tag="$(git describe --tags --abbrev=0 HEAD 2>/dev/null)"; then
+            log_range="${previous_tag}..HEAD"
+          else
+            log_range="HEAD"
+          fi
+          git log --reverse --no-merges --format='%s%x1f%h' "$log_range" > "$RUNNER_TEMP/release-commits.txt"
+          notes_file="$RUNNER_TEMP/release-notes.md"
+          {
+            printf '<!-- android-version-code: %s -->\n\n' "$VERSION_CODE"
+            found=0
+            while IFS=$'\x1f' read -r subject hash; do
+              [[ -z "$subject" || -z "$hash" ]] && continue
+              if is_release_commit "$subject"; then
+                continue
+              fi
+              printf -- '- %s (%s)\n' "$subject" "$hash"
+              found=1
+            done < "$RUNNER_TEMP/release-commits.txt"
+            if (( found == 0 )); then
+              printf '%s\n' '自上次发布以来没有新的提交。'
+            fi
+          } > "$notes_file"
           gh release create "$RELEASE_TAG" dist/* \
             --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
-            --title "$release_title" --generate-notes --latest="$make_latest" \
-            --notes "<!-- android-version-code: $VERSION_CODE -->"$'\n\n'"$release_lead versionCode is unchanged, so an older build of this version can be installed over this one. Signed universal APK (arm64-v8a, armeabi-v7a, x86_64). See update.json and SHA256SUMS for integrity metadata."
+            --title "$release_title" --notes-file "$notes_file" --latest="$make_latest"
 
       - name: Remove signing key
         if: always()
