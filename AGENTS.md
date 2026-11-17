@@ -82,6 +82,7 @@
 | 媒体会话和通知补充信息 | `media/MediaBridge.kt`、`media/DockNotificationListener.kt` |
 | 车控通道配置 | `config/VehicleChannels.kt` |
 | 车控读写和状态 | `vehicle/VehicleController.kt`、`vehicle/VehicleBridge.kt` |
+| 空调共享 I/O 队列与写入门禁 | `vehicle/HvacCommands.kt` |
 | 车控分组轮询、合并和公平调度 | `vehicle/VehicleRefreshQueue.kt` |
 | 原车接口验证会话与结果报告 | `vehicle/HvacDiagnostics.kt`、`ui/LogsSettingsPage.kt` |
 | 传感器 | `vehicle/SensorBridge.kt` |
@@ -250,6 +251,7 @@
 - 查看结果可直接用页面报告并“复制报告”，也可在既有日志中查 `HVAC_TEST`，或只读运行 `adb logcat -s CarDockBar`。诊断沿用本地日志及已有上传策略，不新增上传端点；闪退后应检查上次会话/崩溃证据，不能反复开启导致闪退的通道。不要用 `pm grant` 成功或没有 Java 异常代替真车验证。
 - 结束报告的 RESTORE 是旧订阅撤销及基线配置的调用结果；accepted=false 时不能认为已安全撤销，应查看卸载错误，重启应用后不要重复开启故障通道。两分钟期限按单调实时时钟检查，页面切换不结束实验；到期后的旧实验结果不再更新状态。
 - 能力查询返回、分组结果应用及已排队事件同时核对验证会话和 Bridge 连接代际；停止重开、保存通道重连或 Binder 重建前的旧结果不能污染新报告或状态。连接变化后按当前基线与实验并集重建选择性订阅；不可抢占的单次厂商调用允许完成，但不再继续旧实验的后续读取。
+- 空调写入经 `HvacCommands` 唯一队列执行，所有 Bridge 整数/浮点写入口复核车控 API、写入开关、模拟状态、连接和执行线程，避免组合动作或诊断原始写绕过。未就绪明确返回未执行，不在 UI 线程轮询等待；延迟写后回读也投递同一后台队列。`verifyWrite` 的返回值仅为调用是否接受，UNKNOWN／OBSERVED_MATCH／OBSERVED_DIFFERENT 分开记录，缺失或哨兵读数不再打印“已生效”。
 
 ## 6. 车控接口和安全边界
 

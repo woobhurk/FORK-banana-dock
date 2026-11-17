@@ -178,7 +178,7 @@ class VehicleControlService : Service() {
         val func = d.getInt(VehicleProtocol.KEY_FUNC)
         val zone = d.getInt(VehicleProtocol.KEY_ZONE)
         val isWrite = d.getBoolean(VehicleProtocol.KEY_IS_WRITE)
-        work?.post {
+        HvacCommands.executor.execute {
             val out = Bundle()
             runCatching {
                 if (isWrite) {

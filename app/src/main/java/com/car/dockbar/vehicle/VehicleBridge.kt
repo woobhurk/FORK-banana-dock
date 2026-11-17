@@ -3,6 +3,7 @@ package com.car.dockbar.vehicle
 import android.content.Context
 import com.car.dockbar.util.Logx
 import com.car.dockbar.util.Sec
+import com.car.dockbar.util.Prefs
 import java.lang.reflect.InvocationHandler
 import java.lang.reflect.Method
 import java.lang.reflect.Proxy
@@ -112,6 +113,7 @@ object VehicleBridge {
     private var carObj: Any? = null
     /** 缓存应用上下文，供 binder 死亡后自动重连使用 */
     private var appCtx: Context? = null
+    private val verifyTimer = android.os.Handler(android.os.Looper.getMainLooper())
 
     /** SensorBridge 等需要从 ICar 上取其它管理器时使用；未连接返回 null */
     fun carInstance(): Any? = carObj
@@ -296,9 +298,10 @@ object VehicleBridge {
      * ```
      * propertyId=268828928=0x10060100（与 ECarX functionId 同编号），areaId=1=主驾，val=float ℃。
      *
-     * @return true = 调用成功
+     * @return true = 厂商接口接受调用，不代表温度已变化
      */
     fun writeTempViaGlyCar(functionId: Int, areaId: Int, value: Float): Boolean {
+        if (!HvacCommands.canWrite(appCtx, "writeTempViaGlyCar")) return false
         val obj = glyCarObj ?: return observeWrite(functionId, areaId, value, false, "GlyCar:无会话")
         val m = glyFloatWrite ?: return observeWrite(functionId, areaId, value, false, "GlyCar:无浮点写方法")
         val accepted = try {
@@ -490,6 +493,7 @@ object VehicleBridge {
      * @return null = 该重载不可用（调用方请回落）；true/false = HAL 的接受结果
      */
     fun writeIntNoArea(functionId: Int, value: Int): Boolean? {
+        if (!HvacCommands.canWrite(appCtx, "writeIntNoArea")) return false
         val m = writeMethodNoArea ?: return null
         val s = session ?: return null
         val accepted = runCatching {
@@ -531,6 +535,8 @@ object VehicleBridge {
      *    导致走 2 参重载时把 zone 当成要写的值 → 写入无效。
      */
     fun writeInt(functionId: Int, zone: Int, value: Int): Boolean {
+        if (!HvacCommands.canWrite(appCtx, "writeInt")) return false
+        val generation = connectionGeneration
         val m = writeMethod ?: run {
             Logx.e("HVAC_WRITE 写失败：当前通道没有可用的写方法（后端=${backend}），写 0x${functionId.toString(16)} zone=$zone value=$value")
             return observeWrite(functionId, zone, value, false, "$backend:无整型写方法")
@@ -546,6 +552,14 @@ object VehicleBridge {
                 2 -> arrayOf(functionId, value)          // ★ 2 参 = (functionId, value)
                 3 -> arrayOf(functionId, zone, value)
                 else -> arrayOf(functionId, zone, value)
+            }
+            // 能力查询会阻塞；写入前再次拒绝旧连接或查询期间关闭的权限开关。
+            if (connectionGeneration != generation) {
+                Logx.w("HVAC_WRITE writeInt 未执行：能力查询期间连接已变化")
+                return observeWrite(functionId, zone, value, false, "$backend:${m.name}:STALE")
+            }
+            if (!HvacCommands.canWrite(appCtx, "writeInt")) {
+                return observeWrite(functionId, zone, value, false, "$backend:${m.name}:SKIPPED")
             }
             val r = m.invoke(s, *coerce(m, args))
             val ok = when (r) {
@@ -594,29 +608,37 @@ object VehicleBridge {
         return accepted
     }
 
-    /**
-     * 写后回读校验：写完读一次，比对低 8 位是否真的变了。
-     *
-     * ★ 很多 HAL 的 setFunctionValue 会返回 true 但实际不生效（静默丢弃），
-     *   只看返回值会误判成"写成功"。故必须回读确认。
-     */
+    /** 返回值只表示调用是否被接受；延迟回读仅报告低 8 位的实际观测。 */
     fun verifyWrite(functionId: Int, zone: Int, value: Int, delayMs: Long = 400L): Boolean {
-        appCtx ?: return false
-        val before = readInt(functionId, zone)
-        if (writeInt(functionId, zone, value)) {
-            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                val after = readInt(functionId, zone)
-                val same = (after != null && before != null) &&
-                    (after and 0xFF) == (before and 0xFF) &&
-                    (after and 0xFF) != (value and 0xFF)
-                Logx.d(
-                    "HVAC_VERIFY 0x${functionId.toString(16)} zone=$zone 写前=$before 写值=$value 写后=$after → " +
-                    if (same) "★未生效(NO_EFFECT：写入被静默丢弃，多半是权限)" else "已生效"
-                )
+        val ctx = appCtx
+        if (!HvacCommands.canWrite(ctx, "verifyWrite")) return false
+        ctx ?: return false
+        val generation = connectionGeneration
+        val accepted = writeInt(functionId, zone, value)
+        if (accepted) {
+            verifyTimer.postDelayed({
+                HvacCommands.executor.execute {
+                    // 排队期间及阻塞回读期间都可能断线、重连或关闭 API。
+                    if (connectionGeneration != generation || !isReady ||
+                        !Prefs.vehicleApiEnabled(ctx) || Prefs.simulate(ctx)) return@execute
+                    val after = readInt(functionId, zone)
+                    if (connectionGeneration != generation || !isReady ||
+                        !Prefs.vehicleApiEnabled(ctx) || Prefs.simulate(ctx)) return@execute
+                    val observed = after?.and(0xFF)
+                    val result = when {
+                        observed == null || observed == VALUE_ERROR || observed == VALUE_NONE ||
+                            observed == VALUE_UNKNOWN -> "UNKNOWN"
+                        observed == (value and 0xFF) -> "OBSERVED_MATCH"
+                        else -> "OBSERVED_DIFFERENT"
+                    }
+                    Logx.d(
+                        "HVAC_VERIFY 0x${functionId.toString(16)} zone=$zone 调用接受=true " +
+                            "写值=$value 回读=$after → $result"
+                    )
+                }
             }, delayMs)
-            return true
         }
-        return false
+        return accepted
     }
 
     /** 优先匹配带 zone 的精确重载，不能误拿同名浮点/回调参数方法。 */
@@ -849,6 +871,7 @@ object VehicleBridge {
      *   因此默认关闭，由用户在主界面显式开启。
      */
     fun writeTempCustomize(functionId: Int, zone: Int, value: Float): Boolean {
+        if (!HvacCommands.canWrite(appCtx, "writeTempCustomize")) return false
         if (!customizeWriteEnabled) return observeWrite(functionId, zone, value, false, "Customize:实验写入关闭")
         val c = session?.javaClass ?: return observeWrite(functionId, zone, value, false, "Customize:无会话")
         val m = (customizeWriteMethod ?: findCustomizeMethod(c, Sec.m(Sec.M_SETCUSTOMIZEFUNCTIONVALUE), 3)

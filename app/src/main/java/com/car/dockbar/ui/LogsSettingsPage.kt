@@ -25,6 +25,7 @@ import com.car.dockbar.util.PrivilegeProbe
 import com.car.dockbar.util.StartupPermissions
 import com.car.dockbar.vehicle.VehicleBridge
 import com.car.dockbar.vehicle.VehicleController
+import com.car.dockbar.vehicle.HvacCommands
 import com.car.dockbar.vehicle.HvacDiagnostics
 import com.car.dockbar.vehicle.HvacValidationMode
 
@@ -260,10 +261,10 @@ internal class LogsSettingsPage(activity: MainActivity) :
         val zone = etZone.text.toString().trim().toIntOrNull() ?: ch.defZone
         val index = etVal.text.toString().trim().toIntOrNull() ?: 1
         val raw = (func and 0xFFFFFF00.toInt()) or (index and 0xFF)
-        Thread {
+        HvacCommands.executor.execute {
             val ok = VehicleBridge.writeInt(func, zone, raw)
-            postUi { out.text = "写入：0x${raw.toString(16)} → ${if (ok) "成功" else "失败"}" }
-        }.start()
+            postUi { out.text = "写入调用：0x${raw.toString(16)} → ${if (ok) "接受，生效需真实观测" else "未接受，原因见日志"}" }
+        }
     }
 
     private fun doRead(@Suppress("UNUSED_PARAMETER") ch: VehicleChannel, func: Int, zone: Int, out: TextView) {
