@@ -41,7 +41,7 @@ class StatusPopWindow(private val ctx: Context) {
     /**
      * 显示 / 刷新状态弹窗。
      *
-     * @param text   状态文案，如「主驾 22.5°　风速 3 档　内循环」
+     * @param text   状态文案，如「内循环　座椅通风 2 档」
      * @param autoDismissMs 自动消失时间，0 = 不自动消失
      */
     fun show(text: String, autoDismissMs: Long) {

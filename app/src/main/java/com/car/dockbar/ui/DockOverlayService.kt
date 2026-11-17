@@ -920,22 +920,7 @@ class DockOverlayService : Service() {
     // 空调状态弹窗（自动消失）—— ★ v1.4.40 改成「改了什么就显示什么」
     // =====================================================================
 
-    /**
-     * 空调状态浮窗里的温度文案。
-     * ★ v3.2：15.5 / 28.5 这两个极值改成 **LO / HI**，跟 Dock 栏温度、
-     *   温度滚轮、HvacControlPopup 的显示保持一致（车机 HvacConstants 也是这个约定：
-     *   TEMP_C_MIN="15.5" / MIN_SHOW_TAMP="LO"，TEMP_C_MAX="28.5" / MAX_SHOW_TAMP="HI"）。
-     */
-    private fun tempText(t: Float?): String {
-        if (t == null) return "OFF"
-        val max = Prefs.tempMaxC(this)
-        val min = Prefs.tempMinC(this)
-        if (t >= max) return "HI"
-        if (t <= min) return "LO"
-        return String.format("%.1f°", t)
-    }
-
-    /** 空调相关状态变化 → 弹状态浮窗，到期自动消失（首次/服务启动不弹） */
+    /** 空调相关状态变化 → 弹状态浮窗，到期自动消失（首次/服务启动不弹）。温度和风速不提示。 */
     private fun onAcStateChanged(st: VehicleController.State) {
         if (!Prefs.popupEnabled(this)) return
         // 安全等级 >= 1 时禁用状态弹窗（它会再创建一个 overlay 窗口）
@@ -947,16 +932,8 @@ class DockOverlayService : Service() {
         lastAcState = st
         if (prev == null) return   // 首帧只记录，不弹
 
-        // ★ 用户要求：改了什么就显示什么——逐字段对比，只列本次变化的项
+        // 逐字段对比，只列本次变化的项。温度和风速变化不弹提示。
         val parts = mutableListOf<String>()
-        if (prev.driverTempC != st.driverTempC) parts += "主驾 ${tempText(st.driverTempC)}"
-        if (prev.passengerTempC != st.passengerTempC) parts += "副驾 ${tempText(st.passengerTempC)}"
-        if (prev.fanAuto != st.fanAuto || prev.fanLevel != st.fanLevel) {
-            // ★ v1.4.85：AUTO 也显示档位（"AUTO 3 档"）
-            parts += "风速 " + if (st.fanAuto) {
-                if (st.fanLevel > 0) "AUTO ${st.fanLevel} 档" else "AUTO"
-            } else "${st.fanLevel} 档"
-        }
         if (prev.recircInside != st.recircInside) {
             parts += if (st.recircInside) "内循环" else "外循环"
         }

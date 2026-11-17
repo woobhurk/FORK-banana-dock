@@ -153,13 +153,13 @@ object Prefs {
     fun setTempBase(ctx: Context, v: Float) = sp(ctx).edit().putFloat("temp_base", v).apply()
 
     /**
-     * ★ v1.4.78：每档温度步进 —— **默认 1.0℃**（用户要求：Dock 上的 ± 改成 1 度调节）。
+     * Dock 温度箭头每次调节的摄氏步长，默认 0.5℃。
      *
-     * 换了新 key `temp_step_v2`：老用户存的 `temp_step=0.5` 不再被读取，
-     * 升级后自动变成 1 度（用户可再在设置里改）。
+     * 使用新 key `temp_step_v3`：已保存的 `temp_step_v2`（1.0℃）不再读取，
+     * 升级后主驾/副驾温度箭头按 0.5℃ 调节。
      */
-    fun tempStep(ctx: Context) = sp(ctx).getFloat("temp_step_v2", 1.0f)
-    fun setTempStep(ctx: Context, v: Float) = sp(ctx).edit().putFloat("temp_step_v2", v).apply()
+    fun tempStep(ctx: Context) = sp(ctx).getFloat("temp_step_v3", 0.5f)
+    fun setTempStep(ctx: Context, v: Float) = sp(ctx).edit().putFloat("temp_step_v3", v).apply()
 
     /** 第一次读到车外温度时：高于 25℃ 是否打开主驾座椅通风。 */
     fun autoSeatVentHot(ctx: Context) = sp(ctx).getBoolean("auto_seat_vent_hot", true)
