@@ -281,6 +281,27 @@ object Prefs {
     fun setVehicleTempWatcherEnabled(ctx: Context, v: Boolean) =
         sp(ctx).edit().putBoolean("vehicle_temp_watcher_enabled", v).apply()
 
+    // 仅允许已明确开放的空调通道；旧监听开关与新增常态配置互不改写。
+    private val HVAC_EVENT_KEYS = setOf(
+        "fan_manual", "fan_auto", "ac", "temp_driver", "temp_passenger", "recirc", "air_direction"
+    )
+
+    fun hvacEventKeys(ctx: Context): Set<String> =
+        sp(ctx).getStringSet("hvac_event_keys", emptySet()).orEmpty()
+            .filterTo(mutableSetOf()) { it in HVAC_EVENT_KEYS }
+
+    fun setHvacEventKeys(ctx: Context, keys: Set<String>) =
+        sp(ctx).edit().putStringSet("hvac_event_keys", keys.filterTo(mutableSetOf()) {
+            it in HVAC_EVENT_KEYS
+        }).apply()
+
+    /** 真实崩溃或早期连续异常才关闭新增通道；稳定后无证据退出保留用户配置。 */
+    internal fun suspendHvacEventsAfterCrash(ctx: Context, hasEvidence: Boolean, earlyStreak: Int): Boolean {
+        if ((!hasEvidence && earlyStreak < 1) || hvacEventKeys(ctx).isEmpty()) return false
+        setHvacEventKeys(ctx, emptySet())
+        return true
+    }
+
     /** 是否启用系统媒体接口（MediaSession / 通知使用权）。关闭可确认是不是媒体通道导致闪退 */
     fun mediaEnabled(ctx: Context) = sp(ctx).getBoolean("media_enabled", true)
     fun setMediaEnabled(ctx: Context, v: Boolean) = sp(ctx).edit().putBoolean("media_enabled", v).apply()

@@ -130,7 +130,8 @@ internal object HvacDiagnostics {
         val floatObservation = raw is Float || raw is Double
         if (floatCommand != floatObservation) return null
         val match = if (floatCommand) {
-            abs(raw.toDouble() - cmd.value.toDouble()) <= 0.1
+            // 允许 Float 表示造成的微小边界误差，不改变真实观测值。
+            abs(raw.toDouble() - cmd.value.toDouble()) <= 0.10001
         } else {
             raw.toLong() == cmd.value.toLong() || (raw.toInt() and 0xff) == (cmd.value.toInt() and 0xff)
         }

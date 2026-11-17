@@ -80,6 +80,7 @@ internal class LogsSettingsPage(activity: MainActivity) :
         buildChannelRows()
         wireActions()
         addLogUploadSection()
+        addHvacSubscriptionAction()
         addHvacValidationActions()
 
         Logx.addListener(logListener)
@@ -303,6 +304,54 @@ internal class LogsSettingsPage(activity: MainActivity) :
     // =====================================================================
 
     private var refreshState: (() -> Unit)? = null
+
+    private fun addHvacSubscriptionAction() {
+        root.addView(smallBtn("日常空调同步通道") {
+            AlertDialog.Builder(activity)
+                .setTitle("日常空调同步通道")
+                .setMessage("本车已验证风量、A/C、温度的读取与事件；循环仅验证读取，风向 0/8 的语义仍未确定，不代表所有车型均可用。\n" +
+                    "⚠ 温度会额外启用浮点 Customize/native 读取和事件，可能使进程直接闪退，Java 异常捕获无法保护；厂商其他事件回调也有 native 风险，请在停车安全时配置。\n" +
+                    "原有温度监听、全量监听开关及其基线仍保留；全部不选仅关闭新增日常通道。\n" +
+                    "保存仅调整订阅与读取，不自动写入车控或补权，也不改变车控写入开关。临时验证结束不会清除此配置。")
+                .setPositiveButton("选择通道") { _, _ ->
+                    val labels = arrayOf(
+                        "风量（手动 + AUTO）",
+                        "A/C",
+                        "主副驾温度（含浮点读取，native 风险）",
+                        "循环（本车仅验证读取）",
+                        "风向（0/8 语义未定）"
+                    )
+                    val groups = arrayOf(
+                        setOf("fan_manual", "fan_auto"),
+                        setOf("ac"),
+                        setOf("temp_driver", "temp_passenger"),
+                        setOf("recirc"),
+                        setOf("air_direction")
+                    )
+                    val saved = Prefs.hvacEventKeys(this)
+                    val selected = BooleanArray(groups.size) { index ->
+                        groups[index].any { it in saved }
+                    }
+                    AlertDialog.Builder(activity)
+                        .setTitle("日常通道（可全部不选）")
+                        .setMultiChoiceItems(labels, selected) { _, which, checked ->
+                            selected[which] = checked
+                        }
+                        .setPositiveButton("保存并应用") { _, _ ->
+                            val keys = groups.indices.filter { selected[it] }
+                                .flatMapTo(mutableSetOf()) { groups[it] }
+                            Prefs.setHvacEventKeys(this, keys)
+                            VehicleController.reloadHvacSubscriptions(this)
+                            toastOnce(if (keys.isEmpty()) "新增日常空调同步已关闭，原有基线监听保留"
+                                else "日常空调同步已保存并请求应用")
+                        }
+                        .setNegativeButton("取消", null)
+                        .show()
+                }
+                .setNegativeButton("取消", null)
+                .show()
+        })
+    }
 
     /** 验证会话属于 Controller，切页或销毁本页面不会停止车上操作取证。 */
     private fun addHvacValidationActions() {

@@ -5,6 +5,7 @@ import com.car.dockbar.util.Logx
 import com.car.dockbar.util.Prefs
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.ConcurrentHashMap
 
 /** 所有真实车控读写共用的后台队列；写入入口必须再次核对执行时门禁。 */
 internal object HvacCommands {
@@ -20,6 +21,35 @@ internal object HvacCommands {
     }
 
     fun isWorkerThread(): Boolean = Thread.currentThread() === workerThread
+
+    private val latestTargets = ConcurrentHashMap<String, Long>()
+
+    /** 仅合并尚未执行的绝对目标；步进、翻转和组合动作不得走此入口。 */
+    fun submitLatest(ctx: Context, key: String, sequence: Long, onSkipped: () -> Unit, action: () -> Unit) {
+        val c = ctx.applicationContext
+        val connection = VehicleBridge.connectionGeneration
+        if (!canSubmit(c, key)) { onSkipped(); return }
+        if (sequence != 0L) latestTargets[key] = sequence
+        executor.execute {
+            if ((sequence != 0L && latestTargets[key] != sequence) ||
+                connection != VehicleBridge.connectionGeneration || !canWrite(c, key)) {
+                if (sequence != 0L) latestTargets.remove(key, sequence)
+                onSkipped()
+                return@execute
+            }
+            try {
+                action()
+            } catch (t: Throwable) {
+                Logx.e("HVAC_CMD $key 调用异常，回归最近观测", t)
+                onSkipped()
+            } finally {
+                if (sequence != 0L) latestTargets.remove(key, sequence)
+            }
+        }
+    }
+
+    /** 切换模式时使旧模式尚未执行的绝对目标失效。 */
+    fun supersede(key: String) { latestTargets.remove(key) }
 
     /** 提交前检查不要求当前线程是后台线程，也不代表命令已被厂商接受。 */
     fun canSubmit(ctx: Context, label: String): Boolean {

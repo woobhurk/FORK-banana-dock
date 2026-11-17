@@ -377,6 +377,7 @@ object LogUploader {
         // 否则默认开启的温度监听会在用户打开设置前就被熔断关掉。
         val noPreviousSession = !hasJava && !hasNative && !hasAbort && logText.isBlank()
         lastReportHadCrash = !noPreviousSession && (hasJava || hasNative || !clean)
+        lastReportHasCrashEvidence = hasJava || hasNative || hasAbort
 
         if (!Prefs.logUploadEnabled(ctx)) return "日志上传未启用"
         if (!hasJava && !hasNative && !hasAbort && logText.isBlank()) {
@@ -468,6 +469,11 @@ object LogUploader {
     /** 上次会话是否崩溃（reportPreviousSession 的副产物，供 App 判定安全等级） */
     @Volatile
     var lastReportHadCrash: Boolean = false
+        private set
+
+    /** 与未正常退出区分的落盘崩溃证据，不被稳定运行标记或上传开关抹掉。 */
+    @Volatile
+    var lastReportHasCrashEvidence: Boolean = false
         private set
 
     /** 活过 [STABLE_MS] 就认为「稳定」，由 DockOverlayService 打点 */

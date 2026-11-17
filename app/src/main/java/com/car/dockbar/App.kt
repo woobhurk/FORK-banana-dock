@@ -105,6 +105,9 @@ class App : Application() {
             Prefs.setVehicleTempWatcherEnabled(this, false)
             Logx.w("⚠ 上次会话崩溃过 → 已自动关闭「温度事件监听」实验开关")
         }
+        if (Prefs.suspendHvacEventsAfterCrash(this, LogUploader.lastReportHasCrashEvidence, streak)) {
+            Logx.w("⚠ 上次会话崩溃过 → 已关闭新增日常空调同步通道，保留轮询，需人工确认后再开启")
+        }
 
         // ★ 连续崩溃 2 次就关车控写入：setFunctionValue 是厂商私有 HAL，传错 value 时
         //   厂商 native 库可能直接 abort（SIGSEGV/SIGABRT，Java 层 runCatching / CrashHandler
