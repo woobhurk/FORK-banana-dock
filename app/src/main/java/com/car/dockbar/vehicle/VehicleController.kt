@@ -242,7 +242,7 @@ object VehicleController {
     }
 
     private var appCtx: Context? = null
-    private var watcherRegistered = false
+    // 所有监听均通过唯一订阅集合配置，避免温度监听吞掉后续新增通道。
     private var lastFanAuto = false
 
     // =====================================================================
@@ -292,35 +292,7 @@ object VehicleController {
         runCatching {
             val ok = VehicleBridge.init(ctx)
             if (ok) {
-                // ★ v1.4.53：事件监听分三态，别再让「温度监听」开关形同虚设。
-                //   旧逻辑：只有基础监听开着才会注册 → 用户打开「温度事件监听」毫无反应
-                //   （1.4.51/1.4.52 环境摘要里 `温度监听=开` 但日志一条回调都没有，就是这个原因）。
-                //
-                //   状态机：
-                //     · 基础监听开        → 注册全部通道（含温度，若温度开关也开）
-                //     · 基础监听关+温度开  → **只注册温度通道**（拿回 1.4.14 时代能读的温度）
-                //     · 两个都关          → 纯轮询
-                //
-                //   ⚠ 温度 0x10060100 是 Customize（float）通道，1.4.47 时代普通 App
-                //     收到它的回调会 native SIGSEGV（signal 11, fault addr 低位 0xbc0）。
-                //     但 19:20 的 SIGABRT 已证实是 dock-contrast 截屏线程，与监听无关。
-                //     崩了会被 App 的 streak>=1 熔断自动关回去，可以放心试。
-                val tempOnly = !Prefs.vehicleWatcherEnabled(ctx) && Prefs.vehicleTempWatcherEnabled(ctx)
-                if (tempOnly) {
-                    Logx.w("⚠ 仅注册「温度」事件监听（实验）：用 float 回调拿温度。" +
-                        "若开始闪退，下次启动会自动关回纯轮询。")
-                    runCatching { registerTempOnlyWatcher(ctx) }.onFailure {
-                        Logx.e("温度事件监听注册失败，退回轮询模式：${it.javaClass.simpleName} ${it.message}")
-                    }
-                } else if (Prefs.vehicleWatcherEnabled(ctx)) {
-                    // 事件监听：用动态代理注册到系统 HAL。已知部分车机在收到第一次回调时
-                    // 原生层会拖崩进程（runCatching 兜不住），故默认关闭，仅靠轮询刷新。
-                    runCatching { registerWatcher(ctx) }.onFailure {
-                        Logx.e("车控事件监听注册失败，退回轮询模式：${it.javaClass.simpleName} ${it.message}")
-                    }
-                } else {
-                    Logx.d("车控事件监听已关闭（PollOnly），仅靠定时刷新（排查闪退用）")
-                }
+                hal.execute { configureWatcher(ctx.applicationContext) }
                 refresh(ctx)
             } else {
                 update { current -> current.copy(connected = false, backend = "未连接") }
@@ -358,122 +330,181 @@ object VehicleController {
         }
     }
 
-    /**
-     * ★ v1.4.53：**只注册温度通道**的事件监听。
-     *
-     * 为什么单独一个函数：温度（0x10060100）在本车只有 Customize float 回调能给出真实值
-     * （int 通道 getFunctionValue 恒返回 0xff）。1.4.14 时代温度就是这么读到的：
-     * ```
-     * 14:46:28.122  D  车控事件 0x10060100 zone=1 value=24.0
-     * ```
-     * 后来为消崩把整个 watcher 关掉，温度一起丢了 → 一直显示 15.5℃。
-     *
-     * 现在只注册温度一个通道，把回调面缩到最小；崩了会被 App 的熔断自动关回去。
-     */
-    private fun registerTempOnlyWatcher(ctx: Context) {
-        val keys = listOf("temp_driver", "temp_passenger")
-        val funcs = keys.map { VehicleChannels.funcOf(ctx, it) }.filter { it > 0 }.distinct().toIntArray()
-        if (funcs.isEmpty()) return
-        val ok = VehicleBridge.registerWatcher(funcs) { fid, zone, value ->
-            main.post {
-                runCatching {
-                    Logx.d("温度事件 0x${fid.toString(16)} zone=$zone value=$value")
-                    val t = when (value) {
-                        is Float -> value
-                        is Number -> value.toFloat()
-                        else -> null
-                    } ?: return@runCatching
-                    val key = if (zone == VehicleChannels.zoneOf(ctx, "temp_passenger")) "temp_passenger"
-                    else "temp_driver"
-                    val norm = normalizeTempC(t)
-                    if (norm == null) {
-                        Logx.w("温度事件 ${"%.1f".format(t)}℃ 超出合理区间，忽略")
-                        return@runCatching
-                    }
-                    Logx.d("温度事件 ${if (key == "temp_driver") "主驾" else "副驾"} = ${"%.1f".format(norm)}℃")
-                    update(TEMPERATURE_GROUP) { current ->
-                        if (key == "temp_driver") current.copy(driverTempC = norm)
-                        else current.copy(passengerTempC = norm)
-                    }
-                }.onFailure { Logx.e("温度事件处理异常", it) }
+    // 临时验证会话不持久化；重启后仅恢复用户原有基础/温度监听。
+    @Volatile private var validationMode: HvacValidationMode? = null
+    @Volatile private var validationEpoch = 0L
+    @Volatile private var validationDeadlineAt = 0L
+    @Volatile private var watcherConfiguration = 0L
+    @Volatile private var watcherConnection = -1L
+    private val validationTimeout = Runnable { stopHvacValidation("验证窗口到期") }
+    private val validationPoll = object : Runnable {
+        override fun run() {
+            val c = appCtx ?: return
+            if (validationMode == null) return
+            if (activeValidationMode() == null) {
+                stopHvacValidation("验证窗口到期或车控已关闭")
+                return
             }
+            poll(c)
+            main.postDelayed(this, 250L)
         }
-        Logx.d("温度事件监听注册：func=${funcs.joinToString { "0x" + it.toString(16) }} → ${if (ok) "OK" else "FAIL"}")
     }
 
-    private fun registerWatcher(ctx: Context) {
-        if (watcherRegistered) return
-
-        // ★ 温度通道默认 **不注册进 watcher** —— 这是 CX11 上连续 native 崩溃的根因。
-        //
-        // 机制：0x10060100 在 ECarX 上是 Customize（float）通道。一旦把它放进监听数组，
-        // 厂商库就会用 `onCustomizeFunctionValueChanged(int, int, float)` 把温度推过来，
-        // 普通 App 进程收到这条回调 **立刻 SIGSEGV**（不是异常，Java 层拦不住）。
-        // 真车取证：11 次崩溃里 9 次的落盘日志最后一行都是 `车控事件 0x10060100 … value=21.0`。
-        //
-        // 我们虽然「没有主动调用 getCustomizeFunctionValue」，但注册 watcher 等于
-        // 把这条通道打开了 —— 这就是「已经移除 Customize 调用却还在崩」的原因。
-        val tempKeys = listOf("temp_driver", "temp_passenger")
-        val baseKeys = listOf(
-            "fan_manual", "fan_auto", "recirc", "air_direction", "ac",
-            "seat_vent", "seat_heat"
-        )
-        val keys = if (Prefs.vehicleTempWatcherEnabled(ctx)) baseKeys + tempKeys else baseKeys
-        if (Prefs.vehicleTempWatcherEnabled(ctx)) {
-            Logx.w("⚠ 温度事件监听已开启（实验开关）：若车机开始闪退请立即关掉")
-        }
-
-        // ★ v3.7：**回退** —— 不把 AUTO 总开关加进 watcher 列表。
-        //   理由：watcher 回调在部分车机「收到第一次回调时原生层会拖崩进程」
-        //   （见上方注释），取证功能绝不能给日常运行增加这个风险。
-        //   AUTO 总开关的取证改走「取证窗口内的轮询读」，见 evidenceOn()。
-        val funcs = keys.map { VehicleChannels.funcOf(ctx, it) }.filter { it > 0 }.toIntArray()
-        if (funcs.isEmpty()) return
-        watcherRegistered = VehicleBridge.registerWatcher(funcs) { fid, zone, value ->
-            main.post {
+    /** 只在用户明确开始验证后增加订阅和浮点读取，绝不自动发出车控写命令。 */
+    internal fun startHvacValidation(ctx: Context, mode: HvacValidationMode) {
+        onMain {
+            val c = ctx.applicationContext
+            appCtx = c
+            validationEpoch++
+            val epoch = validationEpoch
+            main.removeCallbacks(validationTimeout)
+            main.removeCallbacks(validationPoll)
+            validationMode = mode
+            validationDeadlineAt = SystemClock.elapsedRealtime() + 120_000L
+            HvacDiagnostics.begin(c, mode)
+            if (!Prefs.vehicleApiEnabled(c) || Prefs.simulate(c)) {
+                HvacDiagnostics.registration(VehicleBridge.backend.label, mode.keys, false, "车控API关闭或模拟模式，未访问车辆")
+                stopHvacValidation("无法开始：请启用真实车控API，退出模拟模式")
+                return@onMain
+            }
+            main.postDelayed(validationTimeout, 120_000L)
+            main.post(validationPoll)
+            hal.execute {
+                if (validationEpoch != epoch || activeValidationMode() == null) return@execute
+                var connection = VehicleBridge.connectionGeneration
                 runCatching {
-                    val c = appCtx ?: return@runCatching
-                    Logx.d("车控事件 0x${fid.toString(16)} zone=$zone value=$value")
-                    // ★★★ v3.7：循环通道的**专项取证** —— **默认关闭**，
-                    //   只在「抓循环取证」按钮打开的 2 分钟窗口内输出。
-                    //   watcher 是厂商 HAL 的跨进程回调：系统 Dock / 系统空调 App
-                    //   改了循环通道，HAL 会把变化推给我们（**包括我们**）。
-                    //   → 用户在系统里切循环，这里就能看到系统写进去之后的读回值。
-                    if (evidenceOn() && fid == VehicleChannels.FUNC_CIRCULATION) {
-                        val n = (value as? Number)?.toInt()
-                        val hex = if (n == null) "?" else "0x" + Integer.toHexString(n)
-                        Logx.d(
-                            "★ 取证：内外循环 系统侧变化 → value=$n ($hex) zone=$zone " +
-                            "判定=${if (n == null) "?" else recircTextOf(n)}"
-                        )
-                    }
-                    // 主驾/副驾温度共用 functionId 0x10060100，必须靠 zone 区分（1=主驾 4=副驾），
-                    // 否则两者的变化都会被错误处理成主驾温度（导致数值不对）。其余通道只看 functionId。
-                    val key = keys.firstOrNull { k ->
-                        VehicleChannels.funcOf(c, k) == fid && when (k) {
-                            "temp_driver", "temp_passenger" -> VehicleChannels.zoneOf(c, k) == zone
-                            else -> true
-                        }
-                    }
-                    if (key == null) {
-                        refresh(c)
+                    if (!VehicleBridge.isReady && !VehicleBridge.init(c)) {
+                        if (validationEpoch != epoch || connection != VehicleBridge.connectionGeneration || activeValidationMode() == null) return@runCatching
+                        HvacDiagnostics.registration(VehicleBridge.backend.label, mode.keys, false, "车控连接不可用")
                         return@runCatching
                     }
-                    // 温度走 onCustomizeFunctionValueChanged（Float），其余走 onFunctionValueChanged（Int）
-                    if (value is Float && (key == "temp_driver" || key == "temp_passenger")) {
-                        val t = normalizeTempC(value)
-                        update(TEMPERATURE_GROUP) { current ->
-                            if (key == "temp_driver") current.copy(driverTempC = t)
-                            else current.copy(passengerTempC = t)
-                        }
-                    } else {
-                        val v = (value as? Number)?.toInt() ?: return@runCatching
-                        applyRaw(key, v)
+                    connection = VehicleBridge.connectionGeneration
+                    if (validationEpoch != epoch || activeValidationMode() == null) return@runCatching
+                    configureWatcher(c)
+                    for (key in mode.keys) {
+                        if (validationEpoch != epoch || connection != VehicleBridge.connectionGeneration || activeValidationMode() == null) return@runCatching
+                        val fid = VehicleChannels.funcOf(c, key)
+                        val zone = VehicleChannels.zoneOf(c, key)
+                        val status = if (fid > 0) VehicleBridge.supportOf(fid, zone) else "未配置"
+                        if (validationEpoch != epoch || connection != VehicleBridge.connectionGeneration || activeValidationMode() == null) return@runCatching
+                        val values = if (fid > 0) VehicleBridge.supportedValues(fid, zone) else null
+                        if (validationEpoch != epoch || connection != VehicleBridge.connectionGeneration || activeValidationMode() == null) return@runCatching
+                        HvacDiagnostics.capability(key, status, values)
                     }
+                    if (validationEpoch == epoch && connection == VehicleBridge.connectionGeneration && activeValidationMode() != null) refresh(c)
                 }.onFailure {
-                    Logx.e("车控事件处理异常 0x${fid.toString(16)} zone=$zone value=$value", it)
+                    if (validationEpoch == epoch && connection == VehicleBridge.connectionGeneration && activeValidationMode() != null) {
+                        HvacDiagnostics.registration(VehicleBridge.backend.label, mode.keys, false,
+                            "${it.javaClass.simpleName}: ${it.message}")
+                    }
                 }
             }
+        }
+    }
+
+    internal fun stopHvacValidation(reason: String = "用户停止") {
+        onMain {
+            if (validationMode == null) return@onMain
+            validationMode = null
+            validationEpoch++
+            val epoch = validationEpoch
+            main.removeCallbacks(validationTimeout)
+            main.removeCallbacks(validationPoll)
+            HvacDiagnostics.finish(reason)
+            val c = appCtx ?: return@onMain
+            hal.execute {
+                if (validationEpoch != epoch) return@execute
+                val restored = runCatching { configureWatcher(c) }.getOrElse {
+                    Logx.e("HVAC_TEST stage=RESTORE_FAILED", it)
+                    false
+                }
+                if (validationEpoch == epoch) HvacDiagnostics.restoration(restored,
+                    if (restored) "基线订阅配置调用已完成，仍不等于收到事件" else "旧订阅卸载或基线恢复未确认，查看后端日志")
+            }
+        }
+    }
+
+    private fun watcherKeys(c: Context): List<String> = buildList {
+        if (Prefs.vehicleWatcherEnabled(c)) {
+            addAll(listOf("fan_manual", "fan_auto", "recirc", "air_direction", "ac",
+                "seat_vent", "seat_heat", "seat_vent_passenger", "seat_heat_passenger"))
+        }
+        if (Prefs.vehicleTempWatcherEnabled(c)) addAll(listOf("temp_driver", "temp_passenger"))
+        activeValidationMode()?.let { addAll(it.keys) }
+    }.distinct()
+
+    private fun activeValidationMode(): HvacValidationMode? {
+        val c = appCtx ?: return null
+        return validationMode?.takeIf { SystemClock.elapsedRealtime() < validationDeadlineAt &&
+            Prefs.vehicleApiEnabled(c) && !Prefs.simulate(c) }
+    }
+
+    /** 基础监听和验证监听共用唯一集合，包含共用功能号的不同区域。 */
+    private fun configureWatcher(c: Context): Boolean {
+        val keys = if (Prefs.vehicleApiEnabled(c) && !Prefs.simulate(c)) watcherKeys(c) else emptyList()
+        val funcs = keys.map { VehicleChannels.funcOf(c, it) }.filter { it > 0 }.distinct().toIntArray()
+        val configuration = ++watcherConfiguration
+        val epoch = validationEpoch
+        val connection = VehicleBridge.connectionGeneration
+        Logx.w("HVAC_TEST stage=SUBSCRIBE_BEGIN backend=${VehicleBridge.backend.label} keys=$keys funcs=${funcs.joinToString { "0x" + it.toString(16) }}")
+        val ok = VehicleBridge.registerWatcher(funcs) { fid, zone, value ->
+            val receivedAt = SystemClock.elapsedRealtime()
+            main.post {
+                if (configuration != watcherConfiguration || epoch != validationEpoch ||
+                    connection != VehicleBridge.connectionGeneration) return@post
+                if (validationMode != null && activeValidationMode() == null) return@post
+                runCatching {
+                    val key = keys.firstOrNull {
+                        VehicleChannels.funcOf(c, it) == fid && VehicleChannels.zoneOf(c, it) == zone
+                    }
+                    if (key == null) {
+                        if (HvacDiagnostics.active) Logx.w("HVAC_TEST stage=EVENT_IGNORED fid=0x${fid.toString(16)} zone=$zone raw=$value reason=未订阅或区域不匹配")
+                        return@runCatching
+                    }
+                    val before = state
+                    val temperature = key == "temp_driver" || key == "temp_passenger"
+                    val float = if (temperature && (value is Float || value is Double)) normalizeTempC((value as Number).toFloat()) else null
+                    val raw = if (value is Int || value is Short || value is Byte) (value as Number).toInt() else null
+                    var accepted = float != null || (raw != null && validRaw(c, key, raw))
+                    if (accepted) {
+                        update(groupMaskOf(key)) { current ->
+                            val next = if (float != null) {
+                                if (key == "temp_driver") current.copy(driverTempC = float) else current.copy(passengerTempC = float)
+                            } else withRaw(current, key, raw!!, c)
+                            if (next === current) accepted = false
+                            next
+                        }
+                    }
+                    HvacDiagnostics.event(key, value, accepted, before != state, zone,
+                        SystemClock.elapsedRealtime() - receivedAt)
+                    Logx.d("车控事件 key=$key fid=0x${fid.toString(16)} zone=$zone raw=$value accepted=$accepted changed=${before != state}")
+                    if (evidenceOn() && fid == VehicleChannels.FUNC_CIRCULATION && raw != null) {
+                        Logx.d("★ 取证：内外循环事件 zone=$zone raw=$raw 解析=${recircTextOf(raw)}")
+                    }
+                }.onFailure { Logx.e("车控事件处理异常 fid=0x${fid.toString(16)} zone=$zone", it) }
+            }
+        }
+        val currentConnection = connection == VehicleBridge.connectionGeneration
+        if (currentConnection) watcherConnection = connection
+        if (epoch == validationEpoch && currentConnection && activeValidationMode() != null) {
+            HvacDiagnostics.registration(VehicleBridge.backend.label, keys, ok,
+                if (ok) "订阅调用被接受，仍需实际回调验证" else "订阅失败，保留分组轮询；查看前面的厂商返回或异常")
+        }
+        Logx.d("车控选择性订阅 keys=$keys accepted=$ok")
+        return ok && currentConnection
+    }
+
+    private fun validRaw(c: Context, key: String, raw: Int): Boolean {
+        if (isSentinel(raw)) return false
+        val value = raw and 0xFF
+        return when (key) {
+            "fan_manual" -> value in 0..FAN_LEVEL_AUTO
+            "fan_auto" -> fanAutoLevelOf(raw) > 0 || boolOf(raw) != null
+            "ac", "recirc" -> boolOf(raw) != null
+            "air_direction" -> value in 1..7
+            "seat_vent", "seat_heat", "seat_vent_passenger", "seat_heat_passenger" -> value in 0..3
+            "temp_driver", "temp_passenger" -> tempFromRaw(key, raw, c) != null
+            else -> false
         }
     }
 
@@ -492,7 +523,9 @@ object VehicleController {
         val present: Int,
         val ignition: Int? = null,
         val indoor: Float? = null,
-        val ambient: Float? = null
+        val ambient: Float? = null,
+        val temperatures: FloatArray? = null,
+        val validationEpoch: Long = 0L
     )
 
     private val EMPTY_READING = GroupReading(IntArray(0), 0)
@@ -531,18 +564,27 @@ object VehicleController {
         if (!Prefs.vehicleApiEnabled(c)) return
         val group = refreshQueue.take() ?: return
         val revision = refreshRevisions[group.ordinal]
+        val epoch = validationEpoch
+        val connection = VehicleBridge.connectionGeneration
         val bit = 1 shl group.ordinal
         val forceProbe = forcedProbeGroups and bit != 0
         forcedProbeGroups = forcedProbeGroups and bit.inv()
         val queuedAt = SystemClock.elapsedRealtime()
         hal.execute {
             val startedAt = SystemClock.elapsedRealtime()
-            val reading = runCatching { readGroup(c, group, forceProbe) }
-                .onFailure { Logx.e("车控分组读取失败：$group", it) }.getOrNull()
+            val reading = if (epoch == validationEpoch && connection == VehicleBridge.connectionGeneration) {
+                runCatching {
+                    if (VehicleBridge.isReady && watcherConnection != connection) configureWatcher(c)
+                    if (epoch == validationEpoch && connection == VehicleBridge.connectionGeneration) {
+                        readGroup(c, group, forceProbe)
+                    } else null
+                }.onFailure { Logx.e("车控分组读取失败：$group", it) }.getOrNull()
+            } else null
             val ioMs = SystemClock.elapsedRealtime() - startedAt
             main.post {
                 try {
-                    if (reading != null) {
+                    if (reading != null && epoch == validationEpoch && connection == VehicleBridge.connectionGeneration &&
+                        (validationMode == null || activeValidationMode() != null)) {
                         applyReading(c, group, revision, reading, startedAt - queuedAt, ioMs)
                     }
                 } finally {
@@ -566,9 +608,30 @@ object VehicleController {
         if (!VehicleBridge.isReady) return EMPTY_READING
         val keys = refreshKeys[group.ordinal]
         val values = IntArray(keys.size)
+        val epoch = validationEpoch
+        val connection = VehicleBridge.connectionGeneration
+        val temperatures = if (group == VehicleRefreshGroup.TEMPERATURE &&
+            activeValidationMode() == HvacValidationMode.TEMPERATURE) FloatArray(keys.size) { Float.NaN } else null
         var present = 0
         for (i in keys.indices) {
+            if (epoch != validationEpoch || connection != VehicleBridge.connectionGeneration ||
+                !Prefs.vehicleApiEnabled(c) || Prefs.simulate(c) ||
+                (validationMode != null && activeValidationMode() == null)) break
             val key = keys[i]
+            val observedAt = SystemClock.elapsedRealtime()
+            if (temperatures != null && activeValidationMode() == HvacValidationMode.TEMPERATURE && epoch == validationEpoch) {
+                val fid = VehicleChannels.funcOf(c, key)
+                val zone = VehicleChannels.zoneOf(c, key)
+                Logx.d("HVAC_TEST stage=FLOAT_READ_BEGIN key=$key fid=0x${fid.toString(16)} zone=$zone")
+                val rawFloat = if (fid > 0) VehicleBridge.readTempProperty(fid, zone) else null
+                if (epoch != validationEpoch || connection != VehicleBridge.connectionGeneration || activeValidationMode() == null) break
+                val temp = rawFloat?.let(::normalizeTempC)
+                if (epoch == validationEpoch) HvacDiagnostics.read(key, rawFloat, temp != null, "FLOAT_READ zone=$zone", observedAt)
+                if (temp != null) {
+                    temperatures[i] = temp
+                    continue
+                }
+            }
             val raw = when (key) {
                 "defrost_front" -> readBare(FUNC_DEFROST_FRONT)
                 "defrost_rear" -> readBare(FUNC_DEFROST_REAR)
@@ -584,9 +647,14 @@ object VehicleController {
                 values[i] = raw
                 present = present or (1 shl i)
             }
+            if (epoch == validationEpoch && connection == VehicleBridge.connectionGeneration &&
+                (validationMode == null || activeValidationMode() != null)) {
+                HvacDiagnostics.read(key, raw, raw != null && validRaw(c, key, raw),
+                    "INT_READ zone=${VehicleChannels.zoneOf(c, key)}", observedAt)
+            }
         }
         if (group == VehicleRefreshGroup.CLIMATE && evidenceOn()) evidencePoll(c)
-        return GroupReading(values, present)
+        return GroupReading(values, present, temperatures = temperatures, validationEpoch = epoch)
     }
 
     private fun applyReading(
@@ -624,6 +692,14 @@ object VehicleController {
             if (connected && !simulated) {
                 val keys = refreshKeys[group.ordinal]
                 for (i in keys.indices) {
+                    val temperature = reading.temperatures?.getOrNull(i)
+                    if (temperature != null && temperature.isFinite() &&
+                        reading.validationEpoch == validationEpoch && activeValidationMode() == HvacValidationMode.TEMPERATURE
+                    ) {
+                        next = if (keys[i] == "temp_driver") next.copy(driverTempC = temperature)
+                            else next.copy(passengerTempC = temperature)
+                        continue
+                    }
                     if (reading.present and (1 shl i) == 0) continue
                     val raw = reading.values[i]
                     if (isSentinel(raw)) continue

@@ -1,5 +1,9 @@
 package com.car.dockbar.ui
 
+import android.app.AlertDialog
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.text.InputType
 import android.view.Gravity
 import android.widget.Button
@@ -21,6 +25,8 @@ import com.car.dockbar.util.PrivilegeProbe
 import com.car.dockbar.util.StartupPermissions
 import com.car.dockbar.vehicle.VehicleBridge
 import com.car.dockbar.vehicle.VehicleController
+import com.car.dockbar.vehicle.HvacDiagnostics
+import com.car.dockbar.vehicle.HvacValidationMode
 
 /**
  * 管理诊断、车控通道及运行日志设置。
@@ -73,6 +79,7 @@ internal class LogsSettingsPage(activity: MainActivity) :
         buildChannelRows()
         wireActions()
         addLogUploadSection()
+        addHvacValidationActions()
 
         Logx.addListener(logListener)
         Logx.snapshot().forEach(::appendLog)
@@ -295,6 +302,64 @@ internal class LogsSettingsPage(activity: MainActivity) :
     // =====================================================================
 
     private var refreshState: (() -> Unit)? = null
+
+    /** 验证会话属于 Controller，切页或销毁本页面不会停止车上操作取证。 */
+    private fun addHvacValidationActions() {
+        root.addView(smallBtn("原车空调接口验证（2分钟）") {
+            val modes = HvacValidationMode.values()
+            var selected = 0
+            AlertDialog.Builder(activity)
+                .setTitle("选择空调验证范围")
+                .setSingleChoiceItems(arrayOf(
+                    "风量（默认）：手动 / 自动风量",
+                    "常用空调：风量 + A/C / 循环 / 风向",
+                    "含温度（高风险）：额外调用浮点 Customize/native"
+                ), selected) { _, which -> selected = which }
+                .setPositiveButton("下一步") { _, _ ->
+                    val mode = modes[selected]
+                    AlertDialog.Builder(activity)
+                        .setTitle("开启2分钟验证：${mode.name}")
+                        .setMessage("仅临时启用所选通道的订阅、能力查询与主动读取，不开启写入或补权，不修改原有功能开关。\n" +
+                            "开启后可切页，在原车空调或 Dock 手动操作，再回来查看报告。命令接受不等于生效，无事件不等于权限拒绝。\n" +
+                            if (mode == HvacValidationMode.TEMPERATURE)
+                                "⚠ 温度模式会额外触发浮点 Customize/native 读取和事件，可能使进程直接闪退，Java 异常捕获无法保护。请只在停车安全时验证。"
+                            else "⚠ 厂商事件回调可能导致 native 闪退，请在停车安全时验证。本模式不新增温度浮点主动读取，原有监听（含用户原已开启的温度监听）保持。")
+                        .setPositiveButton("开始验证") { _, _ ->
+                            VehicleController.startHvacValidation(this, mode)
+                            toastOnce("空调验证已请求；请操作后查看报告")
+                        }
+                        .setNegativeButton("取消", null)
+                        .show()
+                }
+                .setNegativeButton("取消", null)
+                .show()
+        })
+        root.addView(smallBtn("停止空调接口验证") {
+            VehicleController.stopHvacValidation()
+            toastOnce("空调验证已停止，可查看报告")
+        })
+        root.addView(smallBtn("查看空调验证结果") { showHvacValidationReport() })
+    }
+
+    private fun showHvacValidationReport() {
+        val report = HvacDiagnostics.report()
+        val content = TextView(this).apply {
+            text = report
+            textSize = 13f
+            setTextIsSelectable(true)
+            setPadding(dp(16), dp(12), dp(16), dp(12))
+        }
+        AlertDialog.Builder(activity)
+            .setTitle("空调验证报告（HVAC_TEST）")
+            .setView(ScrollView(this).apply { addView(content) })
+            .setPositiveButton("关闭", null)
+            .setNeutralButton("复制报告") { _, _ ->
+                val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                clipboard.setPrimaryClip(ClipData.newPlainText("HVAC_TEST", report))
+                toastOnce("已复制空调验证报告")
+            }
+            .show()
+    }
 
     private fun addLogUploadSection() {
         val page = root

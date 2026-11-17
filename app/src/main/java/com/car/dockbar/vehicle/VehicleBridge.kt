@@ -23,12 +23,9 @@ import java.lang.reflect.Proxy
  * ICarFunction.registerFunctionValueWatcher(int[], IFunctionValueWatcher)
  * ICarFunction.unregisterFunctionValueWatcher(IFunctionValueWatcher)
  * ```
- * 而我们**多调用了 `getCustomizeFunctionValue` / `setCustomizeFunctionValue`（温度通道）**，
- * 一旦调用，约 1 秒后整个进程 native SIGSEGV（signal 11, si_code=2 SEGV_ACCERR，
- * fault addr 低位恒为 0xbc0）。
- *
- * **结论：Customize 系列接口在普通 App 上不可用（厂商库内部崩溃），已彻底移除。**
- * 温度改走 int 通道：`functionId + round(℃ / 0.2)`（与实测 128 → 25.6℃ 一致）。
+ * 历史记录中 Customize 调用曾伴随 native 崩溃，不能据此保证任何车型安全。
+ * 默认轮询仍读 int 通道；浮点主动读取仅供用户显式开启的短时验证，
+ * 并先检查实际后端支持状态。既有实验写入开关与写门禁保持不变。
  *
  * ## 接口签名（权威来源：oneOS_Dock.apk 的 SignalHelper2 反编译）
  * ```
@@ -104,6 +101,11 @@ object VehicleBridge {
     var backend: Backend = Backend.NONE
         private set
 
+    /** reset 与新会话建立时推进，供上层丢弃重连前排队或读取的结果。 */
+    @Volatile
+    internal var connectionGeneration: Long = 0L
+        private set
+
     /** 直接持有实例：ECarX 通道下是 ICarFunction，GlyCar 通道下是 IGlyCar */
     private var session: Any? = null
     /** ICar 实例（SensorBridge 等其它管理器从这里取；reset 时清空） */
@@ -141,13 +143,26 @@ object VehicleBridge {
     private var registerMethod: Method? = null
     private var unregisterMethod: Method? = null
     private var watcherIface: Class<*>? = null
-    private var watcherProxy: Any? = null
-    /** true = registerFunctionValueWatcher 第一个参数是 int[]（ECarX 唯一形态） */
+    @Volatile private var watcherProxy: Any? = null
+    /** 数组参数在 ECarX 前置、GlyCar 后置；仅 ECarX 兼容逐属性重载。 */
     private var registerArrayMode = false
+    private var watcherCallbackFirst = false
+    private var watcherTarget: Any? = null
+    private var watcherDetachMethod: Method? = null
+    private var watcherFunctions = intArrayOf()
+    @Volatile private var watcherRegistered = false
+    @Volatile private var watcherGeneration = 0L
+    @Volatile private var watcherCallback: ((Int, Int, Any?) -> Unit)? = null
 
-    /** 诊断：isFunctionSupported 反射句柄（懒探测一次） */
+    /** 能力方法只按实际会话的精确参数类型探测，重连时清空。 */
     private var supportMethod: Method? = null
     private var supportProbed = false
+    private var valuesMethod: Method? = null
+    private var valuesProbed = false
+    private var glySupportOwner: Class<*>? = null
+    private var glySupportCodes: Map<Int, String> = emptyMap()
+    private var glyStatusMethod: Method? = null
+    private var glyStatusProbed = false
 
     // =====================================================================
     // 初始化
@@ -161,6 +176,7 @@ object VehicleBridge {
         // ① 先试 ECarX
         if (tryEcarX(ctx)) {
             backend = Backend.ECARX
+            ++connectionGeneration
             Logx.d("车控通道就绪：${backend.label}")
             // ★ v1.4.70：**同时**把 GlyCar 实例也建起来（并存，不作 fallback）。
             //   本车 ECarX 的温度通道 isFunctionSupported=notavailable（只读），
@@ -178,12 +194,13 @@ object VehicleBridge {
         // ② 再试吉利 IGlyCar
         if (tryGlyCar(ctx)) {
             backend = Backend.GLYCAR
+            ++connectionGeneration
             Logx.d("车控通道就绪：${backend.label}")
             dumpProbe(ctx)
             return true
         }
 
-        backend = Backend.NONE
+        reset()
         Logx.e("车控通道不可用：未找到 $CAR_CLASS_ECARX 或 $CAR_CLASS_GLYCAR")
         return false
     }
@@ -236,7 +253,7 @@ object VehicleBridge {
             val carClass = loadClass(CAR_CLASS_GLYCAR, ctx) ?: return null
             val car = carClass.getMethod(Sec.m(Sec.M_CREATE), Context::class.java).invoke(null, ctx) ?: return null
             glyCarObj = car
-            glyFloatRead = pickMethod(car.javaClass, Sec.m(Sec.M_GETFLOATPROPERTY), intArrayOf(2))
+            glyFloatRead = findCustomizeMethod(car.javaClass, Sec.m(Sec.M_GETFLOATPROPERTY), 2)
             glyFloatWrite = pickMethod(car.javaClass, Sec.m(Sec.M_SETFLOATPROPERTY), intArrayOf(3))
                 ?: pickMethod(car.javaClass, Sec.m(Sec.M_SETFLOATPROPERTY), intArrayOf(2))
             Logx.d(
@@ -260,7 +277,7 @@ object VehicleBridge {
             // ★ v3.13.15：GlyCar 通道没有 setFunctionValue 重载 → 无 area 旁路不可用
             readMethodNoArea = null
             writeMethodNoArea = null
-            bindWatcher(car)
+            bindWatcher(car, glyCar = true)
             readMethod != null
         } catch (t: Throwable) {
             Logx.d("车控通道 B 不可用：${t.javaClass.simpleName} ${t.message}")
@@ -282,9 +299,9 @@ object VehicleBridge {
      * @return true = 调用成功
      */
     fun writeTempViaGlyCar(functionId: Int, areaId: Int, value: Float): Boolean {
-        val obj = glyCarObj ?: return false
-        val m = glyFloatWrite ?: return false
-        return try {
+        val obj = glyCarObj ?: return observeWrite(functionId, areaId, value, false, "GlyCar:无会话")
+        val m = glyFloatWrite ?: return observeWrite(functionId, areaId, value, false, "GlyCar:无浮点写方法")
+        val accepted = try {
             val r = when (m.parameterTypes.size) {
                 3 -> m.invoke(obj, functionId, areaId, value)
                 2 -> m.invoke(obj, functionId, value)
@@ -297,6 +314,7 @@ object VehicleBridge {
             Logx.e("车控通道 B 温度写异常：${t.javaClass.simpleName}: ${t.message}")
             false
         }
+        return observeWrite(functionId, areaId, value, accepted, "GlyCar:${m.name}")
     }
 
     /** ★★ v1.4.70：GlyCar 浮点属性读温度 */
@@ -304,24 +322,19 @@ object VehicleBridge {
         val obj = glyCarObj ?: return null
         val m = glyFloatRead ?: return null
         return try {
-            val v = m.invoke(obj, functionId, areaId) as? Float
+            val raw = m.invoke(obj, functionId, areaId)
+            if (HvacDiagnostics.active) Logx.d("HVAC_TEST FLOAT_RAW source=GlyCar fid=0x${functionId.toString(16)} zone=$areaId raw=$raw type=${raw?.javaClass?.simpleName ?: "null"}")
+            val v = (raw as? Number)?.toFloat()
             if (v != null) Logx.d("车控通道 B 温度读：propertyId=0x${Integer.toHexString(functionId)} areaId=$areaId → $v℃")
             v
         } catch (t: Throwable) {
             Logx.e("车控通道 B 温度读异常：${t.javaClass.simpleName}: ${t.message}")
+            if (HvacDiagnostics.active) Logx.d("HVAC_TEST FLOAT_RAW source=GlyCar fid=0x${functionId.toString(16)} zone=$areaId reason=READ_EXCEPTION error=${unwrapInvocation(t).javaClass.simpleName}:${unwrapInvocation(t).message}")
             null
         }
     }
 
-    /**
-     * 反射探测 ECarX ICarFunction 的方法签名。
-     *
-     * ⚠️ **刻意只探测「经过验证可用」的方法**：
-     *   `getFunctionValue` / `setFunctionValue` / watcher。
-     *   不再探测 `getCustomizeFunctionValue` / `setCustomizeFunctionValue` /
-     *   `getFloatProperty` / `getSupportedFunctionValue` / `isFunctionSupported` ——
-     *   前者会直接导致 native 崩溃，后者只是减少无谓的反射面。
-     */
+    /** 初始化仅绑定原有整型与选择性监听；能力与 Customize 读取仍按需探测。 */
     private fun probeEcarXMethods() {
         val c = session?.javaClass ?: return
 
@@ -330,7 +343,7 @@ object VehicleBridge {
             it.name == Sec.m(Sec.M_GETFUNCTIONVALUE) && it.parameterTypes.size == 2 &&
                     it.parameterTypes[0] == Int::class.javaPrimitiveType &&
                     it.parameterTypes[1] == Int::class.javaPrimitiveType
-        } ?: pickMethod(c, Sec.m(Sec.M_GETFUNCTIONVALUE), intArrayOf(2))
+        }?.let(::invocationMethod) ?: pickMethod(c, Sec.m(Sec.M_GETFUNCTIONVALUE), intArrayOf(2))
 
         // 写：优先 3 参 (functionId, areaId, value)
         writeMethod = pickMethod(c, Sec.m(Sec.M_SETFUNCTIONVALUE), intArrayOf(3))
@@ -339,12 +352,12 @@ object VehicleBridge {
         // ★ v3.13.15：**无 area 重载旁路**（文档口径）——只给内外循环用，不影响其它通道
         readMethodNoArea = c.methods.firstOrNull {
             it.name == Sec.m(Sec.M_GETFUNCTIONVALUE) && it.parameterTypes.size == 1
-        } ?: pickMethod(c, Sec.m(Sec.M_GETFUNCTIONVALUE), intArrayOf(1))
+        }?.let(::invocationMethod) ?: pickMethod(c, Sec.m(Sec.M_GETFUNCTIONVALUE), intArrayOf(1))
         writeMethodNoArea = c.methods.firstOrNull {
             it.name == Sec.m(Sec.M_SETFUNCTIONVALUE) && it.parameterTypes.size == 2 &&
                     it.parameterTypes[0] == Int::class.javaPrimitiveType &&
                     it.parameterTypes[1] == Int::class.javaPrimitiveType
-        } ?: pickMethod(c, Sec.m(Sec.M_SETFUNCTIONVALUE), intArrayOf(2))
+        }?.let(::invocationMethod) ?: pickMethod(c, Sec.m(Sec.M_SETFUNCTIONVALUE), intArrayOf(2))
         Logx.d(
             "车控通道 A 无 area 重载（文档口径）：" +
             "读=${readMethodNoArea != null} 写=${writeMethodNoArea != null}"
@@ -353,44 +366,69 @@ object VehicleBridge {
         bindWatcher(session!!)
     }
 
-    /**
-     * 绑定事件监听。
-     * ⚠️ ECarX 的 ICarFunction 只有 `registerFunctionValueWatcher(int[], watcher)` 一种形态，
-     *    必须优先选它；按 `c.methods` 遍历顺序取第一个可能拿到不存在的重载。
-     */
-    private fun bindWatcher(target: Any) {
-        val iface = runCatching { Class.forName(IFACE_WATCHER_ECARX) }.getOrNull()
-            ?: runCatching { Class.forName(IFACE_WATCHER_PRO) }.getOrNull() ?: return
-        watcherIface = iface
+    /** 从实际方法参数取得接口类型，避免不同 ClassLoader 下同名接口不兼容。 */
+    private fun bindWatcher(target: Any, glyCar: Boolean = false) {
+        registerMethod = null
+        unregisterMethod = null
+        watcherIface = null
+        registerArrayMode = false
+        watcherCallbackFirst = glyCar
         val c = target.javaClass
-
-        var found: Method? = null
-        var arrayMode = false
-        // ① 优先数组模式
-        for (m in c.methods) {
-            if (m.name != Sec.m(Sec.M_REGISTERFUNCTIONVALUEWATCHER)) continue
-            val p = m.parameterTypes
-            if (p.size == 2 && p[0] == IntArray::class.java && p[1] == iface) {
-                found = m; arrayMode = true; break
+        val registerName = if (glyCar) "registerSingleCarEventCallback"
+            else Sec.m(Sec.M_REGISTERFUNCTIONVALUEWATCHER)
+        val unregisterNames = if (glyCar) listOf("unregisterSingleCarEventCallback")
+            else listOf(Sec.m(Sec.M_UNREGISTERFUNCTIONVALUEWATCHER), Sec.m(Sec.M_UNREGISTER))
+        val candidates = c.methods.filter { method ->
+            if (method.name != registerName || !hasAcceptanceResult(method)) return@filter false
+            val p = method.parameterTypes
+            if (p.size != 2) return@filter false
+            val iface = p[if (glyCar) 0 else 1]
+            val ids = p[if (glyCar) 1 else 0]
+            val ifaceMatches = iface.isInterface && if (glyCar) {
+                iface.name == "com.geely.os.car.IGlyCarEventCallBack"
+            } else {
+                iface.name == IFACE_WATCHER_ECARX || iface.name == IFACE_WATCHER_PRO
             }
-        }
-        // ② 回退：逐函数模式
-        if (found == null) {
-            for (m in c.methods) {
-                if (m.name != Sec.m(Sec.M_REGISTERFUNCTIONVALUEWATCHER)) continue
-                val p = m.parameterTypes
-                if (p.size == 2 &&
-                    (p[0] == Int::class.javaPrimitiveType || p[0] == Integer::class.java) &&
-                    p[1] == iface
-                ) {
-                    found = m; arrayMode = false; break
+            ifaceMatches && (ids == IntArray::class.java || (!glyCar && isIntType(ids)))
+        }.sortedBy { if (it.parameterTypes[if (glyCar) 1 else 0] == IntArray::class.java) 0 else 1 }
+        for (method in candidates) {
+            val iface = method.parameterTypes[if (glyCar) 0 else 1]
+            val detach = unregisterNames.firstNotNullOfOrNull { name ->
+                c.methods.firstOrNull {
+                    it.name == name && it.parameterTypes.contentEquals(arrayOf(iface)) && hasAcceptanceResult(it)
                 }
-            }
+            } ?: continue
+            val callableRegister = invocationMethod(method) ?: continue
+            val callableDetach = invocationMethod(detach) ?: continue
+            registerMethod = callableRegister
+            unregisterMethod = callableDetach
+            watcherIface = iface
+            registerArrayMode = method.parameterTypes[if (glyCar) 1 else 0] == IntArray::class.java
+            return
         }
-        registerMethod = found
-        registerArrayMode = arrayMode
-        unregisterMethod = pickMethod(c, Sec.m(Sec.M_UNREGISTERFUNCTIONVALUEWATCHER), intArrayOf(1))
-            ?: pickMethod(c, Sec.m(Sec.M_UNREGISTER), intArrayOf(1))
+        Logx.w("事件监听不可用：${c.name} 缺少精确的选择性注册/卸载配对，未回退全量监听")
+    }
+
+    private fun isIntType(type: Class<*>): Boolean =
+        type == Int::class.javaPrimitiveType || type == Integer::class.java
+
+    private fun hasAcceptanceResult(method: Method): Boolean =
+        method.returnType == Void.TYPE || method.returnType == Boolean::class.javaPrimitiveType ||
+            method.returnType == java.lang.Boolean::class.java
+
+    /** void 只表示调用完成；Boolean 必须明确为 true，不推断底层事件已经到达。 */
+    private fun invokeAccepted(method: Method, target: Any, vararg args: Any?): Boolean {
+        val result = method.invoke(target, *args)
+        return method.returnType == Void.TYPE || result == true
+    }
+
+    /** GlyCarImpl 可为包私有类；公开 API 的实现方法仍需解除实现类访问限制。 */
+    private fun invocationMethod(method: Method): Method? = try {
+        method.isAccessible = true
+        method
+    } catch (t: Throwable) {
+        Logx.w("反射方法不可访问：${method.declaringClass.name}.${method.name} ${t.javaClass.simpleName}")
+        null
     }
 
     /** 在类上找一个参数个数匹配的方法 */
@@ -399,7 +437,7 @@ object VehicleBridge {
         if (candidates.isEmpty()) {
             val viaInterfaces = c.interfaces.flatMap { it.methods.toList() }
                 .filter { it.name == name && it.parameterTypes.size in arities }
-            return viaInterfaces.firstOrNull()
+            return viaInterfaces.firstOrNull()?.let(::invocationMethod)
         }
         return candidates.minByOrNull { m ->
             val types = m.parameterTypes
@@ -413,7 +451,7 @@ object VehicleBridge {
                 }
             }
             score
-        }
+        }?.let(::invocationMethod)
     }
 
     // =====================================================================
@@ -454,7 +492,7 @@ object VehicleBridge {
     fun writeIntNoArea(functionId: Int, value: Int): Boolean? {
         val m = writeMethodNoArea ?: return null
         val s = session ?: return null
-        return runCatching {
+        val accepted = runCatching {
             val r = m.invoke(s, functionId, value)
             when (r) {
                 null -> true
@@ -465,6 +503,7 @@ object VehicleBridge {
             Logx.d("写 0x${functionId.toString(16)}（无area）失败：${it.message}")
             false
         }
+        return observeWrite(functionId, Int.MIN_VALUE, value, accepted, "$backend:${m.name}:无area")
     }
 
     /** 文档口径读取：`getFunctionValue(functionId)`（不传 area）。null = 不可用或读不到 */
@@ -494,17 +533,15 @@ object VehicleBridge {
     fun writeInt(functionId: Int, zone: Int, value: Int): Boolean {
         val m = writeMethod ?: run {
             Logx.e("HVAC_WRITE 写失败：当前通道没有可用的写方法（后端=${backend}），写 0x${functionId.toString(16)} zone=$zone value=$value")
-            return false
+            return observeWrite(functionId, zone, value, false, "$backend:无整型写方法")
         }
         val s = session ?: run {
             Logx.e("HVAC_WRITE 写失败：会话未建立（后端=${backend}）")
-            return false
+            return observeWrite(functionId, zone, value, false, "$backend:无会话")
         }
-        // 诊断：写前先探测 HAL 对该 functionId/zone 的支持状态。
-        // 返回 "notavailable" 即 HAL 不暴露该能力（普通 App 无权限 / 硬件不支持）→ 写必定无效，
-        // 这是判定「温度/AC 写入被拦截」的决定性证据。
+        // 支持状态只是独立能力观测；不可用/异常不能单独证明权限拒绝或命令实际效果。
         val support = probeSupport(functionId, zone)
-        return runCatching {
+        val accepted = runCatching {
             val args: Array<Any?> = when (m.parameterTypes.size) {
                 2 -> arrayOf(functionId, value)          // ★ 2 参 = (functionId, value)
                 3 -> arrayOf(functionId, zone, value)
@@ -548,6 +585,13 @@ object VehicleBridge {
             )
             false
         }
+        return observeWrite(functionId, zone, value, accepted, "$backend:${m.name}")
+    }
+
+    /** 只记录本次命令的接受结果；不追加读取、写入或权限操作。 */
+    private fun observeWrite(functionId: Int, zone: Int, value: Number, accepted: Boolean, source: String): Boolean {
+        HvacDiagnostics.write(functionId, zone, value, accepted, source)
+        return accepted
     }
 
     /**
@@ -575,57 +619,166 @@ object VehicleBridge {
         return false
     }
 
-    /**
-     * 诊断辅助：写前探测 isFunctionSupported，捕获 HAL 对该 functionId/zone 的支持状态。
-     * 仅在未探测过时反射找一次方法；任何异常都吞掉，绝不影响主写路径。
-     */
-    private fun probeSupport(functionId: Int, zone: Int): String {
-        if (!supportProbed) {
-            supportProbed = true
-            supportMethod = session?.javaClass?.methods?.firstOrNull { m ->
-                m.name == Sec.m(Sec.M_ISFUNCTIONSUPPORTED) && m.parameterTypes.size in 1..2 &&
-                    m.parameterTypes.all { it == Int::class.javaPrimitiveType || it == Integer::class.java }
+    /** 优先匹配带 zone 的精确重载，不能误拿同名浮点/回调参数方法。 */
+    private fun findCapabilityMethod(target: Any, names: List<String>, values: Boolean = false): Method? {
+        for (name in names) {
+            val candidates = target.javaClass.methods.filter { m ->
+                m.name == name && m.parameterTypes.size in 1..2 && m.parameterTypes.all(::isIntType) &&
+                    (!values || m.returnType == IntArray::class.java)
             }
-            if (supportMethod == null) {
-                Logx.d("HVAC_WRITE 诊断：当前后端无「通道支持探测」方法，跳过支持探测")
+            for (candidate in candidates.sortedByDescending { it.parameterTypes.size }) {
+                invocationMethod(candidate)?.let { return it }
             }
         }
-        val sm = supportMethod ?: return "未探测"
-        val s = session ?: return "无会话"
-        return runCatching {
-            val args = if (sm.parameterTypes.size == 1) arrayOf<Any?>(functionId)
-            else arrayOf<Any?>(functionId, zone)
-            val r = sm.invoke(s, *coerce(sm, args))
-            r?.toString() ?: "null"
-        }.getOrElse { "探测异常:${it.javaClass.simpleName}:${it.message}" }
+        return null
     }
 
-    /**
-     * ★ v1.4.48：新增未验证信号的写入前置探测（public）。
-     * 真车日志实锤：对 HAL 不支持的 (funcId, zone, value) 调 setFunctionValue 会
-     * **直接 native abort**（用户闪退 2-3 次正是连续触发了这一点）。
-     * 返回 "active" 才允许写入；其它（not_available / 未探测 / 异常）一律跳过。
-     */
+    private fun findSupportMethod(target: Any): Method? = findCapabilityMethod(target,
+        if (target === glyCarObj || (target === session && backend == Backend.GLYCAR))
+            listOf("getSupportStatus", Sec.m(Sec.M_ISFUNCTIONSUPPORTED))
+        else listOf(Sec.m(Sec.M_ISFUNCTIONSUPPORTED), "getSupportStatus"))
+
+    private fun normalizeSupportName(name: String): String = when (
+        name.lowercase(java.util.Locale.ROOT).replace("_", "").replace("-", "")
+    ) {
+        "active", "available" -> "available"
+        "notactive", "inactive" -> "notactive"
+        "notavailable", "unavailable" -> "notavailable"
+        "error" -> "error"
+        else -> "未探测"
+    }
+
+    private fun normalizeSupport(target: Any, result: Any?): String = when (result) {
+        is Enum<*> -> normalizeSupportName(result.name)
+        is String -> normalizeSupportName(result)
+        is Boolean -> if (result) "available" else "notavailable"
+        is Int -> {
+            if (glySupportOwner !== target.javaClass) {
+                glySupportOwner = target.javaClass
+                glySupportCodes = try {
+                    // 必须由被调用对象的加载器取得真实常量，不能猜 enum ordinal 或整数编码。
+                    val status = Class.forName("com.geely.os.car.GlySupportStatus", false, target.javaClass.classLoader)
+                    val codes = mutableMapOf<Int, String>()
+                    for (field in status.fields) {
+                        val name = normalizeSupportName(field.name)
+                        if (java.lang.reflect.Modifier.isStatic(field.modifiers) && isIntType(field.type) && name != "未探测") {
+                            val code = (field.get(null) as Number).toInt()
+                            val previous = codes[code]
+                            codes[code] = if (previous == null || previous == name) name else "未探测"
+                        }
+                    }
+                    codes
+                } catch (t: Throwable) {
+                    Logx.d("能力整数状态常量不可用：${unwrapInvocation(t).javaClass.simpleName}")
+                    emptyMap()
+                }
+            }
+            glySupportCodes[result] ?: "未探测".also {
+                Logx.d("能力状态未知：${target.javaClass.name} raw=$result，未推断为 available")
+            }
+        }
+        else -> "未探测"
+    }
+
+    private fun querySupport(target: Any, method: Method?, functionId: Int, zone: Int): String {
+        method ?: return "未探测"
+        return try {
+            val result = if (method.parameterTypes.size == 2) method.invoke(target, functionId, zone)
+                else method.invoke(target, functionId)
+            val status = normalizeSupport(target, result)
+            if (HvacDiagnostics.active) Logx.d("HVAC_TEST FLOAT_SUPPORT source=${target.javaClass.name}.${method.name} fid=0x${functionId.toString(16)} zone=$zone raw=$result status=$status")
+            status
+        } catch (t: Throwable) {
+            val cause = unwrapInvocation(t)
+            Logx.d("能力查询失败：${method.name} fid=0x${functionId.toString(16)} zone=$zone ${cause.javaClass.simpleName}:${cause.message}")
+            "error"
+        }
+    }
+
+    private fun probeSupport(functionId: Int, zone: Int): String {
+        val target = session ?: return "未探测"
+        if (!supportProbed) {
+            supportMethod = findSupportMethod(target)
+            supportProbed = true
+            if (supportMethod == null) Logx.d("能力查询不可用：${target.javaClass.name} 无精确支持状态方法")
+        }
+        return querySupport(target, supportMethod, functionId, zone)
+    }
+
+    /** 规范化能力状态；available 只表示接口能力，不等于读写权限或车辆效果已验证。 */
     fun supportOf(functionId: Int, zone: Int): String = probeSupport(functionId, zone)
 
-    /**
-     * 浮点温度通道 —— **已废弃**。
-     *
-     * `getCustomizeFunctionValue` 在普通 App 上会触发厂商库 native 崩溃（见类注释），
-     * 且实测空调关闭时返回伪值 5.0。温度一律走 int 通道（[readInt] + tempFromRaw）。
-     */
+    fun supportedValues(functionId: Int, zone: Int): IntArray? {
+        val target = session ?: return null
+        if (!valuesProbed) {
+            valuesMethod = findCapabilityMethod(target,
+                if (backend == Backend.GLYCAR) listOf("getSupportedValueStatus", "getSupportedFunctionValue")
+                else listOf("getSupportedFunctionValue", "getSupportedValueStatus"), values = true)
+            valuesProbed = true
+            if (valuesMethod == null) Logx.d("值域查询不可用：${target.javaClass.name} 无精确整数数组方法")
+        }
+        val method = valuesMethod ?: return null
+        return try {
+            val result = if (method.parameterTypes.size == 2) method.invoke(target, functionId, zone)
+                else method.invoke(target, functionId)
+            result as? IntArray
+        } catch (t: Throwable) {
+            val cause = unwrapInvocation(t)
+            Logx.d("值域查询失败：${method.name} fid=0x${functionId.toString(16)} zone=$zone ${cause.javaClass.simpleName}:${cause.message}")
+            null
+        }
+    }
+
+    /** 默认刷新仍不启用浮点；显式验证调用 readTempProperty，不借此改变旧调用方策略。 */
     val hasFloat: Boolean get() = false
 
-    /** 浮点通道描述（诊断用） */
-    val floatChannelName: String get() = "无（Customize 通道已禁用，温度走 int 通道 ×0.2）"
+    /** 浮点读取只供显式短时验证；反射句柄存在不代表真车可读取。 */
+    val floatChannelName: String get() = "默认整型；显式验证可试 GlyCar/Customize 浮点读取"
 
-    /** 浮点写入通道描述（诊断用） */
-    val floatWriteChannelName: String get() = "无（温度走车控整型通道 + ×0.2 编码）"
+    /** 保留原有写入选择与门禁，不因读取验证而启用新的写入路径。 */
+    val floatWriteChannelName: String get() = "保留原有温度写入路径与实验开关"
 
-    /** 兼容旧调用名：现在恒返回 null（温度走 int 通道） */
+    /** 仅显式验证入口使用；能力未知、无效温度或读取失败均交由调用方回落整数读取。 */
     fun readTempProperty(functionId: Int, zone: Int): Float? {
-        Logx.d("温度读取已改走 int 通道（Customize 通道因 native 崩溃被禁用）")
-        return null
+        val gly = glyCarObj
+        if (gly != null && glyFloatRead != null) {
+            if (!glyStatusProbed) {
+                glyStatusMethod = findSupportMethod(gly)
+                glyStatusProbed = true
+            }
+            val status = querySupport(gly, glyStatusMethod, functionId, zone)
+            if (HvacDiagnostics.active && status != "available") Logx.d("HVAC_TEST FLOAT_SKIP source=GlyCar fid=0x${functionId.toString(16)} zone=$zone reason=SUPPORT_STATUS status=$status")
+            if (status == "available") {
+                val value = readTempViaGlyCar(functionId, zone)
+                if (HvacDiagnostics.active) Logx.d("HVAC_TEST FLOAT_CHECK source=GlyCar fid=0x${functionId.toString(16)} zone=$zone raw=$value reason=${floatReadReason(value)}")
+                value?.takeIf { it.isFinite() && it in 10f..40f }?.let { return it }
+            }
+        } else if (HvacDiagnostics.active) {
+            Logx.d("HVAC_TEST FLOAT_SKIP source=GlyCar fid=0x${functionId.toString(16)} zone=$zone reason=${if (gly == null) "NO_SESSION" else "NO_FLOAT_METHOD"}")
+        }
+        // GlyCar 已尝试过时不重复调用同一门面；ECarX Customize 仍须独立支持状态通过。
+        val target = session ?: run {
+            if (HvacDiagnostics.active) Logx.d("HVAC_TEST FLOAT_SKIP source=Customize fid=0x${functionId.toString(16)} zone=$zone reason=NO_SESSION")
+            return null
+        }
+        if (target === gly || backend == Backend.GLYCAR) return null
+        val status = supportOf(functionId, zone)
+        if (status != "available") {
+            if (HvacDiagnostics.active) Logx.d("HVAC_TEST FLOAT_SKIP source=Customize fid=0x${functionId.toString(16)} zone=$zone reason=SUPPORT_STATUS status=$status")
+            return null
+        }
+        val value = readTempCustomize(functionId, zone)
+        if (HvacDiagnostics.active) Logx.d("HVAC_TEST FLOAT_CHECK source=Customize fid=0x${functionId.toString(16)} zone=$zone raw=$value reason=${floatReadReason(value)}")
+        return value?.takeIf { it.isFinite() && it in 10f..40f }
+    }
+
+    /** 仅用于活动验证日志，不改变温度有效域或默认采样行为。 */
+    private fun floatReadReason(value: Float?): String = when {
+        value == null -> "NO_VALUE"
+        !value.isFinite() -> "NON_FINITE"
+        value == VALUE_ERROR.toFloat() || value == VALUE_NONE.toFloat() || value == VALUE_UNKNOWN.toFloat() -> "SENTINEL"
+        value !in 10f..40f -> "OUT_OF_RANGE"
+        else -> "VALID"
     }
 
     /** 兼容旧调用名：现在恒失败（温度写走 setFunctionValue + ×0.2 编码） */
@@ -696,15 +849,15 @@ object VehicleBridge {
      *   因此默认关闭，由用户在主界面显式开启。
      */
     fun writeTempCustomize(functionId: Int, zone: Int, value: Float): Boolean {
-        if (!customizeWriteEnabled) return false
-        val c = session?.javaClass ?: return false
+        if (!customizeWriteEnabled) return observeWrite(functionId, zone, value, false, "Customize:实验写入关闭")
+        val c = session?.javaClass ?: return observeWrite(functionId, zone, value, false, "Customize:无会话")
         val m = (customizeWriteMethod ?: findCustomizeMethod(c, Sec.m(Sec.M_SETCUSTOMIZEFUNCTIONVALUE), 3)
             ?.also { customizeWriteMethod = it })
             ?: run {
                 Logx.d("温度 Customize 写：厂商库没有对应的浮点写入方法")
-                return false
+                return observeWrite(functionId, zone, value, false, "Customize:无浮点写方法")
             }
-        return try {
+        val accepted = try {
             val arg = if (m.parameterTypes[2] == Float::class.javaPrimitiveType) value else value.toDouble()
             val r = m.invoke(session, functionId, zone, arg)
             val ok = r == null || r == true
@@ -717,6 +870,7 @@ object VehicleBridge {
             Logx.e("温度 Customize 写异常：${t.javaClass.simpleName}: ${t.message}")
             false
         }
+        return observeWrite(functionId, zone, value, accepted, "$backend:${m.name}")
     }
 
     /**
@@ -727,13 +881,19 @@ object VehicleBridge {
     fun readTempCustomize(functionId: Int, zone: Int): Float? {
         val c = session?.javaClass ?: return null
         val m = (customizeReadMethod ?: findCustomizeMethod(c, Sec.m(Sec.M_GETCUSTOMIZEFUNCTIONVALUE), 2)
-            ?.also { customizeReadMethod = it }) ?: return null
+            ?.also { customizeReadMethod = it }) ?: run {
+                if (HvacDiagnostics.active) Logx.d("HVAC_TEST FLOAT_SKIP source=Customize fid=0x${functionId.toString(16)} zone=$zone reason=NO_FLOAT_METHOD")
+                return null
+            }
         return try {
-            val v = m.invoke(session, functionId, zone) as? Float
+            val raw = m.invoke(session, functionId, zone)
+            if (HvacDiagnostics.active) Logx.d("HVAC_TEST FLOAT_RAW source=Customize fid=0x${functionId.toString(16)} zone=$zone raw=$raw type=${raw?.javaClass?.simpleName ?: "null"}")
+            val v = (raw as? Number)?.toFloat()
             if (v != null) Logx.d("温度 Customize 读：0x${functionId.toString(16)} zone=0x${zone.toString(16)} → $v℃")
             v
         } catch (t: Throwable) {
             Logx.e("温度 Customize 读异常：${t.javaClass.simpleName}: ${t.message}")
+            if (HvacDiagnostics.active) Logx.d("HVAC_TEST FLOAT_RAW source=Customize fid=0x${functionId.toString(16)} zone=$zone reason=READ_EXCEPTION error=${unwrapInvocation(t).javaClass.simpleName}:${unwrapInvocation(t).message}")
             null
         }
     }
@@ -742,11 +902,15 @@ object VehicleBridge {
     private fun findCustomizeMethod(c: Class<*>, name: String, argCount: Int): Method? =
         c.methods.firstOrNull { m ->
             m.name == name && m.parameterTypes.size == argCount &&
-                m.parameterTypes[0] == Int::class.javaPrimitiveType &&
-                (argCount == 2 || m.parameterTypes[1] == Int::class.javaPrimitiveType) &&
-                (argCount == 2 || m.parameterTypes[2] == Float::class.javaPrimitiveType ||
-                    m.parameterTypes[2] == Double::class.javaPrimitiveType)
-        }
+                isIntType(m.parameterTypes[0]) && isIntType(m.parameterTypes[1]) &&
+                (if (argCount == 2) {
+                    m.returnType == Float::class.javaPrimitiveType || m.returnType == java.lang.Float::class.java ||
+                        m.returnType == Double::class.javaPrimitiveType || m.returnType == java.lang.Double::class.java
+                } else {
+                    m.parameterTypes[2] == Float::class.javaPrimitiveType ||
+                        m.parameterTypes[2] == Double::class.javaPrimitiveType
+                })
+        }?.let(::invocationMethod)
 
     /** 把实参适配成方法声明的类型 */
     private fun coerce(m: Method, args: Array<Any?>): Array<Any?> {
@@ -772,74 +936,121 @@ object VehicleBridge {
     // 事件监听
     // =====================================================================
 
+    @Synchronized
     fun registerWatcher(functions: IntArray, onChange: (functionId: Int, zone: Int, value: Any?) -> Unit): Boolean {
-        if (watcherProxy != null) return true
+        val requested = functions.distinct().sorted().toIntArray()
+        if (requested.isEmpty()) return unregisterWatcher()
+        if (watcherRegistered && watcherTarget === session && watcherFunctions.contentEquals(requested)) {
+            watcherCallback = onChange
+            return true
+        }
+        // 先确认旧代理已卸载；失败时保留它的目标与卸载句柄，禁止再挂第二个代理。
+        if (!unregisterWatcher()) return false
         val iface = watcherIface ?: return false
-        val m = registerMethod ?: return false
-        val s = session ?: return false
-        return runCatching {
-            val handler = InvocationHandler { proxy, method, args ->
-                val n = method.name
-                when (n) {
-                    // 必须正确处理这三个标准方法，否则系统向 HashMap/CallbackList 注册代理时会 NPE
+        val method = registerMethod ?: return false
+        val target = session ?: return false
+        val detach = unregisterMethod ?: return false
+        val generation = ++watcherGeneration
+        val handler = InvocationHandler { proxy, callbackMethod, args ->
+            when {
+                callbackMethod.declaringClass == Any::class.java -> when (callbackMethod.name) {
                     "hashCode" -> System.identityHashCode(proxy)
                     "equals" -> (args?.firstOrNull() === proxy)
                     "toString" -> "VehicleWatcherProxy@${Integer.toHexString(System.identityHashCode(proxy))}"
-
-                    // ★ 精确按 ECarX 接口契约分派
-                    //   （osn_fan_widget 只处理 onFunctionValueChanged，实践证明这样就够了）
-                    "onFunctionValueChanged" -> {
-                        if (args != null && args.size >= 3) {
-                            val fid = (args[0] as? Number)?.toInt() ?: -1
-                            val area = (args[1] as? Number)?.toInt() ?: -1
-                            val v = args[2] as? Number
-                            runCatching { onChange(fid, area, v?.toInt()) }
+                    else -> primitiveDefault(callbackMethod.returnType)
+                }
+                else -> {
+                    val name = callbackMethod.name
+                    if (watcherRegistered && watcherGeneration == generation && watcherProxy === proxy &&
+                        args != null && args.size == 3 &&
+                        (name == "onFunctionValueChanged" || name == "onCustomizeFunctionValueChanged" ||
+                            (watcherCallbackFirst && name == "onChangeEvent"))) {
+                        val fid = (args[0] as? Number)?.toInt()
+                        val zone = (args[1] as? Number)?.toInt()
+                        if (fid != null && zone != null && requested.binarySearch(fid) >= 0) {
+                            try {
+                                watcherCallback?.invoke(fid, zone, args[2])
+                            } catch (t: Throwable) {
+                                Logx.e("事件监听业务回调异常", t)
+                            }
                         }
-                        null
                     }
-                    "onCustomizeFunctionValueChanged" -> {
-                        // 该通道已被禁用，正常不会收到；收到也只透传，不做任何调用
-                        if (args != null && args.size >= 3) {
-                            val fid = (args[0] as? Number)?.toInt() ?: -1
-                            val area = (args[1] as? Number)?.toInt() ?: -1
-                            val v = args[2] as? Number
-                            runCatching { onChange(fid, area, v?.toFloat()) }
-                        }
-                        null
-                    }
-                    else -> null
+                    primitiveDefault(callbackMethod.returnType)
                 }
             }
-            val proxy = Proxy.newProxyInstance(
-                iface.classLoader ?: javaClass.classLoader,
-                arrayOf(iface),
-                handler
-            )
+        }
+        return try {
+            val proxy = Proxy.newProxyInstance(iface.classLoader, arrayOf(iface), handler)
             watcherProxy = proxy
-            val ok = if (registerArrayMode) {
-                m.invoke(s, functions, proxy) as? Boolean ?: true
+            watcherTarget = target
+            watcherDetachMethod = detach
+            watcherFunctions = requested
+            watcherCallback = onChange
+            val accepted = if (watcherCallbackFirst) {
+                invokeAccepted(method, target, proxy, requested)
+            } else if (registerArrayMode) {
+                invokeAccepted(method, target, requested, proxy)
             } else {
-                var any = false
-                for (f in functions) {
-                    val r = m.invoke(s, f, proxy) as? Boolean ?: true
-                    any = any || r
-                }
-                any
+                requested.all { invokeAccepted(method, target, it, proxy) }
             }
-            Logx.d("事件监听注册：${if (registerArrayMode) "数组模式" else "逐函数模式"} func=${functions.joinToString { "0x" + it.toString(16) }} → ${if (ok) "OK" else "FAIL"}")
-            ok
-        }.getOrElse {
-            Logx.e("事件监听注册异常", it)
+            if (!accepted) {
+                Logx.w("事件监听注册被拒：${method.name}，撤销可能已接收的部分属性")
+                unregisterWatcher()
+                false
+            } else {
+                watcherRegistered = true
+                Logx.d("事件监听接口已接受：${method.name} func=${requested.joinToString { "0x" + it.toString(16) }}；收到有效回调仍需单独验证")
+                true
+            }
+        } catch (t: Throwable) {
+            Logx.e("事件监听注册异常：${unwrapInvocation(t).javaClass.simpleName}，尝试撤销部分注册", t)
+            unregisterWatcher()
             false
         }
     }
 
-    fun unregisterWatcher() {
-        val m = unregisterMethod ?: return
-        val s = session ?: return
-        val p = watcherProxy ?: return
-        runCatching { m.invoke(s, p) }
-        watcherProxy = null
+    /** 未识别的回调仍须返回正确的装箱值，不能让 primitive 返回类型因 null 崩溃。 */
+    private fun primitiveDefault(type: Class<*>): Any? = when (type) {
+        Boolean::class.javaPrimitiveType -> false
+        Byte::class.javaPrimitiveType -> 0.toByte()
+        Short::class.javaPrimitiveType -> 0.toShort()
+        Int::class.javaPrimitiveType -> 0
+        Long::class.javaPrimitiveType -> 0L
+        Float::class.javaPrimitiveType -> 0f
+        Double::class.javaPrimitiveType -> 0.0
+        Char::class.javaPrimitiveType -> '\u0000'
+        else -> null
+    }
+
+    @Synchronized
+    fun unregisterWatcher(): Boolean {
+        watcherRegistered = false
+        watcherCallback = null
+        ++watcherGeneration
+        val proxy = watcherProxy ?: return true
+        val target = watcherTarget ?: return false
+        val detach = watcherDetachMethod ?: return false
+        val removed = try {
+            invokeAccepted(detach, target, proxy).also {
+                if (!it) Logx.w("事件监听卸载被拒：${detach.name}，保留代理并拒绝叠加注册")
+            }
+        } catch (t: Throwable) {
+            val cause = unwrapInvocation(t)
+            // 明确的 DeadObjectException 才能证明旧远端已不存在；普通 RemoteException 不能据此清空。
+            if (cause is android.os.DeadObjectException) {
+                true
+            } else {
+                Logx.e("事件监听卸载异常：保留代理并拒绝叠加注册", t)
+                false
+            }
+        }
+        if (removed) {
+            watcherProxy = null
+            watcherTarget = null
+            watcherDetachMethod = null
+            watcherFunctions = intArrayOf()
+        }
+        return removed
     }
 
     // =====================================================================
@@ -862,12 +1073,18 @@ object VehicleBridge {
             .sorted()
     }
 
-    /** binder 是否已死（系统车控服务重启/掉线） */
-    private fun isBinderDead(t: Throwable): Boolean =
-        t is android.os.DeadObjectException || t is android.os.RemoteException
+    private fun unwrapInvocation(t: Throwable): Throwable =
+        if (t is java.lang.reflect.InvocationTargetException && t.targetException != null)
+            unwrapInvocation(t.targetException) else t
+
+    /** binder 异常包在反射调用异常内时也需要恢复会话。 */
+    private fun isBinderDead(t: Throwable): Boolean = unwrapInvocation(t).let {
+        it is android.os.DeadObjectException || it is android.os.RemoteException
+    }
 
     @Synchronized
     fun reset() {
+        ++connectionGeneration
         unregisterWatcher()
         session = null
         carObj = null
@@ -878,7 +1095,21 @@ object VehicleBridge {
         writeMethodNoArea = null
         registerMethod = null
         unregisterMethod = null
+        watcherIface = null
+        registerArrayMode = false
+        watcherCallbackFirst = false
+        glyCarObj = null
+        glyFloatRead = null
+        glyFloatWrite = null
+        customizeReadMethod = null
+        customizeWriteMethod = null
         supportMethod = null
+        glyStatusMethod = null
+        glyStatusProbed = false
         supportProbed = false
+        valuesMethod = null
+        valuesProbed = false
+        glySupportOwner = null
+        glySupportCodes = emptyMap()
     }
 }
