@@ -179,16 +179,11 @@ internal class HvacState(initial: State) {
 
         // 确认允许真实浮点误差，目标变化推导仍保持精确比较，不改写观测值。
         private fun confirms(property: HvacProperty, value: State, target: State): Boolean = when (property) {
-            HvacProperty.TEMP_DRIVER -> temperatureMatches(value.driverTempC, target.driverTempC)
-            HvacProperty.TEMP_PASSENGER -> temperatureMatches(value.passengerTempC, target.passengerTempC)
+            HvacProperty.TEMP_DRIVER -> HvacChannels.temperatureMatches(value.driverTempC, target.driverTempC)
+            HvacProperty.TEMP_PASSENGER -> HvacChannels.temperatureMatches(value.passengerTempC, target.passengerTempC)
             else -> matches(property, value, target)
         }
 
-        private fun temperatureMatches(value: Float?, target: Float?): Boolean {
-            if (value == null || target == null) return value == null && target == null
-            return value.isFinite() && target.isFinite() &&
-                kotlin.math.abs(value.toDouble() - target.toDouble()) <= 0.10001
-        }
 
         private fun matches(property: HvacProperty, before: State, after: State): Boolean = when (property) {
             HvacProperty.FAN -> before.fanLevel == after.fanLevel &&

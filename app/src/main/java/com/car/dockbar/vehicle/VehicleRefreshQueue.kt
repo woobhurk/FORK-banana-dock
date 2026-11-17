@@ -24,6 +24,7 @@ internal class VehicleRefreshQueue {
     }
 
     private val dueAtMs = LongArray(GROUPS.size)
+    private val intervalsMs = LongArray(GROUPS.size)
     private var queuedMask = 0
     private var rerunMask = 0
     private var runningOrdinal = NO_GROUP
@@ -33,7 +34,24 @@ internal class VehicleRefreshQueue {
         var ordinal = 0
         while (ordinal < dueAtMs.size) {
             dueAtMs[ordinal] = Long.MIN_VALUE
+            intervalsMs[ordinal] = GROUPS[ordinal].intervalMs
             ordinal++
+        }
+    }
+
+    /**
+     * 更新正数周期；nowMs 与 poll/complete 使用同一个单调递增时钟。
+     * 缩短时让空闲组立即到期；延长保留当前期限和待执行位，完成后再使用新周期。
+     */
+    fun setInterval(group: VehicleRefreshGroup, intervalMs: Long, nowMs: Long) {
+        require(intervalMs > 0L)
+        val ordinal = group.ordinal
+        val previous = intervalsMs[ordinal]
+        if (previous == intervalMs) return
+
+        intervalsMs[ordinal] = intervalMs
+        if (intervalMs < previous && runningOrdinal != ordinal) {
+            dueAtMs[ordinal] = nowMs
         }
     }
 
@@ -83,7 +101,7 @@ internal class VehicleRefreshQueue {
         val ordinal = group.ordinal
         if (runningOrdinal != ordinal) return
 
-        dueAtMs[ordinal] = nowMs + group.intervalMs
+        dueAtMs[ordinal] = nowMs + intervalsMs[ordinal]
         runningOrdinal = NO_GROUP
 
         val bit = 1 shl ordinal

@@ -4,7 +4,6 @@ import android.content.Context
 import android.os.SystemClock
 import com.car.dockbar.config.VehicleChannels
 import com.car.dockbar.util.Logx
-import kotlin.math.abs
 
 internal enum class HvacValidationMode(val keys: List<String>) {
     FAN(listOf("fan_manual", "fan_auto")),
@@ -131,7 +130,7 @@ internal object HvacDiagnostics {
         if (floatCommand != floatObservation) return null
         val match = if (floatCommand) {
             // 允许 Float 表示造成的微小边界误差，不改变真实观测值。
-            abs(raw.toDouble() - cmd.value.toDouble()) <= 0.10001
+            HvacChannels.temperatureMatches(raw.toFloat(), cmd.value.toFloat())
         } else {
             raw.toLong() == cmd.value.toLong() || (raw.toInt() and 0xff) == (cmd.value.toInt() and 0xff)
         }

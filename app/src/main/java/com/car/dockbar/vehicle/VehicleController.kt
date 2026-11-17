@@ -56,49 +56,6 @@ object VehicleController {
      * 注意：车机实际上下限由 MaxTempSignal(0x10060300)/MinTempSignal(0x10060500) 给出，
      * 这里用系统常量作为默认兜底。
      */
-    /**
-     * ★ v1.4.81：风量「AUTO」档位值。
-     * 来源：oneOS_Dock 的 `MANUAL_FAN_SPEED_LEVEL_AUTO = "10"` —— AUTO 是写在
-     * **手动风量通道 0x10020100** 上的，值 = 10（复合编码 0x1002010A）。
-     * 这台车**没有** AUTO 通道（0x10020200 在系统自己日志里就是 notactive + 255）。
-     */
-    const val FAN_LEVEL_AUTO = 10
-
-    /**
-     * ★★ v1.4.84：AUTO 风道「档位 → 通道值」映射（**顺序是乱的！**）
-     *
-     * 权威来源：osn_fan（系统 SystemUI 插件）的 `mapAutoValueToLevel`：
-     * ```
-     * 0x10020204 -> 1 档
-     * 0x10020201 -> 2 档
-     * 0x10020202 -> 3 档
-     * 0x10020203 -> 4 档
-     * 0x10020205 -> 5 档
-     * ```
-     * 也就是说 AUTO 风道 1~5 档对应的值**不是**顺序的 01..05。
-     * 我们之前按 1→0x10020201 写 → 车机当成 2 档 → 档位全错。
-     */
-    val FAN_AUTO_VALUE_BY_LEVEL = intArrayOf(
-        0,                       // 占位（档位 0 不用）
-        0x10020204,              // 1 档
-        0x10020201,              // 2 档
-        0x10020202,              // 3 档
-        0x10020203,              // 4 档
-        0x10020205               // 5 档
-    )
-
-    /** AUTO 档位 → 通道值（0x10020200 | 档位值），level 1..5 */
-    fun fanAutoValue(level: Int): Int {
-        val v = FAN_AUTO_VALUE_BY_LEVEL.getOrNull(level.coerceIn(1, 5)) ?: 0x10020202
-        return (0x10020200 and 0xFFFFFF00.toInt()) or (v and 0xFF)
-    }
-
-    /** 通道值 → AUTO 档位（0 = 不是 AUTO 档位值） */
-    fun fanAutoLevelOf(value: Int): Int {
-        val low = value and 0xFF
-        for (l in 1..5) if ((FAN_AUTO_VALUE_BY_LEVEL[l] and 0xFF) == low) return l
-        return 0
-    }
 
     const val TEMP_MIN_C = 15.5f
 
@@ -315,6 +272,12 @@ object VehicleController {
     @Volatile private var validationDeadlineAt = 0L
     @Volatile private var watcherConfiguration = 0L
     @Volatile private var watcherConnection = -1L
+    @Volatile private var subscriptionAccepted = false
+    @Volatile private var configuredEventMask = 0
+    private var eventProofConnection = Long.MIN_VALUE
+    private var initialSnapshotConnection = Long.MIN_VALUE
+    private var seenEventMask = 0
+    private val refreshIntervals = LongArray(REFRESH_GROUPS.size) { REFRESH_GROUPS[it].intervalMs }
     private val validationTimeout = Runnable { stopHvacValidation("验证窗口到期") }
     private val validationPoll = object : Runnable {
         override fun run() {
@@ -457,18 +420,22 @@ object VehicleController {
                     }
                     val before = state
                     val temperature = key == "temp_driver" || key == "temp_passenger"
-                    val float = if (temperature && (value is Float || value is Double)) normalizeTempC((value as Number).toFloat()) else null
+                    val float = if (temperature && (value is Float || value is Double)) HvacChannels.normalizeTemperature((value as Number).toFloat()) else null
                     val raw = if (value is Int || value is Short || value is Byte) (value as Number).toInt() else null
-                    var accepted = float != null || (raw != null && validRaw(c, key, raw))
+                    val accepted = float != null || (raw != null && validReading(c, key, raw))
                     if (accepted) {
-                        update(groupMaskOf(key), observedProperties = observationProperties(key, value)) { current ->
+                        update(groupMaskOf(key), observedProperties = HvacChannels.observationProperties(key, value)) { current ->
                             val next = if (float != null) {
-                                if (key == "temp_driver") current.copy(driverTempC = float) else current.copy(passengerTempC = float)
-                            } else withRaw(current, key, raw!!, c)
-                            if (next === current) accepted = false
+                                if (key == "temp_driver") {
+                                    if (current.driverTempC == float) current else current.copy(driverTempC = float)
+                                } else {
+                                    if (current.passengerTempC == float) current else current.copy(passengerTempC = float)
+                                }
+                            } else mergeReading(current, key, raw!!, c)
                             next
                         }
                     }
+                    if (accepted) recordEventEvidence(key, value, connection)
                     HvacDiagnostics.event(key, value, accepted, before != state, zone,
                         SystemClock.elapsedRealtime() - receivedAt)
                     Logx.d("车控事件 key=$key fid=0x${fid.toString(16)} zone=$zone raw=$value accepted=$accepted changed=${before != state}")
@@ -479,7 +446,11 @@ object VehicleController {
             }
         }
         val currentConnection = connection == VehicleBridge.connectionGeneration
-        if (currentConnection) watcherConnection = connection
+        if (currentConnection) {
+            watcherConnection = connection
+            subscriptionAccepted = ok
+            configuredEventMask = HvacRefreshPolicy.mask(keys)
+        }
         if (epoch == validationEpoch && currentConnection && activeValidationMode() != null) {
             HvacDiagnostics.registration(VehicleBridge.backend.label, keys, ok,
                 if (ok) "订阅调用被接受，仍需实际回调验证" else "订阅失败，保留分组轮询；查看前面的厂商返回或异常")
@@ -488,25 +459,22 @@ object VehicleController {
         return ok && currentConnection
     }
 
-    private fun validRaw(c: Context, key: String, raw: Int): Boolean {
-        if (isSentinel(raw)) return false
-        val value = raw and 0xFF
-        return when (key) {
-            "fan_manual" -> value in 0..FAN_LEVEL_AUTO
-            "fan_auto" -> fanAutoLevelOf(raw) > 0 || boolOf(raw) != null
-            "ac", "recirc" -> boolOf(raw) != null
-            "air_direction" -> value in 1..7
-            "seat_vent", "seat_heat", "seat_vent_passenger", "seat_heat_passenger" -> value in 0..3
-            "temp_driver", "temp_passenger" -> tempFromRaw(key, raw, c) != null
-            else -> false
-        }
-    }
+    private fun validReading(c: Context, key: String, raw: Int): Boolean =
+        if (key == "temp_driver" || key == "temp_passenger") {
+            HvacChannels.validRaw(key, raw, Prefs.tempBase(c), Prefs.tempStep(c), Prefs.tempIndexBase(c))
+        } else HvacChannels.validRaw(key, raw)
+
+    private fun mergeReading(base: State, key: String, raw: Int, c: Context): State =
+        if (key == "temp_driver" || key == "temp_passenger") {
+            HvacChannels.merge(base, key, raw, Prefs.tempBase(c), Prefs.tempStep(c), Prefs.tempIndexBase(c))
+        } else HvacChannels.merge(base, key, raw)
 
     /** watcher 回调：把某个通道的原始值并入当前 State（无效读数不覆盖已知状态） */
     private fun applyRaw(key: String, raw: Int) {
         val c = appCtx ?: return
-        update(groupMaskOf(key), observedProperties = if (validRaw(c, key, raw)) observationProperties(key, raw) else 0) {
-            current -> withRaw(current, key, raw, c)
+        if (!validReading(c, key, raw)) return
+        update(groupMaskOf(key), observedProperties = HvacChannels.observationProperties(key, raw)) {
+            current -> mergeReading(current, key, raw, c)
         }
     }
 
@@ -533,12 +501,55 @@ object VehicleController {
     }
 
     /** 高频调用只检查期限；实际厂商读取仍由唯一 HAL 队列串行执行。 */
+    private fun recordEventEvidence(key: String, raw: Any?, connection: Long) {
+        if (HvacChannels.observationProperties(key, raw) == 0) return
+        if (eventProofConnection != connection) {
+            eventProofConnection = connection
+            seenEventMask = 0
+        }
+        seenEventMask = seenEventMask or HvacRefreshPolicy.bit(key)
+    }
+
+    private fun applyPollingPolicy(now: Long) {
+        val connection = VehicleBridge.connectionGeneration
+        if (initialSnapshotConnection != connection) {
+            initialSnapshotConnection = connection
+            if (eventProofConnection != connection) { eventProofConnection = connection; seenEventMask = 0 }
+            for (group in REFRESH_GROUPS) refreshQueue.request(group)
+        }
+        val registered = subscriptionAccepted && watcherConnection == connection
+        if (!registered) seenEventMask = 0
+        seenEventMask = seenEventMask and configuredEventMask
+        for (group in REFRESH_GROUPS) {
+            val interval = HvacRefreshPolicy.intervalMs(group, configuredEventMask, seenEventMask, registered)
+            refreshQueue.setInterval(group, interval, now)
+            if (refreshIntervals[group.ordinal] != interval) {
+                refreshIntervals[group.ordinal] = interval
+                Logx.d("HVAC_POLL group=$group intervalMs=$interval registered=$registered seen=$seenEventMask")
+            }
+        }
+    }
+
+    /** 只有轮询发现新值时先回到快兜底；静默且未变化不判事件失效。 */
+    private fun loseEventEvidence(properties: Int) {
+        val previous = seenEventMask
+        for (property in HvacProperty.entries) {
+            if (properties and property.mask == 0) continue
+            val bits = if (property == HvacProperty.FAN) {
+                HvacRefreshPolicy.bit("fan_manual") or HvacRefreshPolicy.bit("fan_auto")
+            } else HvacRefreshPolicy.bit(property.key)
+            seenEventMask = seenEventMask and bits.inv()
+        }
+        if (previous != seenEventMask) Logx.d("HVAC_POLL 仅轮询发现新值 properties=$properties，暂回快兜底")
+    }
     internal fun poll(ctx: Context) {
         onMain {
             val c = ctx.applicationContext
             if (!Prefs.vehicleApiEnabled(c)) return@onMain
             appCtx = c
-            refreshQueue.poll(SystemClock.elapsedRealtime())
+            val now = SystemClock.elapsedRealtime()
+            applyPollingPolicy(now)
+            refreshQueue.poll(now)
             pumpRefreshQueue(c)
         }
     }
@@ -623,13 +634,14 @@ object VehicleController {
                 val rawFloat = if (fid > 0) VehicleBridge.readTempProperty(fid, zone) else null
                 if (epoch != validationEpoch || connection != VehicleBridge.connectionGeneration ||
                     (validationMode != null && activeValidationMode() == null)) break
-                val temp = rawFloat?.let(::normalizeTempC)
+                val temp = rawFloat?.let(HvacChannels::normalizeTemperature)
                 if (epoch == validationEpoch) HvacDiagnostics.read(key, rawFloat, temp != null, "FLOAT_READ zone=$zone", observedAt)
                 if (temp != null) {
                     temperatures[i] = temp
                     continue
                 }
             }
+            var actualZone = if (key == "defrost_front" || key == "defrost_rear" || key == "steering_heat") ZONE_GLOBAL else VehicleChannels.zoneOf(c, key)
             val raw = when (key) {
                 "defrost_front" -> readBare(FUNC_DEFROST_FRONT)
                 "defrost_rear" -> readBare(FUNC_DEFROST_REAR)
@@ -638,7 +650,9 @@ object VehicleController {
                     val now = SystemClock.elapsedRealtime()
                     val probe = forceProbe || now >= nextFallbackProbeAt[group.ordinal][i]
                     if (probe) nextFallbackProbeAt[group.ordinal][i] = now + FALLBACK_PROBE_INTERVAL_MS
-                    read(key, c, allowZoneFallback = probe)
+                    val result = read(key, c, allowZoneFallback = probe)
+                    actualZone = result.zone
+                    result.value
                 }
             }
             if (raw != null) {
@@ -647,8 +661,8 @@ object VehicleController {
             }
             if (epoch == validationEpoch && connection == VehicleBridge.connectionGeneration &&
                 (validationMode == null || activeValidationMode() != null)) {
-                HvacDiagnostics.read(key, raw, raw != null && validRaw(c, key, raw),
-                    "INT_READ zone=${VehicleChannels.zoneOf(c, key)}", observedAt)
+                HvacDiagnostics.read(key, raw, raw != null && validReading(c, key, raw),
+                    "INT_READ zone=$actualZone", observedAt)
             }
         }
         if (group == VehicleRefreshGroup.CLIMATE && evidenceOn()) evidencePoll(c)
@@ -694,21 +708,24 @@ object VehicleController {
                     if (temperature != null && temperature.isFinite() &&
                         reading.validationEpoch == validationEpoch && floatTemperatureEnabled(c, keys[i])
                     ) {
-                        next = if (keys[i] == "temp_driver") next.copy(driverTempC = temperature)
-                            else next.copy(passengerTempC = temperature)
+                        next = if (keys[i] == "temp_driver") {
+                            if (next.driverTempC == temperature) next else next.copy(driverTempC = temperature)
+                        } else {
+                            if (next.passengerTempC == temperature) next else next.copy(passengerTempC = temperature)
+                        }
                         continue
                     }
                     if (reading.present and (1 shl i) == 0) continue
                     val raw = reading.values[i]
-                    if (isSentinel(raw)) continue
+                    if (HvacChannels.isSentinel(raw)) continue
                     next = when (keys[i]) {
-                        "defrost_front" -> boolOf(raw)?.let { next.copy(defrostFront = it) } ?: next
-                        "defrost_rear" -> boolOf(raw)?.let { next.copy(defrostRear = it) } ?: next
+                        "defrost_front" -> HvacChannels.boolValue(raw)?.let { next.copy(defrostFront = it) } ?: next
+                        "defrost_rear" -> HvacChannels.boolValue(raw)?.let { next.copy(defrostRear = it) } ?: next
                         "steering_heat" -> {
                             val level = raw and 0xFF
                             if (level in 0..SEAT_LEVEL_MAX) next.copy(steeringHeat = level) else next
                         }
-                        else -> withRaw(next, keys[i], raw, c)
+                        else -> mergeReading(next, keys[i], raw, c)
                     }
                 }
             }
@@ -735,16 +752,6 @@ object VehicleController {
         }
     }
 
-    /** 模式事件不携带完整风量档位，不得用沿用字段确认新的完整目标。 */
-    private fun observationProperties(key: String, raw: Any?): Int {
-        val property = HvacProperty.fromKey(key) ?: return 0
-        if (property == HvacProperty.FAN) {
-            val value = (raw as? Number)?.toInt() ?: return 0
-            if (key == "fan_auto" && fanAutoLevelOf(value) == 0) return 0
-            if (key == "fan_manual" && (value and 0xff) == FAN_LEVEL_AUTO) return 0
-        }
-        return property.mask
-    }
 
     private fun floatTemperatureEnabled(c: Context, key: String): Boolean =
         Prefs.hvacEventKeys(c).contains(key) || activeValidationMode() == HvacValidationMode.TEMPERATURE
@@ -756,13 +763,13 @@ object VehicleController {
             val temperature = reading.temperatures?.getOrNull(i)
             val valid = if (temperature != null && temperature.isFinite() && floatTemperatureEnabled(c, keys[i])) true
             else if (reading.present and (1 shl i) != 0) when (keys[i]) {
-                "defrost_front", "defrost_rear" -> !isSentinel(reading.values[i]) && boolOf(reading.values[i]) != null
-                "steering_heat" -> !isSentinel(reading.values[i]) && (reading.values[i] and 0xff) in 0..SEAT_LEVEL_MAX
-                else -> validRaw(c, keys[i], reading.values[i])
+                "defrost_front", "defrost_rear" -> !HvacChannels.isSentinel(reading.values[i]) && HvacChannels.boolValue(reading.values[i]) != null
+                "steering_heat" -> !HvacChannels.isSentinel(reading.values[i]) && (reading.values[i] and 0xff) in 0..SEAT_LEVEL_MAX
+                else -> validReading(c, keys[i], reading.values[i])
             } else false
             if (valid) {
                 val raw: Any? = reading.temperatures?.getOrNull(i)?.takeIf { it.isFinite() } ?: reading.values[i]
-                properties = properties or observationProperties(keys[i], raw)
+                properties = properties or HvacChannels.observationProperties(keys[i], raw)
             }
         }
         return properties
@@ -776,151 +783,46 @@ object VehicleController {
         else -> 0
     }
 
-    /**
-     * 把某个通道的原始值并入 [base]，返回新 State。
-     * 无效读数（255 / 0xFF / 越界）直接返回 [base]，不破坏已知状态。
-     */
-    /**
-     * 把 ECarX 的"开关"枚举归一成 true/false。
-     * 兼容两套约定：0/1 与 10/11（部分 ECarX HAL 用 10=OFF、11=ON）。
-     * 其它值（含 255 哨兵）返回 null，保留原状态。
-     */
-    /**
-     * 把 ECarX 的"开关"枚举归一成 true/false。
-     * 兼容两套约定：0/1（HvacConstants：OFF=0 ON=1）与 10/11（部分 HAL 层的 0x0a/0x0b）。
-     * 其它值（含 0xfd/0xfe/0xff 哨兵）返回 null，保留原状态。
-     */
-    private fun boolOf(raw: Int): Boolean? = when (raw and 0xFF) {
-        0, 10 -> false
-        1, 11 -> true
-        else -> null
-    }
 
-    /**
-     * 浮点温度归一。
-     *
-     * 有效区间取 10..40℃，比车机实际可调区间（15.5..28.5℃）略宽，
-     * 用来挡掉「空调关闭 / 通道不可用」时返回的伪值。
-     *
-     * 实测踩坑：车机空调未开启时 `getCustomizeFunctionValue` 会返回 **5.0**，
-     * 而同一通道的 int 值 `getFunctionValue` 返回 `0xff`（UNKNOWN 哨兵）。
-     * 早期实现把 5.0 coerce 进 5..45 就直接显示成「5.0°」——既不是真实温度，
-     * 也不是 OFF，属于误导。现在区间外一律返回 null（UI 显示 OFF）。
-     */
-    private fun normalizeTempC(t: Float): Float? {
-        if (t.isNaN() || t < TEMP_VALID_MIN || t > TEMP_VALID_MAX) return null
-        return t
-    }
+    private data class ChannelRead(val value: Int?, val zone: Int)
+    private data class ReadZone(val function: Int, val configured: Int, val actual: Int)
+    private val readZoneCache = HashMap<String, ReadZone>()
+    private var readZoneConnection = Long.MIN_VALUE
 
-    /** ECarX/HvacConstants 的无效读数哨兵：0xfd=ERROR 0xfe=NONE 0xff=UNKNOWN */
-    private fun isSentinel(raw: Int): Boolean {
-        val b = raw and 0xFF
-        return b == VehicleBridge.VALUE_ERROR || b == VehicleBridge.VALUE_NONE ||
-                b == VehicleBridge.VALUE_UNKNOWN
-    }
-
-    private fun withRaw(base: State, key: String, raw: Int, c: Context): State {
-        val invalid = isSentinel(raw)
-        return when (key) {
-            "fan_manual" -> {
-                if (invalid) return base
-                val idx = raw and 0xFF
-                // ★ v1.4.81：**低字节 10 = AUTO**（MANUAL_FAN_SPEED_LEVEL_AUTO="10"）。
-                //   这台车没有 AUTO 通道（0x10020200 系统自己查也是 notactive），
-                //   AUTO 是写在「手动风量」通道 0x10020100 上的，值 = 10。
-                val parsed = if (idx == FAN_LEVEL_AUTO) {
-                    base.copy(fanAuto = true, fanLevel = 0, fanMax = 5)
-                } else if (idx !in 0..9) {
-                    base
-                } else {
-                    base.copy(fanAuto = false, fanLevel = idx, fanMax = 9)
-                }
-                parsed
-            }
-            "fan_auto" -> {
-                if (invalid) return base
-                // ★ v1.4.84：用**乱序映射**解析 AUTO 档位
-                //   （osn_fan: 0x10020204→1档, 0x10020201→2档, 0x10020202→3档,
-                //     0x10020203→4档, 0x10020205→5档）
-                val lvl = fanAutoLevelOf(raw)
-                when {
-                    lvl > 0 -> base.copy(fanAuto = true, fanLevel = lvl, fanMax = 5)
-                    // HAL 层风格：10/11 布尔
-                    boolOf(raw) == true -> base.copy(fanAuto = true, fanLevel = base.fanLevel.coerceAtLeast(1), fanMax = 5)
-                    boolOf(raw) == false -> base.copy(fanAuto = false, fanMax = 9)
-                    else -> base
-                }
-            }
-            "recirc" -> {
-                if (invalid) return base
-                // ★★★ v3.6：按系统 Dock 权威值域 —— 外循环 = **裸值 0**，
-                //   内循环 = **复合 0x10030101**（低字节 1）。
-                //   boolOf 按低字节判：0x10030101→1→内 ✔ / 0x10030100→0→外 ✔ / 裸值0→外 ✔
-                boolOf(raw)?.let { return base.copy(recircInside = it) } ?: base
-            }
-            "ac" -> {
-                if (invalid) return base
-                // HVAC_FUNC_AC：0=关 1=开；部分 HAL 用 10/11，一并兼容
-                boolOf(raw)?.let { return base.copy(acOn = it) } ?: base
-            }
-            "air_direction" -> {
-                if (invalid) return base
-                val bits = raw and 0xFF
-                // 位掩码：1=吹脸 2=吹脚 4=吹前挡，合法组合 1..7
-                if (bits !in 1..7) base else base.copy(airDirection = bits)
-            }
-            "seat_vent" -> {
-                if (invalid) return base
-                val idx = raw and 0xFF
-                if (idx !in 0..3) base else base.copy(seatVent = idx)
-            }
-            "seat_heat" -> {
-                if (invalid) return base
-                val idx = raw and 0xFF
-                if (idx !in 0..3) base else base.copy(seatHeat = idx)
-            }
-            "seat_vent_passenger" -> {
-                if (invalid) return base
-                val idx = raw and 0xFF
-                if (idx !in 0..3) base else base.copy(seatVentPassenger = idx)
-            }
-            "seat_heat_passenger" -> {
-                if (invalid) return base
-                val idx = raw and 0xFF
-                if (idx !in 0..3) base else base.copy(seatHeatPassenger = idx)
-            }
-            "temp_driver" -> tempFromRaw(key, raw, c)?.let { base.copy(driverTempC = it) } ?: base
-            "temp_passenger" -> tempFromRaw(key, raw, c)?.let { base.copy(passengerTempC = it) } ?: base
-            else -> base
-        }
-    }
-
-    private fun read(key: String, ctx: Context, allowZoneFallback: Boolean = true): Int? {
+    /** 读取命中仅缓存本连接；绝不因读到值就改写控制区域配置。 */
+    private fun read(key: String, ctx: Context, allowZoneFallback: Boolean = true): ChannelRead {
         val f = VehicleChannels.funcOf(ctx, key)
-        if (f <= 0) return null
-        val zone = VehicleChannels.zoneOf(ctx, key)
-        val v = VehicleBridge.readInt(f, zone)
-        if (v != null && v != 0xff && v != 0xfe && v != 0xfd) return v
-        if (!allowZoneFallback) return v
-        // ★ v1.4.53：读也做 zone 回退。
-        //   真车实证：内外循环 0x10030100 在 zone=0x8 读回 0xff，
-        //   但 watcher 回调给的是 `zone=-2147483648（全局）value=0`；
-        //   写的时候也是只有全局 zone 才写进去（1.4.52 日志实锤）。
-        //   所以配置的 zone 读不到就换 zone 试，命中就自动记住 —— 与写入同一套逻辑。
-        for (z in READ_ALT_ZONES) {
-            if (z == zone) continue
-            val alt = VehicleBridge.readInt(f, z)
-            if (alt != null && alt != 0xff && alt != 0xfe && alt != 0xfd) {
-                Logx.w("读 $key：zone=0x${zone.toString(16)} 读不到 → 改用 zone=0x${z.toString(16)} 读到 0x${alt.toString(16)}（已自动记住该 zone）")
-                VehicleChannels.save(ctx, key, f, z)
-                return alt
+        val configured = VehicleChannels.zoneOf(ctx, key)
+        if (f <= 0) return ChannelRead(null, configured)
+        val connection = VehicleBridge.connectionGeneration
+        if (connection != readZoneConnection) {
+            readZoneCache.clear()
+            readZoneConnection = connection
+        }
+        val cached = readZoneCache[key]?.takeIf { it.function == f && it.configured == configured }
+        val firstZone = cached?.actual ?: configured
+        val first = VehicleBridge.readInt(f, firstZone)
+        if (connection != VehicleBridge.connectionGeneration) return ChannelRead(null, firstZone)
+        if (first != null && validReading(ctx, key, first)) return ChannelRead(first, firstZone)
+        readZoneCache.remove(key)
+        if (firstZone != configured) {
+            val primary = VehicleBridge.readInt(f, configured)
+            if (connection != VehicleBridge.connectionGeneration) return ChannelRead(null, configured)
+            if (primary != null && validReading(ctx, key, primary)) return ChannelRead(primary, configured)
+        }
+        if (!allowZoneFallback) return ChannelRead(first, firstZone)
+        for (zone in HvacChannels.readZones(key, configured)) {
+            if (zone == firstZone || (firstZone != configured && zone == configured)) continue
+            val value = VehicleBridge.readInt(f, zone)
+            if (connection != VehicleBridge.connectionGeneration) return ChannelRead(null, zone)
+            if (value != null && validReading(ctx, key, value)) {
+                readZoneCache[key] = ReadZone(f, configured, zone)
+                Logx.d("HVAC_READ_ZONE key=$key configured=$configured actual=$zone（仅本连接读取缓存，不修改写入配置）")
+                return ChannelRead(value, zone)
             }
         }
-        return v
+        return ChannelRead(first, firstZone)
     }
-
-    /** 读取失败时依次尝试的备选 zone（与写入共用同一套，保持一致） */
-    private val READ_ALT_ZONES = intArrayOf(0x8, 1, 4, 0x10, 0x20, 0x40, ZONE_GLOBAL)
 
     /** 直读固定 funcId（不走 VehicleChannels 配置） */
     private fun readBare(func: Int): Int? = VehicleBridge.readInt(func, ZONE_GLOBAL)
@@ -1020,6 +922,7 @@ object VehicleController {
             if (driver) current.copy(driverTempC = next) else current.copy(passengerTempC = next)
         }
         HvacCommands.submitLatest(ctx, key, sequence, { cancelTarget(sequence) }) { writeTempValue(ctx, driver, next) }
+        scheduleRefresh(ctx, TEMPERATURE_GROUP)
     }
 
     /**
@@ -1118,7 +1021,7 @@ object VehicleController {
         }
         // ★ v1.4.54：0x10060500 这个 ID 本身没验证过（oneOS_Dock 表里抄的），
         //   把 0/1/2/3 全试一遍，哪个回读生效就用哪个；全失败至少留下日志证据。
-        val ok = writeChannelCandidates(ctx, key, listOf(if (on) 1 else 0, 1, 0, 2, 3))
+        val ok = writeChannelCandidates(ctx, key, listOf(if (on) 1 else 0))
         Logx.d("写 车机双温同步 target=${if (on) "开" else "关"} func=0x${VehicleChannels.funcOf(ctx, key).toString(16)} → ${if (ok) "OK" else "FAIL"}")
         if (!ok) {
             Logx.w("双温同步写入失败：0x10060500 可能不是本车的双温通道，" +
@@ -1335,29 +1238,11 @@ object VehicleController {
         }
         hal.execute {
             runCatching {
-                // AC 开
-                val acF = VehicleChannels.funcOf(ctx, "ac")
-                if (acF > 0) VehicleBridge.writeInt(acF, VehicleChannels.zoneOf(ctx, "ac"), 11)
-                // 风量最大
-                val fanF = VehicleChannels.funcOf(ctx, "fan_manual")
-                if (fanF > 0) VehicleBridge.writeInt(fanF, VehicleChannels.zoneOf(ctx, "fan_manual"), 9)
-                // 主驾温度最低
-                tempToRaw("temp_driver", TEMP_MIN_C, ctx)?.let { raw ->
-                    VehicleBridge.writeInt(
-                        VehicleChannels.funcOf(ctx, "temp_driver"),
-                        VehicleChannels.zoneOf(ctx, "temp_driver"),
-                        raw
-                    )
-                }
-                // 副驾温度最低
-                tempToRaw("temp_passenger", TEMP_MIN_C, ctx)?.let { raw ->
-                    VehicleBridge.writeInt(
-                        VehicleChannels.funcOf(ctx, "temp_passenger"),
-                        VehicleChannels.zoneOf(ctx, "temp_passenger"),
-                        raw
-                    )
-                }
-            }.onFailure { Logx.e("极速降温写入异常", it) }
+                writeChannel(ctx, "ac", 1)
+                writeChannel(ctx, "fan_manual", 9)
+                writeTempValue(ctx, true, TEMP_MIN_C)
+                writeTempValue(ctx, false, TEMP_MIN_C)
+            }.onFailure { Logx.e("空调组合写入异常", it) }
         }
         preview(FAN_GROUP or CLIMATE_GROUP or TEMPERATURE_GROUP) { current ->
             current.copy(
@@ -1389,26 +1274,10 @@ object VehicleController {
         }
         hal.execute {
             runCatching {
-                // 风量最大
-                val fanF = VehicleChannels.funcOf(ctx, "fan_manual")
-                if (fanF > 0) VehicleBridge.writeInt(fanF, VehicleChannels.zoneOf(ctx, "fan_manual"), 9)
-                // 主驾温度最高
-                tempToRaw("temp_driver", TEMP_MAX_C, ctx)?.let { raw ->
-                    VehicleBridge.writeInt(
-                        VehicleChannels.funcOf(ctx, "temp_driver"),
-                        VehicleChannels.zoneOf(ctx, "temp_driver"),
-                        raw
-                    )
-                }
-                // 副驾温度最高
-                tempToRaw("temp_passenger", TEMP_MAX_C, ctx)?.let { raw ->
-                    VehicleBridge.writeInt(
-                        VehicleChannels.funcOf(ctx, "temp_passenger"),
-                        VehicleChannels.zoneOf(ctx, "temp_passenger"),
-                        raw
-                    )
-                }
-            }.onFailure { Logx.e("极速升温写入异常", it) }
+                writeChannel(ctx, "fan_manual", 9)
+                writeTempValue(ctx, true, TEMP_MAX_C)
+                writeTempValue(ctx, false, TEMP_MAX_C)
+            }.onFailure { Logx.e("空调组合写入异常", it) }
         }
         preview(FAN_GROUP or TEMPERATURE_GROUP) { current ->
             current.copy(
@@ -1433,46 +1302,6 @@ object VehicleController {
         set = { s, v -> s.copy(seatHeatPassenger = v) },
         label = "副驾座椅加热"
     )
-
-    /**
-     * int 原始值 → 摄氏度（浮点通道不可用时的兜底）。
-     *
-     * 依次尝试三种编码，取落进 5..45℃ 的那个：
-     *  1) 直接就是摄氏度（部分后端 5..45）
-     *  2) ×0.2℃（低 8 位索引，如 128 → 25.6℃）
-     *  3) 旧的 base + (idx - indexBase) × step 公式
-     */
-    private fun tempFromRaw(key: String, raw: Int?, ctx: Context): Float? {
-        if (raw == null || raw == 0 || isSentinel(raw)) return null
-        val r = raw and 0xFF   // 温度原始值（低 8 位）
-        if (r <= 0) return null
-        if (r in 5..45) return r.toFloat()
-        val byPoint2 = r * 0.2f
-        if (byPoint2 in 5f..45f) return byPoint2
-        val base = Prefs.tempBase(ctx)
-        val step = Prefs.tempStep(ctx)
-        val iBase = Prefs.tempIndexBase(ctx)
-        val t = base + (r - iBase) * step
-        return if (t in 5f..45f) t else null
-    }
-
-    /**
-     * 摄氏度 → int 原始值（仅在浮点通道不可用时使用）。
-     *
-     * ★ 修正：低 8 位 = round(℃ / 0.2)，与实测 leftTemp:128 → 25.6℃ 一致。
-     *   旧实现用的是 base + (idx-iBase)*step 反推，写回车机的值是错的。
-     */
-    private fun tempToRaw(key: String, tempC: Float, ctx: Context): Int? {
-        val f = VehicleChannels.funcOf(ctx, key)
-        if (f <= 0) return null
-        val idx = Math.round(tempC / 0.2f)
-        if (idx !in 0..255) return null
-        // ⚠️ 该车机温度属性是浮点 Customize 通道（普通 App 写它会 native 崩溃，已禁用），
-        //    int 通道 getFunctionValue 读回 0xff（不可读）。本轮对「写」尝试用纯索引值
-        //    （与座椅一致：HAL 按低字节生效），若下次日志仍 FAIL 则确认是厂商限制，
-        //    需系统签名（android.uid.system）才能控温。
-        return idx and 0xFF
-    }
 
     // =====================================================================
     // 操作
@@ -1506,44 +1335,18 @@ object VehicleController {
      *   Java 层拦不住，只能从源头停写。
      */
     private fun writeChannel(ctx: Context, key: String, value: Int): Boolean {
-        val f = VehicleChannels.funcOf(ctx, key)
-        // ★ v1.4.97 #1：原来这里**静默 return false**（P04 点没反应也不打日志，查不到原因）。
-        //   现在明确打出来，谁再漏配通道一眼就能看出来。
-        if (f <= 0) {
-            Logx.e("写 $key 失败：通道表里没有这个 key（funcOf=$f），请检查 VehicleChannels.ALL")
-            return false
-        }
         if (!HvacCommands.canWrite(ctx, key)) return false
+        val function = VehicleChannels.funcOf(ctx, key)
+        if (function <= 0) { Logx.w("写 $key 未执行：通道未配置"); return false }
         val zone = VehicleChannels.zoneOf(ctx, key)
-        val composite = (f and 0xFFFFFF00.toInt()) or (value and 0xFF)
-
-        // ① 复合编码（本车实测有效形态）
-        // 调用接受与后续观测独立；返回 true 不代表已经生效。
-        if (VehicleBridge.verifyWrite(f, zone, composite)) {
-            Logx.d("写 $key：复合编码 0x${composite.toString(16)} → OK")
-            return true
-        }
-        // ② 裸值
-        if (VehicleBridge.verifyWrite(f, zone, value)) {
-            Logx.d("写 $key：裸值 $value → OK")
-            return true
-        }
-        // ③ 换 zone 再试复合编码：zone 不对时 HAL 会静默丢弃（读回 0xff 就是典型症状）。
-        //    命中就自动把 zone 记住，用户不用手动改。
-        for (z in WRITE_ALT_ZONES) {
-            if (z == zone) continue
-            if (VehicleBridge.verifyWrite(f, z, composite)) {
-                Logx.w("写 $key：zone=0x${zone.toString(16)} 无效 → 改用 zone=0x${z.toString(16)} 写复合编码 0x${composite.toString(16)} → OK（已自动记住该 zone）")
-                VehicleChannels.save(ctx, key, f, z)
-                return true
-            }
-        }
-        Logx.d("写 $key：复合 0x${composite.toString(16)} / 裸值 $value 在 zone=0x${zone.toString(16)} 及备选 zone 全部 FAIL")
-        return false
+        val encoded = HvacChannels.encodeInt(function, key, value)
+        if (encoded == null) { Logx.w("写 $key 未执行：目标越界 value=$value"); return false }
+        val accepted = VehicleBridge.verifyWrite(function, zone, encoded)
+        if (accepted) return true
+        // 尚未逐车型验证的旧舒适/整数路径仅保留同一区域的表示兼容，不跨区盲试。
+        val verified = key == "fan_manual" || key == "fan_auto" || key == "ac" || key == "recirc" || key == "air_direction"
+        return !verified && encoded != value && VehicleBridge.verifyWrite(function, zone, value)
     }
-
-    /** 写入失败时依次尝试的备选 zone */
-    private val WRITE_ALT_ZONES = intArrayOf(0x8, 1, 4, 0x10, 0x20, 0x40, ZONE_GLOBAL)
 
 
     // =====================================================================
@@ -1873,7 +1676,7 @@ object VehicleController {
             return
         }
 
-        val ok = writeChannelCandidates(ctx, key, listOf(dir, if (dir == 1) 2 else 1))
+        val ok = writeChannelCandidates(ctx, key, listOf(dir))
         if (ok) {
             if (Prefs.syncTemp(ctx)) {
                 val otherKey = if (driver) "temp_passenger" else "temp_driver"
@@ -1984,10 +1787,10 @@ object VehicleController {
                 val fAuto = VehicleChannels.funcOf(ctxBg, "fan_auto")
                 val zoneA = VehicleChannels.zoneOf(ctxBg, "fan_auto")
                 if (fAuto > 0) {
-                    val value = fanAutoValue(autoLevel)
+                    val value = HvacChannels.encodeInt(fAuto, "fan_auto", autoLevel) ?: return@execute
                     VehicleBridge.writeInt(fAuto, zoneA, value)
                     val back = VehicleBridge.readInt(fAuto, zoneA)
-                    val backLvl = back?.let { fanAutoLevelOf(it) } ?: 0
+                    val backLvl = back?.let { HvacChannels.fanAutoLevelOf(it) } ?: 0
                     Logx.d(
                         "写 风量 AUTO（0x10020200 乱序映射）：档位=" + autoLevel +
                         " value=0x" + value.toString(16) + " zone=0x" + zoneA.toString(16) +
@@ -2110,246 +1913,19 @@ object VehicleController {
 
     /** ★ v1.4.78：内外循环的实际写入（后台线程） */
     private fun recircWrite(ctx: Context, target: Boolean) {
-        val f = VehicleChannels.funcOf(ctx, "recirc")
-        if (f <= 0) {
-            Logx.e("内外循环：通道未配置")
-            return
-        }
+        if (!HvacCommands.canWrite(ctx, "recirc")) return
+        val function = VehicleChannels.funcOf(ctx, "recirc")
+        if (function <= 0) return
         val zone = VehicleChannels.zoneOf(ctx, "recirc")
-        // ★★ v1.4.80：**裸值优先**！
-        //
-        // 依据（真车回读形态）：内循环读回 0x10030101、**外循环读回裸值 0x0**。
-        // → HAL 这条通道的原生编码就是 **int 裸值**（0=外 / 1=内）。
-        //   复合编码 0x10030100（= functionId 本身，低字节 0 但高位非零）会被 HAL
-        //   判为非法值而拒绝 —— 这就是「内循环能切、外循环切不回」的原因。
-        //
-        // ⚠ 且**不能靠返回值判成败**（HAL 返回 false 但车机真生效，A/C 就是这样），
-        //   必须**回读对账**。
-        // ★★ v1.4.87：**10/11 枚举优先**（HAL 层的真值）
-        //
-        // 权威依据（Handoff 4.1 + ESP32-S3 破译实时读数）：
-        //   ```
-        //   {"power":11,"ac":10,"recirc":11, ...}
-        //   ### 4.1 开关枚举 = 10/11（不是 0/1）
-        //   10 = OFF，11 = ON
-        //   ```
-        // → 内循环 = 11，外循环 = **10**。
-        //   我们之前写 0x10030100（低字节 0）→ HAL 的 {10,11} 体系里根本没有 0
-        //     → 外循环永远写不进去；写 0x10030101（低字节 1）被兼容接受
-        //     → 内循环「碰巧」能切。
-        //
-        // ★★★ v3.6：按**系统 Dock 反编译的权威实现**重排候选（2026-10-22 定论）
-        //
-        // 证据链（oneOS_Dock.apk / com.geely.dockbar，dex 字节码）：
-        //  1) VehicleSignalManager 里 `CycleModeSignal(0x10030100, areaId=0x80000000, 0)`
-        //     → funcId 0x10030100 + **全局 zone**（跟我们实测「zone=0x8 全 FAIL、
-        //       只有 0x80000000 才有效」完全吻合）
-        //  2) RecycleSignalClick.processClick 反编译还原：
-        //       ```java
-        //       int v = signal.getValue();      // getFunctionValue(0x10030100, 0x80000000)
-        //       if (v == 0) signal.setValue(0x10030101);  // 当前=外(0) → 写内
-        //       else        signal.setValue(0);           // 当前≠0   → 写外
-        //       ```
-        //  3) CycleModeSignal.setValue → `setFunctionValue(funcId, areaId, value)`
-        //     **原样写入，不做复合编码**
-        //
-        // ⇒ **权威值域**：
-        //     外循环 = **裸值 0**
-        //     内循环 = **复合 0x10030101**
-        //
-        // 这解释了我们「怎么切都是内循环」：
-        //   · 0x10030101 有效 → 内循环能切进去
-        //   · 0x10030100（低字节 0 但高位非零）**HAL 不认** → 切不出去
-        //   · 裸值 1 也不认（1 不在值域）
-        //   · 唯一能切到外循环的就是**裸值 0** —— 而我们历史上从没在「目标是外」
-        //     的场景下单独试过它（23:48:29 那次目标是内，初始就是外，天然看不出效果）
-        //
-        // ⇒ 新的尝试顺序（每步回读对账，HAL 返回值不可信）：
-        //     内循环：复合 0x10030101 → 裸值 11 → 裸值 1
-        //     外循环：裸值 0      → 复合 0x10030100 → 裸值 10
-        val compOuter = f                                    // 0x10030100（备用，历史实测 HAL 不认）
-        var done = false
-        // ⓪ ★ v3.6：**按系统权威值先试**（内=0x10030101 / 外=裸值 0）
-        //
-        // ★★ v4.1：**写完等 400ms 再回读**（这是外循环切不过去的根因修复）
-        //
-        // 依据（真车实测）：
-        //   · HAL 写入到车机生效需要时间 —— DCY11 实测 A/C 写入后 **+401ms** 才回读出变化
-        //     ```
-        //     12:57:46.270  写 A/C target=关 setFunctionValue(0x10010300, 全局, 0) → OK
-        //     12:57:46.671  HVAC_VERIFY 写前=1 写值=0 写后=0 → 已生效   ← +401ms
-        //     ```
-        //   · 而这里是**写完立即回读**（0ms）→ 永远读到旧值 → 正确的值被误判为失败
-        //   · 误判失败 → 继续往下试 → 最后掉进兜底「切换法」，
-        //     而切换法第一步写的是 0x10030101（=切到**内**循环，有效！）
-        //     ⇒ 结果被推回内循环 —— 正是"能切到内、永远切不到外"的原因
-        //
-        // 权威值统计（云端全量日志，0x10030100 全部写入尝试）：
-        //   zone=全局0x80000000  value=0x10030101 → HAL true  ×18  ← 内循环
-        //   zone=全局0x80000000  value=0         → HAL true  ×9   ← 外循环
-        //   其余全部 false（0x10030100 ×64 / 1 ×9 / 10 ×7 / 0x10030102 / 0x10030103 / 0x1003010A）
-        //   ⚠ 裸值 0 在 zone=0x8 上 7 次全 false → **必须全局 zone**
-        // ★★ v4.2：**方法调用代替裸 { } 块** —— 之前这段写在一个独立 { } 块里，
-        //   Kotlin 把它提升成 `ExternalSyntheticLambda15`（只 new 不 invoke），
-        //   整段成为**死代码**，从来没真正执行过（dexdump 字节码实证）。
-        //   现在抽成独立方法，彻底避开闭包提升。
-        //
-        // ★★★ v3.13.15：**按《空调内外循环接口参考》文档口径**改写
-        //   文档给的写法：
-        //     int current = carFunction.getFunctionValue(HVAC_CYCLE_MODE);          // 无 area 读
-        //     carFunction.setFunctionValue(HVAC_CYCLE_MODE, CYCLE_INNER);           // 无 area 写
-        //     carFunction.setFunctionValue(HVAC_CYCLE_MODE, CYCLE_OUTSIDE);          // 无 area 写
-        //   权威值：内循环 = 复合 0x10030101；外循环 = **裸值 0**
-        //   原车接口内部 area = Integer.MIN_VALUE（= 我们的全局 zone 0x80000000）。
-        //
-        //   ⇒ 写入顺序：
-        //     ① **无 area 重载**（文档首选，VehicleBridge 独立旁路，不影响其它通道）
-        //     ② 带 area 重载（zone=全局，原有路径，作为回落）
-        //   每步都是「写 → 等 400ms → 严格回读对账」；回读不到明确值时再等一次二次回读。
-        val authorityValue = if (target) ((f and 0xFFFFFF00.toInt()) or 1) else 0
-        // ① 文档首选：无 area 重载
-        if (VehicleBridge.hasNoAreaOverload()) {
-            if (recircTryValue(
-                    ctx, f, "无area重载", authorityValue, target,
-                    write = { v -> VehicleBridge.writeIntNoArea(f, v) },
-                    read = { VehicleBridge.readIntNoArea(f) }
-                )
-            ) done = true
-        }
-        // ② 文档等价：带 area 重载（zone = 全局 = Integer.MIN_VALUE）
-        if (!done) {
-            if (recircTryValue(
-                    ctx, f, "带area(全局zone)", authorityValue, target,
-                    write = { v -> VehicleBridge.writeInt(f, zone, v) },
-                    read = { VehicleBridge.readIntNoArea(f) ?: VehicleBridge.readInt(f, zone) }
-                )
-            ) done = true
-        }
-        // ① 复合 0x10030100（外循环备用形态；历史实测 HAL 多半不认）
-        if (!done && !target) {
-            VehicleBridge.writeInt(f, zone, compOuter)
-            val back = readRecircState(ctx)
-            Logx.d(
-                "写 内外循环[复合 0x10030100]：目标=外 value=0x${compOuter.toString(16)} " +
-                "zone=0x${zone.toString(16)} 回读=${recircText(back)}"
-            )
-            if (back != null && back == target) done = true
-        }
-        // ② 裸值 10/11（另一套枚举体系：10=外 OFF / 11=内 ON）
-        val ints1111 = if (target) listOf(11, 1) else listOf(10)
-        for (v in ints1111) {
-            if (done) break
-            VehicleBridge.writeInt(f, zone, v)
-            val back = readRecircState(ctx)      // true=内循环 false=外循环 null=读不到
-            Logx.d(
-                "写 内外循环[裸值]：目标=${if (target) "内" else "外"} value=$v " +
-                "zone=0x${zone.toString(16)} 回读=${recircText(back)}"
-            )
-            if (back != null && back == target) { done = true; break }
-        }
-        // ③ 复合编码 0x1003010A / 0x1003010B（10/11 体系的复合形态，历史很少走通，留作兜底）
-        if (!done) {
-            for (v in (if (target) listOf(11) else listOf(10))) {
-                val composite = (f and 0xFFFFFF00.toInt()) or v
-                VehicleBridge.writeInt(f, zone, composite)
-                val back = readRecircState(ctx)
-                Logx.d(
-                    "写 内外循环[复合]：目标=${if (target) "内" else "外"} value=0x${composite.toString(16)} " +
-                    "回读=${recircText(back)}"
-                )
-                if (back != null && back == target) { done = true; break }
-            }
-        }
-        // ③ Customize 浮点通道（兜底：0.0=外 / 1.0=内）
-        if (!done && Prefs.tempCustomizeWriteEnabled(ctx)) {
-            VehicleBridge.customizeWriteEnabled = true
-            val fv = if (target) 1.0f else 0.0f
-            val okC = VehicleBridge.writeTempCustomize(f, zone, fv)
-            val back = readRecircState(ctx)
-            Logx.d(
-                "写 内外循环[Customize float]：value=$fv 返回=$okC 回读=${recircText(back)}"
-            )
-            if (back != null && back == target) done = true
-        }
-        if (!done) {
-            // 兜底：有些 HAL 把这个通道当「切换」——先切到内(1)，再切到外(0)
-            //
-            // ★★ v4.2：外循环第二步由 `0x10030100`（func|0）改为**裸值 0**。
-            //   依据：真车日志 1.4.96(102) 19:34:33 ——
-            //     写 value=0（裸值） → HAL 返回 true
-            //     写 value=0x10030101 → HAL 返回 true，1 秒后回读 recirc=0x10030101（内循环）
-            //   而 `func|0` = 0x10030100 历史实测 HAL 全部返回 false（64 次全 false）。
-            //   系统 Dock 反编译（RecycleSignalClick.processClick）也是：
-            //     `if (v == 0) setValue(0x10030101) else setValue(0)` —— 裸值 0 才是权威外循环值。
-            Logx.w("内外循环：直接写目标值未生效，改用「切换法」（写 0x10030101 再写裸值 0）")
-            if (target) {
-                VehicleBridge.writeInt(f, zone, (f and 0xFFFFFF00.toInt()) or 1)
-            } else {
-                VehicleBridge.writeInt(f, zone, (f and 0xFFFFFF00.toInt()) or 1)
-                Thread.sleep(300)
-                VehicleBridge.writeInt(f, zone, 0)     // ★ 裸值 0（不是 0x10030100）
-                Thread.sleep(400)
-                val back = readRecircState(ctx)
-                Logx.d(
-                    "写 内外循环[切换法·裸值0]：目标=外 value=0(裸值) " +
-                    "zone=0x${zone.toString(16)} 回读=${recircText(back)}"
-                )
-            }
-        }
+        val value = HvacChannels.encodeInt(function, "recirc", if (target) 1 else 0) ?: return
+        // 全局无 area 与显式全局区是同一目标；仅兼容调用形态，不试其它值或区域。
+        val noArea = if (zone == ZONE_GLOBAL && VehicleBridge.hasNoAreaOverload()) {
+            VehicleBridge.writeIntNoArea(function, value)
+        } else null
+        val accepted = noArea == true || VehicleBridge.verifyWrite(function, zone, value)
+        Logx.d("写 内外循环 target=${if (target) "内" else "外"} zone=$zone raw=0x${value.toString(16)} accepted=$accepted（生效看真实观测）")
     }
 
-    /**
-     * ★★ v4.2：⓪「系统权威值」写入步骤 —— 抽成独立方法。
-     *
-     * 为什么要抽出来：原代码把这段写在一个**独立 `{ }` 块**里，而块内修改了外层
-     * `var done`。Kotlin 编译器会把这种闭包提升为 `$$ExternalSyntheticLambda`，
-     * 而在生成的字节码里只 `new` 了该 lambda 对象、**从未 invoke**，
-     * 导致整段成为**死代码**（dexdump `ExternalSyntheticLambda15` 实证，
-     * 全 dex 搜其 `.invoke` 调用点 = 0）。抽成独立方法后彻底避开闭包提升。
-     *
-     * 权威值：内循环 = 复合 `0x10030101`；外循环 = **裸值 0**。
-     * 写完等 400ms 再回读对账（HAL 生效延迟，实测 A/C 写入 +401ms 才生效）。
-     *
-     * @return true = 回读已确认达到目标状态
-     */
-    /**
-     * ★ v3.13.15：**文档口径的一次写入尝试**（《空调内外循环接口参考》）。
-     *
-     * 流程：写入 → 等 400ms（HAL 生效延迟，实测 A/C 写入 +401ms 才生效）→ 回读对账；
-     *      回读到**未知值**时再等 400ms 做二次回读（避免误判失败）。
-     *
-     * @param label 日志标签（区分无 area / 带 area 等形态）
-     * @param value 要写的值（内循环 = 复合 0x10030101，外循环 = 裸值 0）
-     * @param write 实际写入动作（不同调用形态）
-     * @param read  回读动作
-     * @return true = 回读**明确**达到目标状态
-     */
-    private fun recircTryValue(
-        ctx: Context,
-        f: Int,
-        label: String,
-        value: Int,
-        target: Boolean,
-        write: (Int) -> Boolean?,
-        read: () -> Int?
-    ): Boolean {
-        val accepted = write(value)
-        Thread.sleep(400)
-        var raw = read()
-        var state = classifyRecirc(f, raw)
-        if (state == null) {
-            // 未知 → 再等一次、二次回读（HAL 生效延迟 + 读值抖动）
-            Thread.sleep(400)
-            raw = read()
-            state = classifyRecirc(f, raw)
-        }
-        Logx.d(
-            "写 内外循环[$label]：目标=${if (target) "内" else "外"} " +
-            "value=0x${value.toString(16)}($value) HAL返回=$accepted " +
-            "回读=${recircRawText(raw)} 判定=${recircStateText(state)}"
-        )
-        return state != null && state == target
-    }
 
     /**
      * ★ v3.13.15：**严格按文档判定**读回来的循环状态。
@@ -2370,33 +1946,6 @@ object VehicleController {
         return null                                                 // 未知 / 非激活值
     }
 
-    /** 日志用：原始回读值的可读描述 */
-    private fun recircRawText(raw: Int?): String =
-        if (raw == null) "读不到"
-        else "0x${raw.toString(16)}($raw)"
-
-    /** 日志用：判定结果的可读描述 */
-    private fun recircStateText(state: Boolean?): String = when (state) {
-        true -> "内循环"
-        false -> "外循环"
-        null -> "未知"
-    }
-
-    /**
-     * ★ v1.4.81：读「手动风量」通道的档位（低字节）。
-     * 返回 0..9 = 手动档位，**10 = AUTO**，null = 读不到。
-     */
-    private fun readFanLevel(ctx: Context): Int? {
-        val f = VehicleChannels.funcOf(ctx, "fan_manual")
-        if (f <= 0) return null
-        for (z in intArrayOf(VehicleChannels.zoneOf(ctx, "fan_manual"), 0x8, ZONE_GLOBAL)) {
-            val raw = VehicleBridge.readInt(f, z) ?: continue
-            if (raw == 0xff || raw == 0xfe || raw == 0xfd) continue
-            val idx = raw and 0xFF
-            if (idx in 0..FAN_LEVEL_AUTO) return idx
-        }
-        return null
-    }
 
     /**
      * ★ v1.4.83：读车机当前的双温同步状态（true=开 false=关 null=读不到）。
@@ -2438,10 +1987,10 @@ object VehicleController {
                 return@submitLatest
             }
             val zone = VehicleChannels.zoneOf(ctxBg, "fan_auto")
-            val value = fanAutoValue(l)
+            val value = HvacChannels.encodeInt(f, "fan_auto", l) ?: return@submitLatest
             val r = VehicleBridge.writeInt(f, zone, value)
             val back = VehicleBridge.readInt(f, zone)
-            val backLvl = back?.let { fanAutoLevelOf(it) } ?: 0
+            val backLvl = back?.let { HvacChannels.fanAutoLevelOf(it) } ?: 0
             Logx.d(
                 "设置 AUTO 风道档位：" + l + " 档 → value=0x" + value.toString(16) +
                 " zone=0x" + zone.toString(16) + " 返回=" + r +
@@ -2761,9 +2310,10 @@ object VehicleController {
             val before = hvacState.observed
             val next = change(before)
             val changed = HvacState.changedProperties(before, next)
-            if (next === before && !forceNotify && observedProperties == 0) return@onMain
+            if (next === before && !forceNotify && observedProperties == 0 && (!invalidateReads || groups == 0)) return@onMain
             if (invalidateReads) invalidateGroups(groups, changed)
             hvacState.observe(next, observedProperties, SystemClock.elapsedRealtime(), VehicleBridge.connectionGeneration)
+            if (!invalidateReads) loseEventEvidence(changed)
             appCtx?.let { ctx ->
                 if (next.driverTempC != before.driverTempC) {
                     next.driverTempC?.takeIf { it.isFinite() && it in 5f..45f }?.let { Prefs.setLastDriverTempC(ctx, it) }
