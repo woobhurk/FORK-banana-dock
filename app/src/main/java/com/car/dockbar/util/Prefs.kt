@@ -343,7 +343,7 @@ object Prefs {
     /**
      * 安全等级。连续崩溃时由 App 自动递增，用来做「远程二分定位」：
      *  0 = 正常，全功能
-     *  1 = 关闭「空调状态弹窗」（纯装饰性功能）
+     *  1 = 无额外关闭项（状态浮窗已移除，保留该档以免后续等级错位）
      *  2 = 再关闭「歌词悬浮窗」
      *  3 = 再关闭「媒体接口（MediaSession / 通知使用权）」
      *  4 = 再关闭「车控读取」，只留纯 UI
@@ -461,15 +461,6 @@ object Prefs {
     /** 显示时轻微上移的位移（px），吉利 animSlideAlpha 是 alpha + translationY 组合 */
     fun slideOffsetPx(ctx: Context) = sp(ctx).getInt("slide_offset_px", 24)
     fun setSlideOffsetPx(ctx: Context, v: Int) = sp(ctx).edit().putInt("slide_offset_px", v).apply()
-
-    // ---------------- 空调状态弹窗（自动消失） ----------------
-    /** 调空调时弹出状态浮窗，对齐吉利 BasePopWindow */
-    fun popupEnabled(ctx: Context) = sp(ctx).getBoolean("popup_enabled", true)
-    fun setPopupEnabled(ctx: Context, v: Boolean) = sp(ctx).edit().putBoolean("popup_enabled", v).apply()
-
-    /** 弹窗自动消失时间（ms）。吉利 BasePopWindow.autoDisMissTime = 3000 */
-    fun popupAutoDismissMs(ctx: Context) = sp(ctx).getLong("popup_auto_dismiss_ms", 3000L)
-    fun setPopupAutoDismissMs(ctx: Context, v: Long) = sp(ctx).edit().putLong("popup_auto_dismiss_ms", v).apply()
 
     // ---------------- 日夜模式背景（对齐吉利 setDockBg 日夜切换） ----------------
     /** true = 跟随系统深浅色自动切换底色 */

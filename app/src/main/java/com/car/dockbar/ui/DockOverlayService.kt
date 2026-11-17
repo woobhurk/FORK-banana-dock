@@ -71,7 +71,6 @@ import com.car.dockbar.vehicle.VehicleController
  *  - 窗体级透明：LayoutParams.format = PixelFormat.TRANSLUCENT（对应吉利 format = -3）
  *  - flags：FLAG_NOT_FOCUSABLE | FLAG_NOT_TOUCH_MODAL | FLAG_WATCH_OUTSIDE_TOUCH（0x40028）
  *  - 显示/隐藏由 [DockStateMachine] 状态机驱动，淡入淡出用 alpha + translationY
- *  - 调空调时弹 [StatusPopWindow] 状态浮窗，到期自动消失（对应 BasePopWindow.autoDisMissTime）
  *  - 底色跟随日夜模式切换（对应 BaseDockLayout.setDockBg 的日夜切换）
  */
 class DockOverlayService : Service() {
@@ -138,9 +137,6 @@ class DockOverlayService : Service() {
     // --- 显示/隐藏状态机（对齐吉利 oneOS Dock 的 dockstate 包） ---
     private var stateMachine: DockStateMachine? = null
 
-    // --- 空调 / 车辆状态弹窗（对齐吉利 window/BasePopWindow，到期自动消失） ---
-    private var statusPop: StatusPopWindow? = null
-
     // --- 空调控制浮窗（点击温度 / 风速弹出，双温共用） ---
     private var hvacPop: HvacControlPopup? = null
 
@@ -168,9 +164,6 @@ class DockOverlayService : Service() {
     private var statusLabel: DockStatusLabel? = null
     /** 上一次观测到的 AC 开关状态（用于只在真正变化时弹一次状态小字） */
     // （v1.4.44 已移除 lastAcOn：AC 变化不再触发 Dock 上方状态小字）
-
-    /** 上一次的空调相关状态签名，用于识别"用户刚调了空调" → 弹状态浮窗 */
-    private var lastAcState: VehicleController.State? = null
 
     /** 淡入淡出进行中标记，避免动画重入 */
     private var animating = false
@@ -257,7 +250,7 @@ class DockOverlayService : Service() {
     }
 
     private val vehicleListener: (VehicleController.State) -> Unit = { st ->
-        main.post { bindVehicle(st) }
+        main.post { bindVehicle() }
     }
 
     private val mediaListener: (MediaBridge.MediaInfo) -> Unit = { mi ->
@@ -432,8 +425,6 @@ class DockOverlayService : Service() {
         viewAttached = false
         root = null
         clearBindings()
-        statusPop?.destroy()
-        statusPop = null
         hvacPop?.destroy()
         hvacPop = null
         airDirPop?.destroy()
@@ -456,7 +447,6 @@ class DockOverlayService : Service() {
     private fun clearBindings() {
         mountedEntries.clear()
         lastBoundSnapshot = null
-        lastAcState = null   // 重建后重置首帧判定，避免旧状态误触发弹窗
         animating = false
     }
 
@@ -487,7 +477,7 @@ class DockOverlayService : Service() {
         if (!hadRoot) {
             work?.post { initVehicleAndMedia() }
         }
-        runCatching { bindVehicle(VehicleController.state) }
+        runCatching { bindVehicle() }
         runCatching { bindMedia(MediaBridge.info) }
     }
 
@@ -566,11 +556,9 @@ class DockOverlayService : Service() {
             startContrast()
             setupStateMachine()
             refreshLyricIcons()
-            // 记录初始空调状态，避免开机就弹一次状态浮窗
-            lastAcState = VehicleController.state
             // Dock 上方状态小字：只在长按切换时弹一次（5s 后自动消失），这里不预显示
             statusLabel = DockStatusLabel(this)
-            runCatching { bindVehicle(VehicleController.state) }
+            runCatching { bindVehicle() }
             runCatching { bindMedia(MediaBridge.info) }
         }.onFailure {
             attached = false
@@ -916,68 +904,6 @@ class DockOverlayService : Service() {
         gestureForwarding = false
     }
 
-    // =====================================================================
-    // 空调状态弹窗（自动消失）—— ★ v1.4.40 改成「改了什么就显示什么」
-    // =====================================================================
-
-    /** 空调相关状态变化 → 弹状态浮窗，到期自动消失（首次/服务启动不弹）。温度和风速不提示。 */
-    private fun onAcStateChanged(st: VehicleController.State) {
-        if (!Prefs.popupEnabled(this)) return
-        // 安全等级 >= 1 时禁用状态弹窗（它会再创建一个 overlay 窗口）
-        if (Prefs.safeLevel(this) >= 1) return
-        // 空调控制面板正开着时，不再叠加快照状态浮窗（避免挡住操作）
-        if (hvacPop?.isShowing == true) return
-
-        val prev = lastAcState
-        lastAcState = st
-        if (prev == null) return   // 首帧只记录，不弹
-
-        // 逐字段对比，只列本次变化的项。温度和风速变化不弹提示。
-        val parts = mutableListOf<String>()
-        if (prev.recircInside != st.recircInside) {
-            parts += if (st.recircInside) "内循环" else "外循环"
-        }
-        // ★ AC 变化不弹（用户要求：长按主驾温度切 AC 时不要弹窗）
-        if (prev.seatVent != st.seatVent) {
-            parts += if (st.seatVent > 0) "座椅通风 ${st.seatVent} 档" else "座椅通风 关"
-        }
-        if (prev.seatHeat != st.seatHeat) {
-            parts += if (st.seatHeat > 0) "座椅加热 ${st.seatHeat} 档" else "座椅加热 关"
-        }
-        if (prev.seatVentPassenger != st.seatVentPassenger) {
-            parts += if (st.seatVentPassenger > 0) "副驾通风 ${st.seatVentPassenger} 档" else "副驾通风 关"
-        }
-        if (prev.seatHeatPassenger != st.seatHeatPassenger) {
-            parts += if (st.seatHeatPassenger > 0) "副驾加热 ${st.seatHeatPassenger} 档" else "副驾加热 关"
-        }
-        if (prev.defrostFront != st.defrostFront) {
-            parts += if (st.defrostFront) "前挡加热 开" else "前挡加热 关"
-        }
-        if (prev.defrostRear != st.defrostRear) {
-            parts += if (st.defrostRear) "后挡加热 开" else "后挡加热 关"
-        }
-        if (prev.steeringHeat != st.steeringHeat) {
-            parts += if (st.steeringHeat > 0) "方向盘加热 ${st.steeringHeat} 档" else "方向盘加热 关"
-        }
-        if (parts.isEmpty()) return   // 没有可见变化（如风向变化等不弹的项）
-
-        val delay = Prefs.popupAutoDismissMs(this)
-        val pop = statusPop ?: StatusPopWindow(this).also { statusPop = it }
-        val h = Prefs.dockHeightPx(this)
-        val y = computeY(h)
-        pop.popupX = 0
-        // ★ 用户要求：状态弹窗再往上移一个 Dock 的高度（150px），避免贴太低被 Dock 挡住
-        pop.popupY = if (Prefs.dockAtBottom(this))
-            (y - dp(56) - Prefs.dockHeightPx(this) - Prefs.dockMarginPx(this)).coerceAtLeast(0)
-        else (y + h + dp(8))
-        pop.show(parts.joinToString("　"), delay)
-        // Dock 已隐藏时，随状态弹窗临时显示；到时是否收起仍取决于前台黑名单状态。
-        if (stateMachine?.state == DockState.HIDDEN) {
-            stateMachine?.requestTempShow(delay)
-            stateMachine?.onUserIdle()
-        }
-    }
-
     /**
      * 点击 Dock 上的「主驾温度 / 副驾温度」时触发：开关**系统原生的空调窗口**
      * （com.geely.hvac，即车机原本那个），而不是我们自绘的面板。
@@ -1143,44 +1069,22 @@ class DockOverlayService : Service() {
         }
     }
 
-    /** 长按「副驾温度」切换双温同步 → 弹「双温同步」状态弹窗（用户要求单项） */
+    /** 长按「副驾温度」切换双温同步。 */
     private fun toggleDualSync() {
         onUserInteraction()
         val next = !Prefs.syncTemp(this)
         Prefs.setSyncTemp(this, next)
         Logx.d("双温同步 → ${if (next) "开" else "关"}（长按副驾温度切换）")
-        // ★ v1.4.52：除了本地开关，也把车机自身的 DUAL 通道写一次（原来从来没告诉车机）
         runCatching { VehicleController.setTempDual(this, next) }
-        // ★ v1.4.47：只显示「双温同步」这一项；Dock 上方状态小字已全部移除
-        if (Prefs.popupEnabled(this) && Prefs.safeLevel(this) < 1) {
-            val pop = statusPop ?: StatusPopWindow(this).also { statusPop = it }
-            pop.popupX = 0
-            pop.popupY = if (Prefs.dockAtBottom(this))
-                (computeY(Prefs.dockHeightPx(this)) - dp(56) - Prefs.dockHeightPx(this) - Prefs.dockMarginPx(this)).coerceAtLeast(0)
-            else (Prefs.dockHeightPx(this) + dp(8))
-            pop.show("双温同步 ${if (next) "开" else "关"}", 2000L)
-        }
     }
 
-    /** 长按「主驾温度」切 AC → 弹「AC」状态弹窗（用户要求） */
+    /** 长按「主驾温度」切换 AC。 */
     private fun toggleAcFromDock() {
         onUserInteraction()
         VehicleController.toggleAc(this)
-        // toggleAc 乐观更新：state.acOn 已是目标值
         val ac = VehicleController.state.acOn
         Logx.d("AC → ${if (ac) "开" else "关"}（长按主驾温度切换）")
-        if (Prefs.popupEnabled(this) && Prefs.safeLevel(this) < 1) {
-            val pop = statusPop ?: StatusPopWindow(this).also { statusPop = it }
-            pop.popupX = 0
-            pop.popupY = if (Prefs.dockAtBottom(this))
-                (computeY(Prefs.dockHeightPx(this)) - dp(56) - Prefs.dockHeightPx(this) - Prefs.dockMarginPx(this)).coerceAtLeast(0)
-            else (Prefs.dockHeightPx(this) + dp(8))
-            pop.show("AC ${if (ac) "开" else "关"}", 2000L)
-        }
     }
-
-    /** 双温同步状态小字文案 */
-    private fun syncStatusText(on: Boolean): String = "双温同步：${if (on) "开" else "关"}"
 
     // =====================================================================
     // 背景（日夜模式 + 渐变）
@@ -1335,7 +1239,7 @@ class DockOverlayService : Service() {
         applyPaletteColors(darkText)
         root?.applyPalette(light = !darkText)
         // 真实车控数据可能带来异常值，渲染层必须兜底，绝不能让前台服务闪退
-        runCatching { bindVehicle(VehicleController.state) }
+        runCatching { bindVehicle() }
         runCatching { bindMedia(MediaBridge.info) }
         Logx.d("反色：${if (darkText) "白字（暗背景）" else "黑字（亮背景）"}")
     }
@@ -1436,9 +1340,8 @@ class DockOverlayService : Service() {
         lastBoundSnapshot = snapshot
     }
 
-    private fun bindVehicle(st: VehicleController.State) {
+    private fun bindVehicle() {
         rebind()
-        onAcStateChanged(st)
     }
 
     private fun bindMedia(mi: MediaBridge.MediaInfo) {

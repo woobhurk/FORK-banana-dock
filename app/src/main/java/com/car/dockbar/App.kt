@@ -167,7 +167,7 @@ class App : Application() {
     companion object {
         /** 安全等级含义（也写进上传的日志，方便远程判读） */
         fun safeLevelDesc(level: Int): String = when (level) {
-            1 -> "已关闭「空调状态弹窗」"
+            1 -> "无额外关闭项"
             2 -> "再关闭「歌词悬浮窗」"
             3 -> "再关闭「媒体接口（MediaSession / 通知使用权）」（车控状态保留）"
             else -> "全功能"

@@ -17,7 +17,6 @@ import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
-import android.widget.SeekBar
 import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import androidx.core.content.ContextCompat
@@ -101,37 +100,6 @@ class IconsSettingsPage(activity: MainActivity) : SettingsPage(activity, MainAct
         }
         root.addView(quickAppsGrid)
         refreshAppDrawerSelectionLabel()
-
-        // --- 空调状态弹窗（自动消失） ---
-        // ── [S00] 空调状态弹窗（调空调时显示） ───────────────
-        var popupDurationView: LinearLayout? = null
-        fun updatePopupDurationEnabled(enabled: Boolean) {
-            popupDurationView?.apply {
-                alpha = if (enabled) 1f else .4f
-                for (i in 0 until childCount) {
-                    (getChildAt(i) as? SeekBar)?.isEnabled = enabled
-                }
-            }
-        }
-        addSwitchRow(
-            root, "空调状态弹窗",
-            Prefs.popupEnabled(this)
-        ) {
-            Prefs.setPopupEnabled(this, it)
-            updatePopupDurationEnabled(it)
-        }
-        root.getChildAt(root.childCount - 1).id = R.id.settingsPopupSwitchRow
-        // ★ 用户要求：精确到秒（1 秒步进，不再 0.1 秒）
-        // ── [S01] 弹窗自动消失 ───────────────────────
-        popupDurationView = addSeekRow(
-            root, "弹窗显示时长",
-            (Prefs.popupAutoDismissMs(this) / 1000L).toInt(), 20,
-            { "${it} 秒" },
-            onChange = { Prefs.setPopupAutoDismissMs(this, it * 1000L) },
-            separateValue = true
-        )
-        popupDurationView?.id = R.id.settingsPopupDurationRow
-        updatePopupDurationEnabled(Prefs.popupEnabled(this))
 
         // --- 淡入淡出（时长滑块用于调节显示/隐藏动画快慢）---
         // 0.1 秒粒度（10ms 步进太细不好调）
