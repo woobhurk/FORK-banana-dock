@@ -50,6 +50,7 @@ object Logx {
                 f.parentFile?.mkdirs()
                 if (!f.exists()) f.createNewFile()
                 stream = FileOutputStream(f, true)
+                file = f
                 written = f.length()
             }
         }
@@ -89,9 +90,10 @@ object Logx {
     /** 同步写盘；超出上限时截断保留后半段 */
     @Synchronized
     private fun appendToFile(line: String) {
-        val s = stream ?: return
+        if (stream == null) return
         runCatching {
             if (written > FILE_MAX_BYTES) rotate()
+            val s = stream ?: return
             val bytes = (line + "\n").toByteArray(Charsets.UTF_8)
             s.write(bytes)
             s.flush()
@@ -124,6 +126,46 @@ object Logx {
 
     @Synchronized
     fun snapshot(): List<String> = buffer.toList()
+
+    /** 活动文件在日志锁内快照；其它归档和内存落盘在锁外复制，避免阻塞全部日志生产者。 */
+    internal fun copyFilesForExport(sources: Map<String, File>, destination: File): List<String> {
+        val missing = mutableListOf<String>()
+        val activeSnapshot: Pair<String, ByteArray?>?
+        val memory: String
+        synchronized(this) {
+            stream?.flush()
+            val active = file?.absoluteFile
+            val entry = sources.entries.firstOrNull { it.value.absoluteFile == active }
+            activeSnapshot = entry?.let { it.key to it.value.takeIf { f -> f.exists() && f.isFile }?.readBytes() }
+            memory = buffer.joinToString("\n")
+        }
+        val copied = activeSnapshot?.first
+        activeSnapshot?.let { (name, bytes) ->
+            if (bytes == null) {
+                missing += "$name：文件不存在（可能尚未产生或已被清理）"
+            } else {
+                val target = File(destination, name)
+                target.parentFile?.mkdirs()
+                target.writeBytes(bytes)
+            }
+        }
+        sources.forEach { (name, source) ->
+            if (name != copied) copyExportFile(name, source, destination, missing)
+        }
+        File(destination, "memory_snapshot.log").writeText(memory, Charsets.UTF_8)
+        return missing
+    }
+
+    private fun copyExportFile(name: String, source: File, destination: File, missing: MutableList<String>) {
+        if (!source.exists()) {
+            missing += "$name：文件不存在（可能尚未产生或已被清理）"
+        } else {
+            check(source.isFile) { "$name 不是普通文件" }
+            val target = File(destination, name)
+            target.parentFile?.mkdirs()
+            source.copyTo(target, overwrite = false)
+        }
+    }
 
     @Synchronized
     fun addListener(l: (String) -> Unit) { listeners.add(l) }

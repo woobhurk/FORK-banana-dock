@@ -475,6 +475,14 @@ object VehicleController {
         val configuration = ++watcherConfiguration
         val epoch = validationEpoch
         val connection = VehicleBridge.connectionGeneration
+        // 配置目录仅在订阅重配时生成，不在每次轮询或回调重建。
+        val pollingKeys = refreshKeys.flatMap { it.asList() }.toSet()
+        val evidenceKeys = (VehicleChannels.ALL.map { it.key } + pollingKeys).distinct()
+        val evidenceConfigs = evidenceKeys.map { key ->
+            HvacChannelEvidence.ChannelConfig(key, evidenceFunction(c, key), evidenceZone(c, key), key in pollingKeys)
+        }
+        HvacChannelEvidence.connection(connection, VehicleBridge.backend.label, VehicleBridge.isReady)
+        HvacChannelEvidence.registration(connection, configuration, evidenceConfigs, keys.toSet(), null)
         Logx.w("HVAC_TEST stage=SUBSCRIBE_BEGIN backend=${VehicleBridge.backend.label} keys=$keys funcs=${funcs.joinToString { "0x" + it.toString(16) }}")
         val ok = VehicleBridge.registerWatcher(funcs) { fid, zone, value ->
             val receivedAt = SystemClock.elapsedRealtime()
@@ -483,10 +491,16 @@ object VehicleController {
                     connection != VehicleBridge.connectionGeneration) return@post
                 if (validationMode != null && activeValidationMode() == null) return@post
                 runCatching {
-                    val key = keys.firstOrNull {
-                        VehicleChannels.funcOf(c, it) == fid && VehicleChannels.zoneOf(c, it) == zone
-                    }
+                    val key = evidenceConfigs.firstOrNull {
+                        it.key in keys && it.fid == fid && it.configuredZone == zone
+                    }?.key
                     if (key == null) {
+                        for (config in evidenceConfigs) {
+                            if (config.key in keys && config.fid == fid) {
+                                HvacChannelEvidence.event(connection, configuration, config.key, fid, zone,
+                                    value as? Number, false, receivedAt)
+                            }
+                        }
                         if (HvacDiagnostics.active) Logx.w("HVAC_TEST stage=EVENT_IGNORED fid=0x${fid.toString(16)} zone=$zone raw=$value reason=未订阅或区域不匹配")
                         return@runCatching
                     }
@@ -495,6 +509,7 @@ object VehicleController {
                     val float = if (temperature && (value is Float || value is Double)) HvacChannels.normalizeTemperature((value as Number).toFloat()) else null
                     val raw = if (value is Int || value is Short || value is Byte) (value as Number).toInt() else null
                     val accepted = float != null || (raw != null && validReading(c, key, raw))
+                    HvacChannelEvidence.event(connection, configuration, key, fid, zone, value as? Number, accepted, receivedAt)
                     if (accepted) {
                         update(groupMaskOf(key), observedProperties = HvacChannels.observationProperties(key, value)) { current ->
                             val next = if (float != null) {
@@ -511,7 +526,7 @@ object VehicleController {
                     if (accepted && value is Number) HvacCommands.observe(fid, zone, value, "EVENT", receivedAt, connection)
                     HvacDiagnostics.event(key, value, accepted, before != state, zone,
                         SystemClock.elapsedRealtime() - receivedAt)
-                    Logx.d("车控事件 key=$key fid=0x${fid.toString(16)} zone=$zone raw=$value accepted=$accepted changed=${before != state}")
+                    // 重复事件由观测器聚合；不在主线程为每个回调同步落盘。
                     if (evidenceOn() && fid == VehicleChannels.FUNC_CIRCULATION && raw != null) {
                         Logx.d("★ 取证：内外循环事件 zone=$zone raw=$raw 解析=${recircTextOf(raw)}")
                     }
@@ -519,6 +534,7 @@ object VehicleController {
             }
         }
         val currentConnection = connection == VehicleBridge.connectionGeneration
+        if (currentConnection) HvacChannelEvidence.registration(connection, configuration, evidenceConfigs, keys.toSet(), ok)
         if (currentConnection) {
             watcherConnection = connection
             subscriptionAccepted = ok
@@ -691,6 +707,7 @@ object VehicleController {
         val values = IntArray(keys.size)
         val epoch = validationEpoch
         val connection = VehicleBridge.connectionGeneration
+        val evidenceSubscription = watcherConfiguration
         val normalKeys = Prefs.hvacEventKeys(c)
         val temperatures = if (group == VehicleRefreshGroup.TEMPERATURE &&
             (activeValidationMode() == HvacValidationMode.TEMPERATURE || normalKeys.any { it == "temp_driver" || it == "temp_passenger" } ||
@@ -711,6 +728,8 @@ object VehicleController {
                     (validationMode != null && activeValidationMode() == null)) break
                 val temp = rawFloat?.let(HvacChannels::normalizeTemperature)
                 if (epoch == validationEpoch) HvacDiagnostics.read(key, rawFloat, temp != null, "FLOAT_READ zone=$zone", observedAt)
+                if (fid > 0) HvacChannelEvidence.read(connection, evidenceSubscription, key, fid, zone, zone,
+                    rawFloat, temp != null, "FLOAT_READ", observedAt, SystemClock.elapsedRealtime() - observedAt)
                 if (temp != null) {
                     temperatures[i] = temp
                     continue
@@ -718,14 +737,13 @@ object VehicleController {
             }
             var actualZone = if (key == "defrost_front" || key == "defrost_rear" || key == "steering_heat") ZONE_GLOBAL else VehicleChannels.zoneOf(c, key)
             val raw = when (key) {
-                "defrost_front" -> readBare(FUNC_DEFROST_FRONT)
-                "defrost_rear" -> readBare(FUNC_DEFROST_REAR)
-                "steering_heat" -> readBare(FUNC_STEERING_HEAT)
+                "defrost_front", "defrost_rear", "steering_heat" -> readEvidenceInt(c, key,
+                    evidenceFunction(c, key), ZONE_GLOBAL, ZONE_GLOBAL, epoch, connection, evidenceSubscription)
                 else -> {
                     val now = SystemClock.elapsedRealtime()
                     val probe = forceProbe || now >= nextFallbackProbeAt[group.ordinal][i]
                     if (probe) nextFallbackProbeAt[group.ordinal][i] = now + FALLBACK_PROBE_INTERVAL_MS
-                    val result = read(key, c, allowZoneFallback = probe)
+                    val result = read(key, c, allowZoneFallback = probe, evidenceEpoch = epoch)
                     actualZone = result.zone
                     result.value
                 }
@@ -926,31 +944,57 @@ object VehicleController {
     private val readZoneCache = HashMap<String, ReadZone>()
     private var readZoneConnection = Long.MIN_VALUE
 
+    private fun evidenceFunction(c: Context, key: String): Int = when (key) {
+        "defrost_front" -> FUNC_DEFROST_FRONT
+        "defrost_rear" -> FUNC_DEFROST_REAR
+        "steering_heat" -> FUNC_STEERING_HEAT
+        else -> VehicleChannels.funcOf(c, key)
+    }
+
+    private fun evidenceZone(c: Context, key: String): Int = when (key) {
+        "defrost_front", "defrost_rear", "steering_heat" -> ZONE_GLOBAL
+        else -> VehicleChannels.zoneOf(c, key)
+    }
+
+    /** 沿用当前真实读取；日志记录逐次区域尝试，不把失败回退样本吞成最终成功。 */
+    private fun readEvidenceInt(c: Context, key: String, fid: Int, configured: Int, zone: Int,
+                                epoch: Long?, connection: Long, subscription: Long): Int? {
+        val started = SystemClock.elapsedRealtime()
+        val raw = VehicleBridge.readInt(fid, zone)
+        if (epoch != null && epoch == validationEpoch && connection == VehicleBridge.connectionGeneration &&
+            (validationMode == null || activeValidationMode() != null)) {
+            HvacChannelEvidence.read(connection, subscription, key, fid, configured, zone, raw,
+                raw != null && validReading(c, key, raw), "INT_READ", started, SystemClock.elapsedRealtime() - started)
+        }
+        return raw
+    }
+
     /** 读取命中仅缓存本连接；绝不因读到值就改写控制区域配置。 */
-    private fun read(key: String, ctx: Context, allowZoneFallback: Boolean = true): ChannelRead {
+    private fun read(key: String, ctx: Context, allowZoneFallback: Boolean = true, evidenceEpoch: Long? = null): ChannelRead {
         val f = VehicleChannels.funcOf(ctx, key)
         val configured = VehicleChannels.zoneOf(ctx, key)
         if (f <= 0) return ChannelRead(null, configured)
         val connection = VehicleBridge.connectionGeneration
+        val subscription = watcherConfiguration
         if (connection != readZoneConnection) {
             readZoneCache.clear()
             readZoneConnection = connection
         }
         val cached = readZoneCache[key]?.takeIf { it.function == f && it.configured == configured }
         val firstZone = cached?.actual ?: configured
-        val first = VehicleBridge.readInt(f, firstZone)
+        val first = readEvidenceInt(ctx, key, f, configured, firstZone, evidenceEpoch, connection, subscription)
         if (connection != VehicleBridge.connectionGeneration) return ChannelRead(null, firstZone)
         if (first != null && validReading(ctx, key, first)) return ChannelRead(first, firstZone)
         readZoneCache.remove(key)
         if (firstZone != configured) {
-            val primary = VehicleBridge.readInt(f, configured)
+            val primary = readEvidenceInt(ctx, key, f, configured, configured, evidenceEpoch, connection, subscription)
             if (connection != VehicleBridge.connectionGeneration) return ChannelRead(null, configured)
             if (primary != null && validReading(ctx, key, primary)) return ChannelRead(primary, configured)
         }
         if (!allowZoneFallback) return ChannelRead(first, firstZone)
         for (zone in HvacChannels.readZones(key, configured)) {
             if (zone == firstZone || (firstZone != configured && zone == configured)) continue
-            val value = VehicleBridge.readInt(f, zone)
+            val value = readEvidenceInt(ctx, key, f, configured, zone, evidenceEpoch, connection, subscription)
             if (connection != VehicleBridge.connectionGeneration) return ChannelRead(null, zone)
             if (value != null && validReading(ctx, key, value)) {
                 readZoneCache[key] = ReadZone(f, configured, zone)

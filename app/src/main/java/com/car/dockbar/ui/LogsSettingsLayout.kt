@@ -134,7 +134,14 @@ internal class LogsSettingsLayout(activity: Activity) : SettingsPageLayout(activ
             add(experiments, control, 12)
         }
         val actions = card(actionCol, "诊断操作", "执行结果显示在左侧，保留原有执行与反馈逻辑")
-        buttons.filter { it !in transfer }.chunked(2).forEach { pair ->
+        // 导出固定放在诊断操作首行，后续两列重排不再把新按钮遗漏。
+        val export = buttons.firstOrNull { it.tag == "diagnostic-log-export" }
+        export?.let {
+            it.textSize = 15f
+            it.minHeight = dp(56)
+            add(actions, take(it), 18)
+        }
+        buttons.filter { it !in transfer && it !== export }.chunked(2).forEach { pair ->
             val line = row()
             pair.forEachIndexed { index, button ->
                 button.textSize = 14f

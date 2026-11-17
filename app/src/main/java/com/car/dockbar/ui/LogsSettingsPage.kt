@@ -11,6 +11,12 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.contract.ActivityResultContracts
+import com.car.dockbar.util.DiagnosticLogExporter
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import androidx.core.content.ContextCompat
 import com.car.dockbar.App
 import com.car.dockbar.R
@@ -48,6 +54,9 @@ internal class LogsSettingsPage(activity: MainActivity) :
     private lateinit var tvLog: TextView
     private lateinit var svLog: ScrollView
     private lateinit var llChannels: LinearLayout
+    private var exportLauncher: ActivityResultLauncher<String>? = null
+    private var exportRunning = false
+    private var exportButton: Button? = null
 
     private var tvStateRef: TextView? = null
     private var created = false
@@ -76,23 +85,30 @@ internal class LogsSettingsPage(activity: MainActivity) :
     override fun create() {
         if (created) return
         created = true
+        exportLauncher = activity.registerForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
+            if (uri == null) {
+                exportButton?.isEnabled = true
+                exportButton?.alpha = 1f
+            } else startExport(uri)
+        }
         bindViews()
         buildChannelRows()
         wireActions()
         addLogUploadSection()
         addHvacSubscriptionAction()
         addHvacValidationActions()
+        addDiagnosticExportAction()
 
         Logx.addListener(logListener)
         Logx.snapshot().forEach(::appendLog)
         appendLog("—— 打开配置页 ——")
 
-        // 保留 MainActivity 原有的崩溃取证行为：显示一次后清除标记，
-        // 避免后续再次进入时重复展示同一份崩溃记录。
+        // 启动判据仍按原语义清除；导出专用归档不参与熔断和上传判定。
         val crash = CrashHandler.read(this)
         if (crash != null) {
             appendLog("⚠⚠ 上次闪退堆栈：\n$crash")
-            CrashHandler.clear(this)
+            CrashHandler.archiveForExport(this, crash)
+            CrashHandler.clear(this, clearExportArchive = false)
             Logx.e("检测到上次闪退，已把堆栈显示在下方日志区")
         }
         refreshBackendStatus()
@@ -313,7 +329,7 @@ internal class LogsSettingsPage(activity: MainActivity) :
                 .setTitle("日常空调同步通道")
                 .setMessage("本车已验证风量、A/C、温度的读取与事件；循环仅验证读取，风向 0/8 的语义仍未确定，不代表所有车型均可用。\n" +
                     "⚠ 温度会额外启用浮点 Customize/native 读取和事件，可能使进程直接闪退，Java 异常捕获无法保护；厂商其他事件回调也有 native 风险，请在停车安全时配置。\n" +
-                    "原有温度监听、全量监听开关及其基线仍保留；全部不选仅关闭新增日常通道。\n" +
+                    "原有温度监听、全量监听开关及其基线仍保留；未配置过日常通道时默认勾选风量（手动 + AUTO），已有选择不会被覆盖；全部不选仅关闭新增日常通道。\n" +
                     "保存仅调整订阅与读取，不自动写入车控或补权，也不改变车控写入开关。临时验证结束不会清除此配置。")
                 .setPositiveButton("选择通道") { _, _ ->
                     val labels = arrayOf(
@@ -671,6 +687,62 @@ internal class LogsSettingsPage(activity: MainActivity) :
         setPadding(dp(6), dp(6), dp(6), dp(6))
         background = ContextCompat.getDrawable(this@LogsSettingsPage, R.drawable.bg_field)
         inputType = InputType.TYPE_CLASS_TEXT
+    }
+
+    private fun addDiagnosticExportAction() {
+        val button = smallBtn("导出诊断与运行日志") { btn ->
+            if (exportRunning) return@smallBtn
+            exportButton = btn
+            btn.isEnabled = false
+            btn.alpha = 0.45f
+            AlertDialog.Builder(activity)
+                .setTitle("导出诊断与运行日志")
+                .setMessage("日志可能包含应用名/包名、媒体信息及设备诊断信息，请仅交给可信分析者。选择保存位置不会自动分享或上传。")
+                .setPositiveButton("选择保存位置") { _, _ ->
+                    val name = "banana-dock-diagnostics-${SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())}.zip"
+                    try {
+                        val launcher = exportLauncher ?: throw IllegalStateException("文档保存器尚未就绪")
+                        launcher.launch(name)
+                    } catch (e: Exception) {
+                        btn.isEnabled = true
+                        btn.alpha = 1f
+                        Logx.e("无法打开日志保存位置", e)
+                        toastOnce("无法打开保存位置：${e.javaClass.simpleName}")
+                    }
+                }
+                .setNegativeButton("取消") { _, _ ->
+                    btn.isEnabled = true
+                    btn.alpha = 1f
+                }
+                .setOnCancelListener {
+                    btn.isEnabled = true
+                    btn.alpha = 1f
+                }
+                .show()
+        }
+        button.tag = "diagnostic-log-export"
+        exportButton = button
+        root.addView(button)
+    }
+
+    private fun startExport(uri: android.net.Uri) {
+        if (exportRunning) return
+        exportRunning = true
+        val appContext = applicationContext
+        val pageRef = java.lang.ref.WeakReference(this)
+        Thread {
+            val result = DiagnosticLogExporter.export(appContext, uri)
+            val page = pageRef.get() ?: return@Thread
+            synchronized(page.callbackLock) {
+                if (page.destroyed) return@Thread
+                page.main.post {
+                    page.exportRunning = false
+                    page.exportButton?.isEnabled = true
+                    page.exportButton?.alpha = 1f
+                    page.toastOnce(result.message)
+                }
+            }
+        }.apply { isDaemon = true; name = "diagnostic-export" }.start()
     }
 
     private fun smallBtn(text: String, onClick: (Button) -> Unit): Button = Button(this).apply {

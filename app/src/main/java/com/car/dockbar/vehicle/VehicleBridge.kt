@@ -180,6 +180,7 @@ object VehicleBridge {
         if (tryEcarX(ctx)) {
             backend = Backend.ECARX
             ++connectionGeneration
+            HvacChannelEvidence.connection(connectionGeneration, backend.label)
             Logx.d("车控通道就绪：${backend.label}")
             // GlyCar是同一厂商接口的属性门面；准备浮点句柄不是获取另一套授权。
             runCatching { ensureGlyCar(ctx) }
@@ -193,6 +194,7 @@ object VehicleBridge {
         if (tryGlyCar(ctx)) {
             backend = Backend.GLYCAR
             ++connectionGeneration
+            HvacChannelEvidence.connection(connectionGeneration, backend.label)
             Logx.d("车控通道就绪：${backend.label}")
             dumpProbe(ctx)
             return true
@@ -1117,6 +1119,7 @@ object VehicleBridge {
     @Synchronized
     fun reset() {
         ++connectionGeneration
+        HvacChannelEvidence.connection(connectionGeneration, Backend.NONE.label, ready = false)
         unregisterWatcher()
         session = null
         carObj = null

@@ -76,7 +76,16 @@ object CrashHandler {
             if (!f.exists() || f.length() == 0L) null else f.readText()
         }.getOrNull()
 
-    fun clear(ctx: Context) {
+    /** 页面展示并清除启动判据前，保留一份仅供用户主动导出的最近 Java 堆栈。 */
+    fun archiveForExport(ctx: Context, text: String) {
+        runCatching {
+            val dir = LogUploader.logDir(ctx)
+            File(dir, "java_crash_export.txt").writeText(text, Charsets.UTF_8)
+        }.onFailure { Logx.e("Java 崩溃导出归档失败", it) }
+    }
+
+    fun clear(ctx: Context, clearExportArchive: Boolean = true) {
         runCatching { File(ctx.filesDir, FILE).delete() }
+        if (clearExportArchive) runCatching { File(LogUploader.logDir(ctx), "java_crash_export.txt").delete() }
     }
 }

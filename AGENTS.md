@@ -88,9 +88,10 @@
 | 空调真实观测、显示目标与到期回落 | `vehicle/HvacState.kt` |
 | 车控分组轮询、合并和公平调度 | `vehicle/VehicleRefreshQueue.kt` |
 | 空调纯编码/解码与事件证明降频 | `vehicle/HvacChannels.kt`、`vehicle/HvacRefreshPolicy.kt` |
+| 空调通道观测证据与导出 | `vehicle/HvacChannelEvidence.kt`、`util/DiagnosticLogExporter.kt` |
 | 原车接口验证会话与结果报告 | `vehicle/HvacDiagnostics.kt`、`ui/LogsSettingsPage.kt` |
 | 传感器 | `vehicle/SensorBridge.kt` |
-| 日志、崩溃和上传 | `util/Logx.kt`、`util/LogUploader.kt`、`util/NativeCrashHandler.kt` |
+| 日志、崩溃和上传 | `util/Logx.kt`、`util/LogUploader.kt`、`util/DiagnosticLogExporter.kt`、`util/NativeCrashHandler.kt` |
 | 偏好设置兼容入口与启动 | `util/Prefs.kt`、`App.kt` |
 | Dock 黑名单默认值、迁移与存储 | `util/DockBlacklistDefaults.kt`、`util/DockBlacklistMigration.kt`、`util/DockBlacklistPreferences.kt`、`util/DockBlacklistRules.kt` |
 | 规则、迁移与控件单元测试 | `app/src/test/java/com/car/dockbar/util/`、`app/src/test/java/com/car/dockbar/dock/` |
@@ -248,7 +249,7 @@
 
 ### 5.7 原车空调接口按需验证（当前）
 
-- “诊断与日志”提供“原车空调接口验证（2分钟）”“停止空调接口验证”“查看空调验证结果”；默认选择风量，另可显式验证常用空调或包含温度。测试不自动写车控、不补权、不修改用户写入开关及安全等级；新增监听和浮点主动读取不会在安装后自动开启。
+- “诊断与日志”提供“原车空调接口验证（2分钟）”“停止空调接口验证”“查看空调验证结果”；默认选择风量，另可显式验证常用空调或包含温度。测试不自动写车控、不补权、不修改用户写入开关及安全等级；除了日常默认风量和原有温度监听，其他新增监听及主动浮点读取仍由用户显式开启。
 - 基础监听与本次实验订阅合并为同一份按属性集合；ECARX 使用精确 `IFunctionValueWatcher`，GlyCar 使用 `IGlyCarEventCallBack` 与 `registerSingleCarEventCallback`，不退回 GlyCar 全量注册。替换先卸载旧集合，失败不谎报已注册；迟到的旧代理事件被忽略。停止或到期只移除本次实验，恢复原有监听。应用重启不自动恢复实验；native 回调仍可能使普通应用直接闪退，原有熔断保留。
 - 验证中的温度组先查询可用性并尝试浮点 ℃ 读取，无效时才走既有整数兜底；10..40℃ 以外、NaN、哨兵和错误 zone 不覆盖已知状态。主副驾按功能号和区域双重匹配。默认运行的温度采样方式不因安装新包而强制改为浮点。
 - `HVAC_TEST` 标记区分 START、REGISTER、CAP、READ、EVENT、WRITE、CHECK、END。REGISTER 的 accepted 仅表示注册调用被接受；GlyCar 的 void 门面还会丢弃底层注册返回值，不能据此确认底层接受。CAP 是厂商支持和值域查询，不等于读写授权。报告分别统计实际事件、有效事件、状态变化和真实读取，轮询不会增加事件计数；EVENT 的 delayMs 仅为接收回调到主线程处理的时间，不是车辆操作到显示的总延迟。
@@ -260,7 +261,7 @@
 
 ### 5.8 日常同步与目标状态（当前）
 
-- “诊断与日志 → 日常空调同步通道”明确选择风量、AC、主副驾温度、循环和风向；新增配置默认空，取消不保存，全部不选关闭新增通道，不自动加入座椅或方向盘。基线旧开关、日常配置和临时验证取并集，停止验证保留日常配置；有 Java/native/abort 落盘证据或既有早期连续异常时关闭新增日常通道。稳定后仅有未正常退出标记、没有崩溃证据时保留配置，避免车机断电清空选择；完全没有证据的晚发 native 崩溃与系统杀进程无法可靠区分。
+- “诊断与日志 → 日常空调同步通道”允许选择风量、AC、主副驾温度、循环和风向。没有保存过 `hvac_event_keys` 时默认订阅手动和 AUTO 风量；已保存的空集合或自定义集合原样尊重，不因升级、读取或停止测试补回。取消不保存，全部不选关闭新增日常通道，不自动加入其他通道。基线旧开关、日常配置和临时验证取并集，停止验证保留日常风量；有 Java/native/abort 落盘证据或既有早期连续异常时持久保存空集合停用新增日常通道，默认风量也受此熔断。稳定后仅有未正常退出标记、没有崩溃证据时保留配置，避免车机断电清空选择；完全没有证据的晚发 native 崩溃与系统杀进程无法可靠区分。
 - 显式选择日常温度后，温度浮点主动读取不依赖两分钟验证；未选择时保留旧默认读取策略。真实值、显示目标和命令接受分别记录：界面预览不能用作车辆回读，温度持久缓存只保存观测，不保存尚未确认的目标。
 - 所有意图在主线程基于当前显示目标累计，再提交不可变目标到共享 worker。尚未执行的独立绝对设温和风量目标可合并；整数步进、双温同步组合、翻转及记忆动作不随意合并。旧序号取消和旧连接结果不得清除新目标，相同显示仍跳过重复绑定。
 - 写后确认从实际写动作完成后安排，而不是从主线程提交时刻倒计时。温度定向回读延迟 900ms；仍有效的当前目标按属性续期，不复活过期目标。只有本次真实尝试浮点写入才开启相应温度不超过 3500ms 的浮点确认窗口，默认日常通道空、旧温度监听关闭时也可确认这次业务写入；未确认目标在窗口内使用 500ms 兜底，匹配或到期后恢复常态策略，不把确认变成永久浮点轮询。
@@ -273,6 +274,7 @@
 - NATIVE_PREPARING 只表示调用准备；紧邻原生反射调用激活确认窗口，准备日志和锁等待不算进原生耗时，也不能提前确认。日志分列排队耗时、原生调用耗时、接口返回是否接受及首次合法观测匹配耗时；RAW 调用缺少操作上下文时，排队耗时保留 UNKNOWN。
 - 接受与观测彼此独立：accepted=false 不直接推断权限不足；OBSERVED_MATCH、OBSERVED_DIFFERENT、UNKNOWN 均不能证明实际物理效果。首次合法匹配只记录一次，后续外部变化不改写其耗时，超时或旧连接观测不能冒充及时确认。验证报告的业务采样 READ 与原生写后校验分开统计，后者见实际调用流水及 HVAC_VERIFY。
 
+- `HvacChannelEvidence` 会对当前连接的 `VehicleChannels.ALL`、分组读取目录（包括前挡/后挡除霜等舒适通道）及当前订阅回调做有界证据累计；它记录配置/实际 zone、连接与订阅代际、注册接受、事件有效性、轮询变化和读取耗时。未订阅、无事件、坏值或没有现有读取覆盖时只报告 UNKNOWN，不额外探测，也不把注册接受或轮询变化写成事件能力证明。迟到读取仍计真实调用次数，但不覆盖较新的事件基线或增加轮询独有变化计数。
 
 ## 6. 车控接口和安全边界
 
@@ -379,6 +381,8 @@ https://28059b4b3e6a450db00a72ad75ea95a0.sg2.agentos-app.run/upload
 - `files/logs/prev.log`
 - `files/logs/native_crash.txt`、`native_crash.txt.err`
 - `files/last_crash.txt`
+- 诊断页“导出诊断与运行日志”通过 Android 系统创建文档保存器生成 ZIP，由用户选择保存位置，不申请存储权限、不自动上传。ZIP 包含固定白名单中的 `session.log`、`prev.log`、native/abort 证据、最近 Java 崩溃归档、`HvacDiagnostics` 和 `HvacChannelEvidence` 报告、内存日志补充及 UTF-8 元数据；缺失文件明确列出。
+- 导出副本会过滤运行日志中的 URL 查询凭据和 Authorization bearer 内容；不包含 SharedPreferences、上传队列、密钥或其他应用私有文件。日志可能包含应用名、包名、媒体和车控诊断信息，分享前需由用户自行确认接收者。保存器取消、启动失败或写入失败均不报告成功，临时文件在结束时清理。
 
 根目录 `log_server.py` 是纯 Python 标准库的局域网接收服务，默认监听 `0.0.0.0:8080`，按天写入 `log_server_logs/YYYY-MM-DD.jsonl`。它只适用于开发诊断，不是 CI 发布服务。远程服务端的子域名可能因重新部署变化；修改默认端点后必须重新核对代码并重新构建。
 
