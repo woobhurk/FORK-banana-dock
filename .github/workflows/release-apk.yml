@@ -291,16 +291,44 @@ jobs:
           # 页面先展示提交说明，GitHub 再把自动 Changelog 接在后面。
           # HTML 注释不显示，下次发布用它判断能否标为 Latest。
           # 与 detect 相同：说明以 ci 开头（分隔符或结尾）的发布提交不写入。
+          # 范围从最近一次稳定 Release（非 Pre-release，且 tag 是当前提交的祖先）到本次。
+          # 手动构建的 v<version>-r<run> 不重置起点。
           is_release_commit() {
             (
               shopt -s nocasematch
               [[ "$1" == ci || "$1" == ci:* || "$1" == ci：* || "$1" == ci[[:space:]]* || "$1" == ci$'\u3000'* ]]
             )
           }
-          if previous_tag="$(git describe --tags --abbrev=0 HEAD 2>/dev/null)"; then
+          stable_tags_file="$RUNNER_TEMP/stable-release-tags.txt"
+          gh release list --repo "$GITHUB_REPOSITORY" \
+            --exclude-drafts --exclude-pre-releases --limit 100 \
+            --json tagName --jq '.[].tagName' > "$stable_tags_file"
+          previous_tag=""
+          previous_distance=-1
+          while IFS= read -r candidate; do
+            [[ -z "$candidate" || "$candidate" == "null" ]] && continue
+            if ! git rev-parse -q --verify "refs/tags/${candidate}^{commit}" >/dev/null; then
+              echo "::error::稳定 Release 的 tag 未检出：$candidate"
+              exit 1
+            fi
+            if ! git merge-base --is-ancestor "$candidate" HEAD; then
+              continue
+            fi
+            distance="$(git rev-list --count "${candidate}..HEAD")"
+            # 取离当前提交最近的稳定祖先，而不是发布时间最新但不在这条历史上的 Release。
+            if (( previous_distance < 0 || distance < previous_distance )); then
+              previous_tag="$candidate"
+              previous_distance="$distance"
+            fi
+          done < "$stable_tags_file"
+          notes_start=()
+          if [[ -n "$previous_tag" ]]; then
             log_range="${previous_tag}..HEAD"
+            notes_start=(--notes-start-tag "$previous_tag")
+            echo "更新日志范围：${previous_tag}..HEAD"
           else
             log_range="HEAD"
+            echo "没有更早的稳定 Release，更新日志包含全部提交"
           fi
           git log --reverse --no-merges --format='%s%x1f%h' "$log_range" > "$RUNNER_TEMP/release-commits.txt"
           notes_file="$RUNNER_TEMP/release-notes.md"
@@ -316,13 +344,13 @@ jobs:
               found=1
             done < "$RUNNER_TEMP/release-commits.txt"
             if (( found == 0 )); then
-              printf '%s\n' '自上次发布以来没有新的提交。'
+              printf '%s\n' '自上次稳定发布以来没有新的提交。'
             fi
           } > "$notes_file"
           gh release create "$RELEASE_TAG" dist/* \
             --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
             --title "$release_title" --notes-file "$notes_file" \
-            --generate-notes "${prerelease[@]}" --latest="$make_latest"
+            --generate-notes "${notes_start[@]}" "${prerelease[@]}" --latest="$make_latest"
 
       - name: Remove signing key
         if: always()
