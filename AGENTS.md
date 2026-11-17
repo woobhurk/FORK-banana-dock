@@ -81,8 +81,10 @@
 | 歌词服务和歌词数据源 | `ui/LyricOverlayService.kt`、`media/LyricMonitor.kt`、`media/LyricDownloader.kt` |
 | 媒体会话和通知补充信息 | `media/MediaBridge.kt`、`media/DockNotificationListener.kt` |
 | 车控通道配置 | `config/VehicleChannels.kt` |
-| 车控读写和状态 | `vehicle/VehicleController.kt`、`vehicle/VehicleBridge.kt` |
+| 车控业务门面、状态协调与反射适配 | `vehicle/VehicleController.kt`、`vehicle/VehicleBridge.kt` |
 | 空调共享 I/O 队列与写入门禁 | `vehicle/HvacCommands.kt` |
+| 空调写入策略、组合动作与温度兼容 | `vehicle/HvacWriteActions.kt` |
+| 操作、真实原生写入与观测确认流水 | `vehicle/HvacCommandTrace.kt` |
 | 空调真实观测、显示目标与到期回落 | `vehicle/HvacState.kt` |
 | 车控分组轮询、合并和公平调度 | `vehicle/VehicleRefreshQueue.kt` |
 | 空调纯编码/解码与事件证明降频 | `vehicle/HvacChannels.kt`、`vehicle/HvacRefreshPolicy.kt` |
@@ -261,12 +263,22 @@
 - “诊断与日志 → 日常空调同步通道”明确选择风量、AC、主副驾温度、循环和风向；新增配置默认空，取消不保存，全部不选关闭新增通道，不自动加入座椅或方向盘。基线旧开关、日常配置和临时验证取并集，停止验证保留日常配置；有 Java/native/abort 落盘证据或既有早期连续异常时关闭新增日常通道。稳定后仅有未正常退出标记、没有崩溃证据时保留配置，避免车机断电清空选择；完全没有证据的晚发 native 崩溃与系统杀进程无法可靠区分。
 - 显式选择日常温度后，温度浮点主动读取不依赖两分钟验证；未选择时保留旧默认读取策略。真实值、显示目标和命令接受分别记录：界面预览不能用作车辆回读，温度持久缓存只保存观测，不保存尚未确认的目标。
 - 所有意图在主线程基于当前显示目标累计，再提交不可变目标到共享 worker。尚未执行的独立绝对设温和风量目标可合并；整数步进、双温同步组合、翻转及记忆动作不随意合并。旧序号取消和旧连接结果不得清除新目标，相同显示仍跳过重复绑定。
+- 写后确认从实际写动作完成后安排，而不是从主线程提交时刻倒计时。温度定向回读延迟 900ms；仍有效的当前目标按属性续期，不复活过期目标。只有本次真实尝试浮点写入才开启相应温度不超过 3500ms 的浮点确认窗口，默认日常通道空、旧温度监听关闭时也可确认这次业务写入；未确认目标在窗口内使用 500ms 兜底，匹配或到期后恢复常态策略，不把确认变成永久浮点轮询。
+- Bridge 的真实写后回读与事件、分组采样归入同一观测状态；应用前核对连接、配置/验证代际和采样版本，旧回读不能覆盖较新的目标或观测。
+
+### 5.9 空调维护边界与操作日志（当前）
+
+- `VehicleController` 保留业务入口、意图/观测归并及分组调度；`HvacWriteActions` 负责单通道、组合、温度兼容等写入策略，不持有显示状态或另建线程；`HvacChannels` 负责纯编码/解码；`VehicleBridge` 仅做厂商反射、能力探测、读写与事件适配。写入和采样继续复用 `HvacCommands` 的唯一 worker，不因拆分增加并行车控队列。
+- `HVAC_TRACE` 用 `commandId` 标记用户操作、`wireId` 标记每次真实原生写入；组合动作的每个子写分别记录。QUEUED、SENT、FINISHED 只是操作排队/执行状态；未调用的 SKIPPED 不计为已发送，也不伪造原生耗时。
+- NATIVE_PREPARING 只表示调用准备；紧邻原生反射调用激活确认窗口，准备日志和锁等待不算进原生耗时，也不能提前确认。日志分列排队耗时、原生调用耗时、接口返回是否接受及首次合法观测匹配耗时；RAW 调用缺少操作上下文时，排队耗时保留 UNKNOWN。
+- 接受与观测彼此独立：accepted=false 不直接推断权限不足；OBSERVED_MATCH、OBSERVED_DIFFERENT、UNKNOWN 均不能证明实际物理效果。首次合法匹配只记录一次，后续外部变化不改写其耗时，超时或旧连接观测不能冒充及时确认。验证报告的业务采样 READ 与原生写后校验分开统计，后者见实际调用流水及 HVAC_VERIFY。
+
 
 ## 6. 车控接口和安全边界
 
 ### 6.1 当前默认通道表
 
-以下是 `config/VehicleChannels.kt` 与可执行 `VehicleController.kt` 的当前摘要。运行时可在设置页“车控通道”覆盖默认数字，所以这是默认配置，不等于所有车型最终实际使用的 zone。
+以下是 `config/VehicleChannels.kt`、`vehicle/HvacChannels.kt` 与 `vehicle/HvacWriteActions.kt` 的当前摘要。运行时可在设置页“车控通道”覆盖默认数字，所以这是默认配置，不等于所有车型最终实际使用的 zone。
 
 | 通道 | functionId | 默认 zone | 当前值域/写法 |
 | --- | --- | --- | --- |
@@ -286,18 +298,18 @@
 
 重要纠偏：
 
-- AUTO 当前可执行代码确实使用专用 `0x10020200` 通道和乱序映射；`VehicleChannels.kt` 中“01…05 顺序映射”的说明以及 `VehicleController.kt` 中“手动风量写 10”的部分注释属于旧说明，不能覆盖实际执行语句。
+- AUTO 使用专用 `0x10020200` 通道和乱序映射，编码以 `HvacChannels.kt` 为准；历史“01…05 顺序映射”或“手动风量写 10”的说明不能覆盖当前执行逻辑。
 - 内外循环的旧 zone `0x8` 是已确认的错误配置；当前默认全局 zone 为 `0x80000000`。
 - `Prefs.tempCustomizeWriteEnabled` 默认true，常用设温和步进均先计算绝对目标后走已有GlyCar/Customize浮点写；整数兼容需显式选择，步进逐条执行，不合并、不在升温失败后尝试降温。旧整数绝对值按round(℃/0.2)编码；supported values里的[2]不解释为温度范围，接口接受不等于真车效果。
-- 旧文档中“开关统一为 10/11”是某次外部设备/历史日志的层级编码，不应替代当前 `VehicleController` 和 `VehicleChannels` 的实际值域。
+- 旧文档中“开关统一为 10/11”是某次外部设备/历史日志的层级编码，不应替代当前 `HvacChannels`、`HvacWriteActions` 和 `VehicleChannels` 的实际值域。
 
 ### 6.2 写入保护
 
 - `HvacCommands`与Bridge在提交及实际写入前统一检查API、模拟状态、写开关、连接和worker线程。日常写仅使用明确编码与配置zone；未逐车型验证的舒适/整数兼容最多尝试同区两种表示，不跨区域盲写，也不因调用返回true就持久化修改zone。
-- `writeSwitch` 先调用 `VehicleBridge.supportOf`，再依 `bareFirst` 选择裸值或复合值优先，并通过 `verifyWrite` 和延迟回读记录结果。
+- `HvacWriteActions.writeSwitch` 先调用 `VehicleBridge.supportOf`，再依 `bareFirst` 选择裸值或复合值优先，并通过 `verifyWrite` 和延迟回读记录结果。
 - `VehicleBridge.writeInt` 会先探测支持状态；不支持或异常要记录权限拒绝/非法值，不得盲写。厂商 HAL 对不支持的 `(functionId, zone, value)` 可能触发 native abort，Java 层不能靠 try/catch 兜底。
-- 温度回读的边界伪值和 `0xfd`、`0xfe`、`0xff` 等无效哨兵不能无条件覆盖已有状态；当前代码会保留乐观值或继续走安全候选路径。
-- `verifyWrite` 的返回值只是当前写调用是否返回成功，延迟回读会另记 `NO_EFFECT`；不能因为方法名含“verify”就把 `true` 写成“真车已生效”，也不能把某些通道的 `false` 一律解释为被拒绝。
+- 温度回读的边界伪值和 `0xfd`、`0xfe`、`0xff` 等无效哨兵不能覆盖真实观测；显示目标只在有限期限内保留，未获有效确认时回落最近真实值，不将目标当回读，也不自动重写。
+- `verifyWrite` 的返回值只是当前写调用是否返回成功，真实观测另记 OBSERVED_MATCH／OBSERVED_DIFFERENT／UNKNOWN；不能因为方法名含“verify”就把 `true` 写成“真车已生效”，也不能把某些通道的 `false` 一律解释为被拒绝。
 - 车控初始化和写入受崩溃熔断开关控制。不要把“熔断后暂时只读”误写成车控问题已修复。
 
 ### 6.3 连接、升级和验证

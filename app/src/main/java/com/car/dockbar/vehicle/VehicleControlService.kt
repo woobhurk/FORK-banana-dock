@@ -174,28 +174,41 @@ class VehicleControlService : Service() {
 
     private fun handleDebug(msg: Message) {
         val replyTo = msg.replyTo ?: return
-        val d = msg.data ?: return
-        val func = d.getInt(VehicleProtocol.KEY_FUNC)
-        val zone = d.getInt(VehicleProtocol.KEY_ZONE)
-        val isWrite = d.getBoolean(VehicleProtocol.KEY_IS_WRITE)
-        HvacCommands.executor.execute {
+        val data = msg.data ?: return
+        val function = data.getInt(VehicleProtocol.KEY_FUNC)
+        val zone = data.getInt(VehicleProtocol.KEY_ZONE)
+        val isWrite = data.getBoolean(VehicleProtocol.KEY_IS_WRITE)
+        fun reply(out: Bundle) {
+            runCatching {
+                val response = Message.obtain(null, VehicleProtocol.MSG_DEBUG)
+                response.data = out
+                replyTo.send(response)
+            }
+        }
+        val execute = {
             val out = Bundle()
             runCatching {
                 if (isWrite) {
-                    val value = d.getInt(VehicleProtocol.KEY_VALUE)
-                    out.putBoolean(VehicleProtocol.KEY_WRITE_OK, VehicleBridge.writeInt(func, zone, value))
+                    val value = data.getInt(VehicleProtocol.KEY_VALUE)
+                    out.putBoolean(VehicleProtocol.KEY_WRITE_OK, VehicleBridge.writeInt(function, zone, value))
                 } else {
-                    val v = VehicleBridge.readInt(func, zone)
-                    if (v == null) out.putString(VehicleProtocol.KEY_TEXT, "null")
-                    else out.putInt(VehicleProtocol.KEY_READ_RESULT, v)
+                    val value = VehicleBridge.readInt(function, zone)
+                    if (value == null) out.putString(VehicleProtocol.KEY_TEXT, "null")
+                    else out.putInt(VehicleProtocol.KEY_READ_RESULT, value)
                 }
             }.onFailure { out.putString(VehicleProtocol.KEY_TEXT, "异常 ${it.javaClass.simpleName}") }
-            runCatching {
-                val r = Message.obtain(null, VehicleProtocol.MSG_DEBUG)
-                r.data = out
-                replyTo.send(r)
-            }
+            reply(out)
         }
+        if (isWrite) {
+            HvacCommands.submit(this, "debug_write fid=0x${function.toString(16)} zone=$zone", {
+                HvacCommands.executor.execute {
+                    reply(Bundle().apply {
+                        putBoolean(VehicleProtocol.KEY_WRITE_OK, false)
+                        putString(VehicleProtocol.KEY_TEXT, "未执行：门禁或连接状态已变化")
+                    })
+                }
+            }, execute)
+        } else HvacCommands.executor.execute(execute)
     }
 
     // =====================================================================

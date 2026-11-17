@@ -56,6 +56,15 @@ internal class HvacState(initial: State) {
     private var sequence = 0L
     private var connection = Long.MIN_VALUE
 
+    val pendingProperties: Int
+        get() {
+            var properties = 0
+            for (property in HvacProperty.entries) {
+                if (pending[property.ordinal] != null) properties = properties or property.mask
+            }
+            return properties
+        }
+
     val nextDeadlineMs: Long
         get() {
             var next = Long.MAX_VALUE
@@ -141,6 +150,19 @@ internal class HvacState(initial: State) {
     fun cancel(sequence: Long) {
         for (index in pending.indices) {
             if (pending[index]?.sequence == sequence) pending[index] = null
+        }
+    }
+
+    /** 仅延长仍有效的本次目标；旧序号、已过期目标和其它属性均不复活。 */
+    fun renew(sequence: Long, properties: Int, nowMs: Long, connection: Long) {
+        if (sequence == 0L || !acceptConnection(connection)) return
+        expire(nowMs, connection)
+        for (property in HvacProperty.entries) {
+            if (properties and property.mask == 0) continue
+            val item = pending[property.ordinal] ?: continue
+            if (item.sequence != sequence || item.connection != connection) continue
+            val duration = if (property == HvacProperty.FAN) 1500L else 3500L
+            pending[property.ordinal] = Pending(item.target, sequence, nowMs + duration, connection)
         }
     }
 

@@ -1,6 +1,7 @@
 package com.car.dockbar.vehicle
 
 import android.content.Context
+import android.os.SystemClock
 import com.car.dockbar.util.Logx
 import com.car.dockbar.util.Sec
 import com.car.dockbar.util.Prefs
@@ -25,8 +26,8 @@ import java.lang.reflect.Proxy
  * ICarFunction.unregisterFunctionValueWatcher(IFunctionValueWatcher)
  * ```
  * 历史记录中 Customize 调用曾伴随 native 崩溃，不能据此保证任何车型安全。
- * 默认轮询仍读 int 通道；浮点主动读取仅供用户显式开启的短时验证，
- * 并先检查实际后端支持状态。既有实验写入开关与写门禁保持不变。
+ * 浮点主动读取仅在用户明确选择日常温度通道或短时验证时启用，
+ * 并先检查实际后端支持状态；写门禁、目标与真实观测保持分离。
  *
  * ## 接口签名（权威来源：oneOS_Dock.apk 的 SignalHelper2 反编译）
  * ```
@@ -34,7 +35,7 @@ import java.lang.reflect.Proxy
  * int     getFunctionValue(int functionId) / (int functionId, int areaId)
  * boolean setFunctionValue(int functionId, int value)          ★ 2 参第二参是 value，不是 zone
  * boolean setFunctionValue(int functionId, int areaId, int value)
- * boolean registerFunctionValueWatcher(int[] functionIds, IFunctionValueWatcher)   ★ 只有数组模式
+ * boolean registerFunctionValueWatcher(int[] functionIds, IFunctionValueWatcher)   // 运行时也精确兼容逐属性重载
  * boolean unregisterFunctionValueWatcher(IFunctionValueWatcher)
  * ```
  *
@@ -42,7 +43,7 @@ import java.lang.reflect.Proxy
  * ```
  * onFunctionChanged(int id)
  * onFunctionValueChanged(int id, int area, int val)
- * onCustomizeFunctionValueChanged(int id, int area, float val)   // 通道已禁用，仅保持契约
+ * onCustomizeFunctionValueChanged(int id, int area, float val)   // 依明确温度订阅接收
  * onSupportedFunctionStatusChanged(int id, int area, FunctionStatus st)
  * onSupportedFunctionValueChanged(int id, int[] ints)
  * ```
@@ -180,12 +181,7 @@ object VehicleBridge {
             backend = Backend.ECARX
             ++connectionGeneration
             Logx.d("车控通道就绪：${backend.label}")
-            // ★ v1.4.70：**同时**把 GlyCar 实例也建起来（并存，不作 fallback）。
-            //   本车 ECarX 的温度通道 isFunctionSupported=notavailable（只读），
-            //   而系统空调实际是通过 **GlyCar 浮点属性**写温度的
-            //   （logcat: `GlyCarImpl set HVAC_FUNC_TEMP propertyId=268828928 areaId=1 val=18.0`），
-            //   交接文档也写着「若温度通道=无，说明该车只有 GlyCar 浮点属性，需要走另一条通道」。
-            //   → 温度写入必须同时准备两条路。
+            // GlyCar是同一厂商接口的属性门面；准备浮点句柄不是获取另一套授权。
             runCatching { ensureGlyCar(ctx) }
                 .onFailure { Logx.e("车控通道 B 实例创建异常：${it.javaClass.simpleName} ${it.message}") }
             Logx.d("车控通道 B 状态：实例=${glyCarObj != null} 浮点读=${glyFloatRead != null} 浮点写=${glyFloatWrite != null}")
@@ -241,14 +237,7 @@ object VehicleBridge {
             false
         }
     }
-
-    /**
-     * ★★ v1.4.70：建（或取）GlyCar 实例，**并存**使用。
-     *
-     * 为什么并存：ECarX 的温度通道在本车 isFunctionSupported=notavailable（只读），
-     * 系统空调实际是走 GlyCar 的浮点属性写温度的。两套 API 的 propertyId 同编号
-     * （0x10060100 = 268828928），但**权限检查可能不同** —— 这就是突破口。
-     */
+    /** 建立或复用属性门面，是否能调用及是否生效仍由实际后端与观测决定。 */
     private fun ensureGlyCar(ctx: Context): Any? {
         glyCarObj?.let { return it }
         return try {
@@ -301,31 +290,36 @@ object VehicleBridge {
      * @return true = 厂商接口接受调用，不代表温度已变化
      */
     fun writeTempViaGlyCar(functionId: Int, areaId: Int, value: Float): Boolean {
-        if (!HvacCommands.canWrite(appCtx, "writeTempViaGlyCar")) return false
-        val obj = glyCarObj ?: return observeWrite(functionId, areaId, value, false, "GlyCar:无会话")
-        val m = glyFloatWrite ?: return observeWrite(functionId, areaId, value, false, "GlyCar:无浮点写方法")
-        val accepted = try {
-            val r = when (m.parameterTypes.size) {
-                3 -> m.invoke(obj, functionId, areaId, value)
-                2 -> m.invoke(obj, functionId, value)
-                else -> null
-            }
+        val generation = connectionGeneration
+        if (!HvacCommands.canWrite(appCtx, "writeTempViaGlyCar")) return rejectWrite(functionId, areaId, value, "GlyCar:门禁拒绝")
+        val obj = glyCarObj ?: return rejectWrite(functionId, areaId, value, "GlyCar:无会话")
+        val m = glyFloatWrite ?: return rejectWrite(functionId, areaId, value, "GlyCar:无浮点写方法")
+        val noArea = m.parameterTypes.size == 2
+        if (!noArea && m.parameterTypes.size != 3) return rejectWrite(functionId, areaId, value, "GlyCar:浮点写签名不匹配")
+        val actualZone = if (noArea) Int.MIN_VALUE else areaId
+        val args = if (noArea) arrayOf<Any?>(functionId, value) else arrayOf<Any?>(functionId, areaId, value)
+        val ticket = beginNativeWrite(generation, functionId, actualZone, value, "GlyCar:${m.name}") ?: return false
+        return try {
+            if (!activateNativeWrite(ticket)) return false
+            val r = invokeNativeWrite(ticket, false) { m.invoke(obj, *args) }
             val ok = r == null || r == true
-            Logx.d("车控通道 B 温度写：propertyId=0x${Integer.toHexString(functionId)} areaId=$areaId value=$value℃ → ${m.name} 返回=$r")
+            Logx.d("车控通道 B 温度写：propertyId=0x${Integer.toHexString(functionId)} areaId=$actualZone value=$value℃ → ${m.name} 返回=$r")
             ok
         } catch (t: Throwable) {
             Logx.e("车控通道 B 温度写异常：${t.javaClass.simpleName}: ${t.message}")
             false
         }
-        return observeWrite(functionId, areaId, value, accepted, "GlyCar:${m.name}")
     }
 
-    /** ★★ v1.4.70：GlyCar 浮点属性读温度 */
+    /** GlyCar 浮点属性读取只把真实返回值交给统一观测，不使用本地显示目标。 */
     fun readTempViaGlyCar(functionId: Int, areaId: Int): Float? {
+        val connection = connectionGeneration
         val obj = glyCarObj ?: return null
         val m = glyFloatRead ?: return null
+        val observedAt = SystemClock.elapsedRealtime()
         return try {
             val raw = m.invoke(obj, functionId, areaId)
+            if (raw is Number) HvacCommands.observe(functionId, areaId, raw, "READ_TEMP_GLYCAR", observedAt, connection)
             if (HvacDiagnostics.active) Logx.d("HVAC_TEST FLOAT_RAW source=GlyCar fid=0x${functionId.toString(16)} zone=$areaId raw=$raw type=${raw?.javaClass?.simpleName ?: "null"}")
             val v = (raw as? Number)?.toFloat()
             if (v != null) Logx.d("车控通道 B 温度读：propertyId=0x${Integer.toHexString(functionId)} areaId=$areaId → $v℃")
@@ -462,12 +456,16 @@ object VehicleBridge {
     // =====================================================================
 
     fun readInt(functionId: Int, zone: Int): Int? {
+        val connection = connectionGeneration
         val m = readMethod ?: return null
         val s = session ?: return null
         return runCatching {
-            val args = if (m.parameterTypes.size == 1) arrayOf<Any?>(functionId)
-            else arrayOf<Any?>(functionId, zone)
-            val r = m.invoke(s, *coerce(m, args))
+            val noArea = m.parameterTypes.size == 1
+            val args = if (noArea) arrayOf<Any?>(functionId) else arrayOf<Any?>(functionId, zone)
+            val coerced = coerce(m, args)
+            val observedAt = SystemClock.elapsedRealtime()
+            val r = m.invoke(s, *coerced)
+            if (r is Number) HvacCommands.observe(functionId, if (noArea) Int.MIN_VALUE else zone, r, "READ_INT", observedAt, connection)
             when (r) {
                 null -> null
                 is Number -> r.toInt()
@@ -493,29 +491,31 @@ object VehicleBridge {
      * @return null = 该重载不可用（调用方请回落）；true/false = HAL 的接受结果
      */
     fun writeIntNoArea(functionId: Int, value: Int): Boolean? {
-        if (!HvacCommands.canWrite(appCtx, "writeIntNoArea")) return false
-        val m = writeMethodNoArea ?: return null
-        val s = session ?: return null
-        val accepted = runCatching {
-            val r = m.invoke(s, functionId, value)
-            when (r) {
-                null -> true
-                is Boolean -> r
-                else -> true
-            }
+        val generation = connectionGeneration
+        val zone = Int.MIN_VALUE
+        if (!HvacCommands.canWrite(appCtx, "writeIntNoArea")) return rejectWrite(functionId, zone, value, "无area:门禁拒绝")
+        val m = writeMethodNoArea ?: run { HvacCommands.skippedWrite(functionId, zone, value, "无area:无整型写方法"); return null }
+        val s = session ?: run { HvacCommands.skippedWrite(functionId, zone, value, "无area:无会话"); return null }
+        val ticket = beginNativeWrite(generation, functionId, zone, value, "$backend:${m.name}:无area") ?: return false
+        return runCatching {
+            if (!activateNativeWrite(ticket)) return false
+            val r = invokeNativeWrite(ticket) { m.invoke(s, functionId, value) }
+            r !is Boolean || r
         }.getOrElse {
             Logx.d("写 0x${functionId.toString(16)}（无area）失败：${it.message}")
             false
         }
-        return observeWrite(functionId, Int.MIN_VALUE, value, accepted, "$backend:${m.name}:无area")
     }
 
     /** 文档口径读取：`getFunctionValue(functionId)`（不传 area）。null = 不可用或读不到 */
     fun readIntNoArea(functionId: Int): Int? {
+        val connection = connectionGeneration
         val m = readMethodNoArea ?: return null
         val s = session ?: return null
+        val observedAt = SystemClock.elapsedRealtime()
         return runCatching {
             val r = m.invoke(s, functionId)
+            if (r is Number) HvacCommands.observe(functionId, Int.MIN_VALUE, r, "READ_INT_NO_AREA", observedAt, connection)
             when (r) {
                 is Number -> r.toInt()
                 is Boolean -> if (r) 1 else 0
@@ -535,55 +535,42 @@ object VehicleBridge {
      *    导致走 2 参重载时把 zone 当成要写的值 → 写入无效。
      */
     fun writeInt(functionId: Int, zone: Int, value: Int): Boolean {
-        if (!HvacCommands.canWrite(appCtx, "writeInt")) return false
         val generation = connectionGeneration
+        if (!HvacCommands.canWrite(appCtx, "writeInt")) return rejectWrite(functionId, zone, value, "整型写:门禁拒绝")
         val m = writeMethod ?: run {
             Logx.e("HVAC_WRITE 写失败：当前通道没有可用的写方法（后端=${backend}），写 0x${functionId.toString(16)} zone=$zone value=$value")
-            return observeWrite(functionId, zone, value, false, "$backend:无整型写方法")
+            return rejectWrite(functionId, zone, value, "$backend:无整型写方法")
         }
         val s = session ?: run {
             Logx.e("HVAC_WRITE 写失败：会话未建立（后端=${backend}）")
-            return observeWrite(functionId, zone, value, false, "$backend:无会话")
+            return rejectWrite(functionId, zone, value, "$backend:无会话")
         }
         // 支持状态只是独立能力观测；不可用/异常不能单独证明权限拒绝或命令实际效果。
         val support = probeSupport(functionId, zone)
-        val accepted = runCatching {
-            val args: Array<Any?> = when (m.parameterTypes.size) {
-                2 -> arrayOf(functionId, value)          // ★ 2 参 = (functionId, value)
-                3 -> arrayOf(functionId, zone, value)
-                else -> arrayOf(functionId, zone, value)
-            }
-            // 能力查询会阻塞；写入前再次拒绝旧连接或查询期间关闭的权限开关。
-            if (connectionGeneration != generation) {
-                Logx.w("HVAC_WRITE writeInt 未执行：能力查询期间连接已变化")
-                return observeWrite(functionId, zone, value, false, "$backend:${m.name}:STALE")
-            }
-            if (!HvacCommands.canWrite(appCtx, "writeInt")) {
-                return observeWrite(functionId, zone, value, false, "$backend:${m.name}:SKIPPED")
-            }
-            val r = m.invoke(s, *coerce(m, args))
-            val ok = when (r) {
-                null -> true
-                is Boolean -> r
-                is Number -> true
-                else -> true
-            }
+        val actualZone = if (m.parameterTypes.size == 2) Int.MIN_VALUE else zone
+        val args = if (m.parameterTypes.size == 2) arrayOf<Any?>(functionId, value)
+            else arrayOf<Any?>(functionId, zone, value)
+        val coerced = coerce(m, args)
+        // 能力查询可能阻塞；最终门禁与连接检查仍紧邻真实调用。
+        val ticket = beginNativeWrite(generation, functionId, actualZone, value, "$backend:${m.name}") ?: return false
+        return runCatching {
+            if (!activateNativeWrite(ticket)) return false
+            val r = invokeNativeWrite(ticket) { m.invoke(s, *coerced) }
+            val ok = r !is Boolean || r
             Logx.d(
-                "HVAC_WRITE 0x${functionId.toString(16)} zone=$zone value=$value → " +
-                "车控写入返回=${r}(${r?.javaClass?.simpleName ?: "null"}) 判定=$ok " +
+                "HVAC_WRITE 0x${functionId.toString(16)} zone=$actualZone value=$value → " +
+                "车控写入返回=${r}(${r?.javaClass?.simpleName ?: "null"}) 接受=$ok " +
                 "方法=${m.name} 支持状态=$support"
             )
             ok
         }.getOrElse { e ->
             if (isBinderDead(e)) { reset(); appCtx?.let { c -> runCatching { init(c) } } }
-            // ★ 明确区分「权限被拒」与「值/属性不支持」——两者处理方式完全不同：
-            //   SecurityException → 服务端对 set 做了 uid/签名校验，普通 App 无解（需系统签名或 su）
-            //   其它异常          → 多半是 value 格式 / 属性不支持，改编码还有救
+            // 只按实际异常分类，不从异常名推断必须平台签名、root或特定授权方式。
             val cause = e.cause ?: e
             val kind = when {
                 cause is SecurityException ||
                     cause.javaClass.name.contains("SecurityException") ->
-                    "★权限被拒(PERMISSION_DENIED：该 set 需要系统签名/uid，普通 App 无解)"
+                    "权限被拒(PERMISSION_DENIED：厂商抛出SecurityException，具体授权条件需设备证据)"
                 cause is IllegalArgumentException ||
                     cause.javaClass.name.contains("IllegalArgument") ->
                     "值非法(ILLEGAL_VALUE：value 格式或取值越界，改编码/取值可能有救)"
@@ -599,24 +586,64 @@ object VehicleBridge {
             )
             false
         }
-        return observeWrite(functionId, zone, value, accepted, "$backend:${m.name}")
     }
 
-    /** 只记录本次命令的接受结果；不追加读取、写入或权限操作。 */
-    private fun observeWrite(functionId: Int, zone: Int, value: Number, accepted: Boolean, source: String): Boolean {
-        HvacDiagnostics.write(functionId, zone, value, accepted, source)
-        return accepted
+    private fun rejectWrite(functionId: Int, zone: Int, value: Number, source: String): Boolean {
+        HvacCommands.skippedWrite(functionId, zone, value, source)
+        return false
     }
 
-    /** 返回值只表示调用是否被接受；延迟回读仅报告低 8 位的实际观测。 */
+    private fun beginNativeWrite(generation: Long, functionId: Int, zone: Int, value: Number, source: String): HvacWriteTicket? {
+        if (generation != connectionGeneration || !HvacCommands.canWrite(appCtx, source)) {
+            HvacCommands.skippedWrite(functionId, zone, value, "$source:SKIPPED_OR_STALE")
+            return null
+        }
+        val ticket = HvacCommands.beginWrite(appCtx, functionId, zone, value, source)
+        // 配置采样及日志也可能耗时；真正进入 native 前不能放松门禁或跨越连接代际。
+        if (generation != connectionGeneration || ticket.connection != generation || !HvacCommands.canWrite(appCtx, source)) {
+            HvacCommands.abortWrite(ticket, "$source:SKIPPED_OR_STALE")
+            return null
+        }
+        return ticket
+    }
+
+    private fun activateNativeWrite(ticket: HvacWriteTicket, requireCustomizeEnabled: Boolean = false): Boolean {
+        // 准备日志/配置采样全部结束后复核；激活本身绝不能写日志或触发配置 IO。
+        if (ticket.connection != connectionGeneration || !HvacCommands.canWrite(appCtx, "native") ||
+            (requireCustomizeEnabled && !customizeWriteEnabled) || !HvacCommands.activateWrite(ticket)) {
+            HvacCommands.abortWrite(ticket, "native:SKIPPED_OR_STALE")
+            return false
+        }
+        return true
+    }
+
+    private inline fun invokeNativeWrite(ticket: HvacWriteTicket, acceptNonBoolean: Boolean = true, invoke: () -> Any?): Any? {
+        val startedAt = SystemClock.elapsedRealtime()
+        val raw = try {
+            invoke()
+        } catch (t: Throwable) {
+            val nativeMs = SystemClock.elapsedRealtime() - startedAt
+            HvacCommands.finishWrite(ticket, false, nativeMs, "异常=${unwrapInvocation(t).javaClass.simpleName}")
+            throw t
+        }
+        val nativeMs = SystemClock.elapsedRealtime() - startedAt
+        val accepted = if (acceptNonBoolean) raw !is Boolean || raw else raw == null || raw == true
+        HvacCommands.finishWrite(ticket, accepted, nativeMs, "返回=$raw type=${raw?.javaClass?.simpleName ?: "null"}")
+        return raw
+    }
+
+    /** 返回值只表示调用被接受；后台真实回读交统一 Trace，不能另造首次匹配耗时。 */
     fun verifyWrite(functionId: Int, zone: Int, value: Int, delayMs: Long = 400L): Boolean {
         val ctx = appCtx
-        if (!HvacCommands.canWrite(ctx, "verifyWrite")) return false
+        if (!HvacCommands.canWrite(ctx, "verifyWrite")) return rejectWrite(functionId, zone, value, "verifyWrite:门禁拒绝")
         ctx ?: return false
         val generation = connectionGeneration
         val accepted = writeInt(functionId, zone, value)
         if (accepted) {
             verifyTimer.postDelayed({
+                // 在主线程定时回调、真实读取之前冻结版本；worker 读后不能重新取当前版本。
+                val receiver = HvacCommands.confirmations
+                val sample = receiver?.capture(functionId, zone)
                 HvacCommands.executor.execute {
                     // 排队期间及阻塞回读期间都可能断线、重连或关闭 API。
                     if (connectionGeneration != generation || !isReady ||
@@ -624,16 +651,12 @@ object VehicleBridge {
                     val after = readInt(functionId, zone)
                     if (connectionGeneration != generation || !isReady ||
                         !Prefs.vehicleApiEnabled(ctx) || Prefs.simulate(ctx)) return@execute
-                    val observed = after?.and(0xFF)
-                    val result = when {
-                        observed == null || observed == VALUE_ERROR || observed == VALUE_NONE ||
-                            observed == VALUE_UNKNOWN -> "UNKNOWN"
-                        observed == (value and 0xFF) -> "OBSERVED_MATCH"
-                        else -> "OBSERVED_DIFFERENT"
-                    }
+                    if (after != null) sample?.let { receiver?.accept(it, after) }
+                    // 这里只展示该真实回读的证据；首次匹配耗时及相对温度语义由统一 Trace 判定。
+                    val result = HvacCommands.describeLastWrite(functionId, zone, 0L)
                     Logx.d(
                         "HVAC_VERIFY 0x${functionId.toString(16)} zone=$zone 调用接受=true " +
-                            "写值=$value 回读=$after → $result"
+                            "写值=$value 回读=$after；统一首次观测记录=$result"
                     )
                 }
             }, delayMs)
@@ -803,31 +826,10 @@ object VehicleBridge {
         else -> "VALID"
     }
 
-    /** 兼容旧调用名：现在恒失败（温度写走 setFunctionValue + ×0.2 编码） */
-    fun writeTempProperty(functionId: Int, zone: Int, value: Float): Boolean {
-        Logx.d("温度写入已改走 int 通道（Customize 通道因 native 崩溃被禁用）")
-        return false
-    }
 
     /**
-     * ★★ v1.4.65（实验）：通过 **Customize 浮点通道**写温度。
-     *
-     * ## 为什么重新启用
-     *
-     * 温度 int 通道 `0x10060100` 实测**只读**（`isFunctionSupported=notavailable`，
-     * 复合/裸值 × 8 个 zone 全 FAIL，1362 次 0 成功）。而：
-     *  - 系统空调的温度就是 float（watcher 回调收到 18.5 / 22.5，`onCustomizeFunctionValueChanged`）
-     *  - 说明温度的**正规写入通道就是 Customize float**：`setCustomizeFunctionValue(id, zone, float)`
-     *  - 该通道在 1.4.47 时代被禁，理由是「调用即 SIGSEGV」——但那个结论**很可能是误诊**：
-     *    + 当时 dock-contrast 截屏线程每秒在跑（后来证实是 SIGABRT 真凶）
-     *    + 当时取证只有 maps 原文，无信号名/线程名/模块（1.4.51 才加）
-     *    + 现在温度 watcher 一直开着从未崩，「温度相关调用必崩」前提已动摇
-     *
-     * ## 风险控制
-     *  - 只在用户打开「实验开关」后才调用（默认关）
-     *  - 崩了会被 streak 熔断自动停写，且 1.4.51+ 取证能直接给出线程名/模块
-     *
-     * @return true = 调用成功（HAL 是否真正生效另说）；false = 方法不存在/调用失败
+     * Customize浮点写受显式配置及统一门禁控制；当前本车短时验证不能推广到所有车型。
+     * 原始返回与实际观测独立记录，不把true当生效，也不把false一律解释为权限失败。
      */
     @Volatile
     var customizeWriteEnabled: Boolean = false
@@ -871,18 +873,22 @@ object VehicleBridge {
      *   因此默认关闭，由用户在主界面显式开启。
      */
     fun writeTempCustomize(functionId: Int, zone: Int, value: Float): Boolean {
-        if (!HvacCommands.canWrite(appCtx, "writeTempCustomize")) return false
-        if (!customizeWriteEnabled) return observeWrite(functionId, zone, value, false, "Customize:实验写入关闭")
-        val c = session?.javaClass ?: return observeWrite(functionId, zone, value, false, "Customize:无会话")
+        val generation = connectionGeneration
+        if (!HvacCommands.canWrite(appCtx, "writeTempCustomize")) return rejectWrite(functionId, zone, value, "Customize:门禁拒绝")
+        if (!customizeWriteEnabled) return rejectWrite(functionId, zone, value, "Customize:实验写入关闭")
+        val s = session ?: return rejectWrite(functionId, zone, value, "Customize:无会话")
+        val c = s.javaClass
         val m = (customizeWriteMethod ?: findCustomizeMethod(c, Sec.m(Sec.M_SETCUSTOMIZEFUNCTIONVALUE), 3)
             ?.also { customizeWriteMethod = it })
             ?: run {
                 Logx.d("温度 Customize 写：厂商库没有对应的浮点写入方法")
-                return observeWrite(functionId, zone, value, false, "Customize:无浮点写方法")
+                return rejectWrite(functionId, zone, value, "Customize:无浮点写方法")
             }
-        val accepted = try {
-            val arg = if (m.parameterTypes[2] == Float::class.javaPrimitiveType) value else value.toDouble()
-            val r = m.invoke(session, functionId, zone, arg)
+        val arg = if (m.parameterTypes[2] == Float::class.javaPrimitiveType) value else value.toDouble()
+        val ticket = beginNativeWrite(generation, functionId, zone, value, "$backend:${m.name}") ?: return false
+        return try {
+            if (!activateNativeWrite(ticket, true)) return false
+            val r = invokeNativeWrite(ticket, false) { m.invoke(s, functionId, zone, arg) }
             val ok = r == null || r == true
             Logx.d(
                 "温度 Customize 写：0x${functionId.toString(16)} zone=0x${zone.toString(16)} " +
@@ -893,7 +899,6 @@ object VehicleBridge {
             Logx.e("温度 Customize 写异常：${t.javaClass.simpleName}: ${t.message}")
             false
         }
-        return observeWrite(functionId, zone, value, accepted, "$backend:${m.name}")
     }
 
     /**
@@ -902,14 +907,18 @@ object VehicleBridge {
      * 相比 watcher 回调，这个是主动读，更适合「写完立刻验证」。
      */
     fun readTempCustomize(functionId: Int, zone: Int): Float? {
-        val c = session?.javaClass ?: return null
+        val connection = connectionGeneration
+        val s = session ?: return null
+        val c = s.javaClass
         val m = (customizeReadMethod ?: findCustomizeMethod(c, Sec.m(Sec.M_GETCUSTOMIZEFUNCTIONVALUE), 2)
             ?.also { customizeReadMethod = it }) ?: run {
                 if (HvacDiagnostics.active) Logx.d("HVAC_TEST FLOAT_SKIP source=Customize fid=0x${functionId.toString(16)} zone=$zone reason=NO_FLOAT_METHOD")
                 return null
             }
         return try {
-            val raw = m.invoke(session, functionId, zone)
+            val observedAt = SystemClock.elapsedRealtime()
+            val raw = m.invoke(s, functionId, zone)
+            if (raw is Number) HvacCommands.observe(functionId, zone, raw, "READ_TEMP_CUSTOMIZE", observedAt, connection)
             if (HvacDiagnostics.active) Logx.d("HVAC_TEST FLOAT_RAW source=Customize fid=0x${functionId.toString(16)} zone=$zone raw=$raw type=${raw?.javaClass?.simpleName ?: "null"}")
             val v = (raw as? Number)?.toFloat()
             if (v != null) Logx.d("温度 Customize 读：0x${functionId.toString(16)} zone=0x${zone.toString(16)} → $v℃")

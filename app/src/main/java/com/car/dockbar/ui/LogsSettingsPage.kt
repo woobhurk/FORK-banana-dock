@@ -262,7 +262,9 @@ internal class LogsSettingsPage(activity: MainActivity) :
         val zone = etZone.text.toString().trim().toIntOrNull() ?: ch.defZone
         val index = etVal.text.toString().trim().toIntOrNull() ?: 1
         val raw = (func and 0xFFFFFF00.toInt()) or (index and 0xFF)
-        HvacCommands.executor.execute {
+        HvacCommands.submit(this, "raw_write fid=0x${func.toString(16)} zone=$zone", {
+            postUi { out.text = "未执行：门禁、连接或排队状态已变化，原因见日志" }
+        }) {
             val ok = VehicleBridge.writeInt(func, zone, raw)
             postUi { out.text = "写入调用：0x${raw.toString(16)} → ${if (ok) "接受，生效需真实观测" else "未接受，原因见日志"}" }
         }

@@ -15,16 +15,12 @@ internal enum class HvacValidationMode(val keys: List<String>) {
 internal object HvacDiagnostics {
     private const val DURATION_MS = 120_000L
     private val lock = Any()
-    private data class Command(
-        val value: Number, val at: Long, val accepted: Boolean,
-        var check: String = "UNKNOWN（未有命令后的有效观测）"
-    )
     private data class Channel(
         val key: String, val fid: Int, val zone: Int,
         var events: Int = 0, var validEvents: Int = 0, var changedEvents: Int = 0,
         var reads: Int = 0, var validReads: Int = 0,
         var last: String = "未观测", var capability: String = "未查询",
-        var command: Command? = null, var lastReadLog: String? = null, var lastReadLogAt: Long = 0
+        var lastReadLog: String? = null, var lastReadLogAt: Long = 0
     )
     private data class Session(
         val mode: HvacValidationMode, val start: Long, val channels: List<Channel>,
@@ -84,14 +80,13 @@ internal object HvacDiagnostics {
                 ch.lastReadLog = signature
                 ch.lastReadLogAt = now
             }
-            check(ch, raw, valid && actualZone == ch.zone, observedAtMs, source)?.let(result::add)
             result
         }
         lines.forEach(::emit)
     }
 
     fun event(key: String, raw: Any?, valid: Boolean, changed: Boolean, zone: Int, delayMs: Long) {
-        val lines = synchronized(lock) {
+        val line = synchronized(lock) {
             val current = session ?: return
             val observedAt = SystemClock.elapsedRealtime() - delayMs.coerceAtLeast(0L)
             if (observedAt < current.start) return
@@ -102,47 +97,9 @@ internal object HvacDiagnostics {
             if (applicable && changed) ch.changedEvents++
             val detail = "EVENT ${identity(ch)} actualZone=$zone raw=$raw valid=$valid applicable=$applicable changed=$changed delayMs=$delayMs"
             ch.last = detail
-            val result = mutableListOf(detail)
-            check(ch, raw, applicable, observedAt, "EVENT")?.let(result::add)
-            result
-        }
-        lines.forEach(::emit)
-    }
-
-    fun write(functionId: Int, zone: Int, value: Number, accepted: Boolean, source: String) {
-        val line = synchronized(lock) {
-            val current = session ?: return
-            val matched = current.channels.filter { it.fid == functionId && it.zone == zone }
-            matched.forEach {
-                it.command = Command(value, SystemClock.elapsedRealtime(), accepted,
-                    if (accepted) "UNKNOWN（仅接受命令，等待真实观测）" else "NOT_ACCEPTED（未接受命令，原因见后端日志）")
-            }
-            "WRITE fid=0x${functionId.toUInt().toString(16)} actualZone=$zone raw=$value accepted=$accepted source=$source keys=${matched.map { it.key }}（非生效证明）"
+            detail
         }
         emit(line)
-    }
-
-    private fun check(ch: Channel, raw: Any?, valid: Boolean, observedAt: Long, source: String): String? {
-        val cmd = ch.command ?: return null
-        if (!cmd.accepted || !valid || raw !is Number || observedAt <= cmd.at) return null
-        val floatCommand = cmd.value is Float || cmd.value is Double
-        val floatObservation = raw is Float || raw is Double
-        if (floatCommand != floatObservation) return null
-        val match = if (floatCommand) {
-            // 允许 Float 表示造成的微小边界误差，不改变真实观测值。
-            HvacChannels.temperatureMatches(raw.toFloat(), cmd.value.toFloat())
-        } else {
-            raw.toLong() == cmd.value.toLong() || (raw.toInt() and 0xff) == (cmd.value.toInt() and 0xff)
-        }
-        val result = when {
-            match -> "CHECK_MATCH"
-            observedAt - cmd.at >= 1_500L -> "CHECK_DIFFERENT"
-            else -> return null
-        }
-        val state = "$result raw=$raw source=$source afterMs=${observedAt - cmd.at}"
-        if (cmd.check.startsWith(result)) return null
-        cmd.check = state
-        return "CHECK ${identity(ch)} expected=${cmd.value} $state（观测匹配不等于物理效果；不同不等于权限拒绝）"
     }
 
     fun finish(reason: String) {
@@ -184,11 +141,14 @@ internal object HvacDiagnostics {
         current.channels.forEach { ch ->
             appendLine(identity(ch))
             appendLine("  能力=${ch.capability}")
-            appendLine("  EVENT收到=${ch.events} 有效且zone匹配=${ch.validEvents} 状态变化=${ch.changedEvents}；READ总数=${ch.reads} 有效=${ch.validReads}")
+            appendLine("  EVENT收到=${ch.events} 有效且zone匹配=${ch.validEvents} 状态变化=${ch.changedEvents}；业务采样READ总数=${ch.reads} 有效=${ch.validReads}")
             appendLine("  最后观测=${ch.last}")
-            appendLine("  最近命令=${ch.command?.let { "raw=${it.value} accepted=${it.accepted} ${it.check}" } ?: "无"}")
+            appendLine("  最近实际调用=${HvacCommands.describeLastWrite(ch.fid, ch.zone, current.start)}")
         }
+        val operations = HvacCommands.recentOperations(current.start)
+        if (operations.isNotEmpty()) appendLine("近期操作（仅排队/执行状态，不代表实际写入）：\n$operations")
         appendLine("UNKNOWN/无事件/无读回不代表0或关闭，也不是成功或权限拒绝。READ实际zone以source/后端日志为准。")
+        appendLine("上述READ仅统计业务采样；原生写后校验另见最近实际调用与HVAC_VERIFY日志，不重复计入采样次数。")
         append("命令接受、注册接受、观测匹配均不证明真车物理效果，请人工观察；温度 Customize/native 接口可能导致进程闪退。")
     }
 

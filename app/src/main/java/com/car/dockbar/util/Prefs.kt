@@ -223,57 +223,17 @@ object Prefs {
 
     // ---------------- 车控诊断开关（排查闪退用） ----------------
     /**
-     * 是否启用事件监听（registerFunctionValueWatcher）。
-     * 默认关闭：仅靠定时轮询刷新，避开「动态代理 watcher 被原生 HAL 回调时拖崩进程」的已知问题
-     * （这类 native 崩溃 runCatching 兜不住，表现为「打开约 1 秒就闪退」）。
-     * 排查时单独打开它，即可验证是不是 watcher 引发的崩溃。
-     */
-    /**
-     * 是否注册车控事件监听（registerFunctionValueWatcher）。
-     *
-     * ★ 默认 **false**。
-     *
-     * 真车取证（2026-10-20，CX11，v1.4.47 → v1.4.49）：
-     *  - v1.4.47 监听列表含温度 → 11 次崩溃里 9 次的最后一行是温度回调；
-     *  - v1.4.49 把温度剔除后 **照样崩**，崩点移到座椅 / A-C / 风向回调；
-     *  - 崩溃信号是 **SIGABRT（signal 6, si_code -6）**，不是 SIGSEGV —— 说明是厂商库
-     *    主动 `abort()`，而不是野指针。结合「系统 App 能正常用 watcher、普通 App 一回调就死」，
-     *    基本可判定为厂商库对调用方身份的断言。
-     *
-     * ⇒ **不是某个通道的问题，是 watcher 回调对普通 App 整体不可用。**
-     *   状态一律靠 2.5 秒轮询（[VehicleController.refresh]），实测轮询全程无崩溃。
-     *
-     * 想验证的用户可在主界面打开；崩一次会被 [com.car.dockbar.App] 自动关回去。
+     * 旧基础全量监听开关保持默认关闭，避免升级自动扩展到未验证车控通道。
+     * 历史CX11部分固件出现过原生回调崩溃；当前本车的按需风量、AC和温度回调已短时验证。
+     * 两者不能互相泛化。日常推荐显式选择通道，仍保留崩溃熔断和轮询兜底。
      */
     fun vehicleWatcherEnabled(ctx: Context) = sp(ctx).getBoolean("vehicle_watcher_enabled", false)
     fun setVehicleWatcherEnabled(ctx: Context, v: Boolean) =
         sp(ctx).edit().putBoolean("vehicle_watcher_enabled", v).apply()
 
     /**
-     * 是否把「温度通道 0x10060100」也放进事件监听数组。
-     *
-     * ★ 默认 **关闭**，这是 1.4.47 在 CX11 上「一直崩到只剩 UI」的直接根因：
-     *   温度在 ECarX 上是 **Customize（float）通道**，注册进 watcher 后，厂商库会以
-     *   `onCustomizeFunctionValueChanged(int, int, float)` 把温度推给普通 App 进程，
-     *   **一收到这条回调进程就 native SIGSEGV**（runCatching / CrashHandler 都拦不住）。
-     *
-     *   真车取证：2026-10-20 00:27–00:45 共 11 次崩溃，其中 9 次落盘日志的
-     *   **最后一行**都是 `车控事件 0x10060100 zone=1 value=21.0` —— 崩点高度一致。
-     *   剩下 2 次最后一行是「状态机：已显示」，即挂载后还没来得及打日志就崩在第一波回调上。
-     *
-     *   只监听 int 通道（风量 / 风向 / 循环 / 座椅 / A-C）不会触发这条回调，是安全的。
-     *   想验证温度通道的用户可在主界面单独打开它（崩了会自动关回去，见 App.onCreate）。
-     *
-     * ★★★ v4.0（2026-10-26）：**默认值改为 true**。
-     *   原因：在 **DCY11**（另一台车，QUALCOMM DCY11）上实测 —— 温度通道
-     *   `0x10060100` 的 **int 读全 zone 返回 0xff**（不暴露），
-     *   唯一能拿到温度的是 `onCustomizeFunctionValueChanged` **回调**。
-     *   开关关闭时 → 回调不注册 → **温度永远显示 `—`，且用户以为调温无效**
-     *   （实际写入是生效的，只是显示不更新）。
-     *   用户确认：「温度监听开关默认打开」→ 调和读都正常了。
-     *
-     *   ⚠ 崩溃风险仍在（CX11 上 11 次崩溃 9 次最后一行是 `车控事件 0x10060100 …`），
-     *   所以**保留熔断**：真崩了会自动关回去（App.onCreate 的 streak 检测）。
+     * 旧温度监听默认值保持true，兼容既有配置和依赖回调的车型，不隐式改变用户开关。
+     * 主动浮点读取由日常通道配置或临时验证显式启用；历史原生风险不等于所有车机不可用。
      */
     fun vehicleTempWatcherEnabled(ctx: Context) =
         sp(ctx).getBoolean("vehicle_temp_watcher_enabled", true)
