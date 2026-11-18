@@ -308,8 +308,7 @@ class TemperaturePopup(
             btnDualSync = funcBtn(
                 R.drawable.ic_popup_sync, "双温同步", "SYNC", iconScale = ICON_SCALE_SYNC
             ) {
-                val next = !Prefs.syncTemp(ctx)
-                Prefs.setSyncTemp(ctx, next)
+                val next = VehicleController.state.tempDualOn != true
                 runCatching { VehicleController.setTempDual(ctx, next) }
                     .onFailure { Logx.e("双温同步：写车机失败", it) }
                 render(VehicleController.state)
@@ -449,10 +448,14 @@ class TemperaturePopup(
                 it.setActive(st.steeringHeat > 0)
             }
         } else {
-            val sync = Prefs.syncTemp(ctx)
+            val sync = st.tempDualOn
             btnDualSync?.let {
-                it.contentDescription = "双温同步${if (sync) "开启" else "关闭"}"
-                it.setActive(sync)
+                it.contentDescription = when (sync) {
+                    true -> "双温同步开启"
+                    false -> "双温同步关闭"
+                    null -> "双温同步状态未知"
+                }
+                it.setActive(sync == true)
             }
             btnVentHot?.let {
                 val on = Prefs.autoSeatVentHot(ctx)

@@ -7,7 +7,7 @@ import com.car.dockbar.util.Logx
 
 internal enum class HvacValidationMode(val keys: List<String>) {
     FAN(listOf("fan_manual", "fan_auto")),
-    CLIMATE(FAN.keys + listOf("ac", "recirc", "air_direction")),
+    CLIMATE(FAN.keys + listOf("ac", "recirc", "air_direction", "temp_dual")),
     TEMPERATURE(CLIMATE.keys + listOf("temp_driver", "temp_passenger"))
 }
 

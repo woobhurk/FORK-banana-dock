@@ -9,6 +9,7 @@ internal enum class HvacProperty(val key: String) {
     TEMP_PASSENGER("temp_passenger"),
     AC("ac"),
     RECIRC("recirc"),
+    TEMP_DUAL("temp_dual"),
     AIR_DIRECTION("air_direction"),
     SEAT_VENT("seat_vent"),
     SEAT_HEAT("seat_heat"),
@@ -27,6 +28,7 @@ internal enum class HvacProperty(val key: String) {
             "temp_passenger" -> TEMP_PASSENGER
             "ac" -> AC
             "recirc" -> RECIRC
+            "temp_dual" -> TEMP_DUAL
             "air_direction" -> AIR_DIRECTION
             "seat_vent" -> SEAT_VENT
             "seat_heat" -> SEAT_HEAT
@@ -119,6 +121,7 @@ internal class HvacState(initial: State) {
         val passenger = source(HvacProperty.TEMP_PASSENGER)
         val ac = source(HvacProperty.AC)
         val recirc = source(HvacProperty.RECIRC)
+        val dual = source(HvacProperty.TEMP_DUAL)
         val direction = source(HvacProperty.AIR_DIRECTION)
         val seatVent = source(HvacProperty.SEAT_VENT)
         val seatHeat = source(HvacProperty.SEAT_HEAT)
@@ -135,6 +138,7 @@ internal class HvacState(initial: State) {
             fanMax = fan.fanMax,
             fanAuto = fan.fanAuto,
             acOn = ac.acOn,
+            tempDualOn = dual.tempDualOn,
             recircInside = recirc.recircInside,
             airDirection = direction.airDirection,
             seatVent = seatVent.seatVent,
@@ -213,6 +217,7 @@ internal class HvacState(initial: State) {
             HvacProperty.TEMP_DRIVER -> before.driverTempC == after.driverTempC
             HvacProperty.TEMP_PASSENGER -> before.passengerTempC == after.passengerTempC
             HvacProperty.AC -> before.acOn == after.acOn
+            HvacProperty.TEMP_DUAL -> before.tempDualOn == after.tempDualOn
             HvacProperty.RECIRC -> before.recircInside == after.recircInside
             HvacProperty.AIR_DIRECTION -> before.airDirection == after.airDirection
             HvacProperty.SEAT_VENT -> before.seatVent == after.seatVent

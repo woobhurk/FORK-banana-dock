@@ -7,11 +7,12 @@ internal object HvacRefreshPolicy {
     private const val AC = 1 shl 2
     private const val RECIRC = 1 shl 3
     private const val AIR_DIRECTION = 1 shl 4
-    private const val TEMP_DRIVER = 1 shl 5
-    private const val TEMP_PASSENGER = 1 shl 6
+    private const val TEMP_DUAL = 1 shl 5
+    private const val TEMP_DRIVER = 1 shl 6
+    private const val TEMP_PASSENGER = 1 shl 7
 
     private const val FAN_MASK = FAN_MANUAL or FAN_AUTO
-    private const val CLIMATE_MASK = AC or RECIRC or AIR_DIRECTION
+    private const val CLIMATE_MASK = AC or RECIRC or AIR_DIRECTION or TEMP_DUAL
     private const val TEMPERATURE_MASK = TEMP_DRIVER or TEMP_PASSENGER
 
     fun bit(key: String): Int = when (key) {
@@ -20,6 +21,7 @@ internal object HvacRefreshPolicy {
         "ac" -> AC
         "recirc" -> RECIRC
         "air_direction" -> AIR_DIRECTION
+        "temp_dual" -> TEMP_DUAL
         "temp_driver" -> TEMP_DRIVER
         "temp_passenger" -> TEMP_PASSENGER
         else -> 0

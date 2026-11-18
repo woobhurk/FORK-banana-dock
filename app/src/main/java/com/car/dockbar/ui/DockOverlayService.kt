@@ -1088,8 +1088,7 @@ class DockOverlayService : Service() {
     /** Dock 动作切换双温同步。 */
     private fun toggleDualSync() {
         onUserInteraction()
-        val next = !Prefs.syncTemp(this)
-        Prefs.setSyncTemp(this, next)
+        val next = VehicleController.state.tempDualOn != true
         Logx.d("双温同步 → ${if (next) "开" else "关"}（Dock 动作）")
         runCatching { VehicleController.setTempDual(this, next) }
     }

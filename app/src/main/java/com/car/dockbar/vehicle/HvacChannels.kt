@@ -111,6 +111,10 @@ internal object HvacChannels {
             "recirc" -> boolValue(raw)?.let {
                 if (base.recircInside == it) base else base.copy(recircInside = it)
             } ?: base
+            "temp_dual" -> if (value in 0..1) {
+                val on = value == 1
+                if (base.tempDualOn == on) base else base.copy(tempDualOn = on)
+            } else base
             "air_direction" -> if (value in 1..7 && base.airDirection != value) {
                 base.copy(airDirection = value)
             } else base
@@ -158,6 +162,7 @@ internal object HvacChannels {
             "fan_manual" -> value in 0..FAN_LEVEL_AUTO
             "fan_auto" -> fanAutoLevelOf(raw) > 0 || boolValue(raw) != null
             "ac", "recirc", "defrost_front", "defrost_rear" -> boolValue(raw) != null
+            "temp_dual" -> value in 0..1
             "air_direction" -> value in 1..7
             "seat_vent", "seat_heat", "seat_vent_passenger", "seat_heat_passenger", "steering_heat" ->
                 value in 0..3
@@ -215,7 +220,7 @@ internal object HvacChannels {
             "fan_manual", "fan_auto", "air_direction" ->
                 if (configured == ZONE_FRONT) intArrayOf(configured)
                 else intArrayOf(configured, ZONE_FRONT)
-            "ac", "recirc" ->
+            "ac", "recirc", "temp_dual" ->
                 if (configured == ZONE_GLOBAL) intArrayOf(configured)
                 else intArrayOf(configured, ZONE_GLOBAL)
             else -> intArrayOf(configured)

@@ -94,9 +94,6 @@ object Prefs {
     fun simulate(ctx: Context) = sp(ctx).getBoolean("simulate", false)
     fun setSimulate(ctx: Context, v: Boolean) = sp(ctx).edit().putBoolean("simulate", v).apply()
 
-    /** 点击"主驾/副驾温度"时，是否同时把两侧温度联动 */
-    fun syncTemp(ctx: Context) = sp(ctx).getBoolean("sync_temp", false)
-    fun setSyncTemp(ctx: Context, v: Boolean) = sp(ctx).edit().putBoolean("sync_temp", v).apply()
 
     // ---------------- 跳转入口 ----------------
     // ---- 跳转入口默认值：来自车机实测日志，用户可在配置页覆盖 ----

@@ -34,6 +34,7 @@ object VehicleController {
         val seatVent: Int = 0,
         val seatHeat: Int = 0,
         val acOn: Boolean = false,
+        val tempDualOn: Boolean? = null,
         // ★ v1.4.35：温度弹窗 / 座椅弹窗所需
         val seatVentPassenger: Int = 0,
         val seatHeatPassenger: Int = 0,
@@ -132,7 +133,7 @@ object VehicleController {
     private val refreshRevisions = LongArray(REFRESH_GROUPS.size)
     private val refreshKeys = arrayOf(
         arrayOf("fan_auto", "fan_manual"),
-        arrayOf("recirc", "air_direction", "ac"),
+        arrayOf("recirc", "air_direction", "ac", "temp_dual"),
         arrayOf("temp_driver", "temp_passenger"),
         arrayOf("seat_vent", "seat_heat", "seat_vent_passenger", "seat_heat_passenger",
             "defrost_front", "defrost_rear", "steering_heat"),
@@ -445,6 +446,8 @@ object VehicleController {
         }
         if (Prefs.vehicleTempWatcherEnabled(c)) addAll(listOf("temp_driver", "temp_passenger"))
         addAll(Prefs.hvacEventKeys(c))
+        // 双温同步是温度弹窗的真实状态，始终订阅，不受日常通道选择影响。
+        add("temp_dual")
         activeValidationMode()?.let { addAll(it.keys) }
     }.distinct()
 
@@ -931,7 +934,7 @@ object VehicleController {
     }
     private fun groupMaskOf(key: String): Int = when (key) {
         "fan_manual", "fan_auto" -> FAN_GROUP
-        "recirc", "air_direction", "ac" -> CLIMATE_GROUP
+        "recirc", "air_direction", "ac", "temp_dual" -> CLIMATE_GROUP
         "temp_driver", "temp_passenger" -> TEMPERATURE_GROUP
         "seat_vent", "seat_heat", "seat_vent_passenger", "seat_heat_passenger",
         "defrost_front", "defrost_rear", "steering_heat" -> COMFORT_GROUP
@@ -1036,10 +1039,16 @@ object VehicleController {
         }
         HvacCommands.submitLatest(ctx, key, sequence, { cancelTarget(sequence) }) { sendTemperatureTarget(ctx, driver, next, sequence) }
     }
-    /** 同步开关在共享队列中读取和写入，避免主线程等待与重复翻转。 */
+    /** 双温同步使用真实状态作为目标，写入和写后回读均走共享车控队列。 */
     fun setTempDual(ctx: Context, on: Boolean) {
+        if (Looper.myLooper() != main.looper) { main.post { setTempDual(ctx, on) }; return }
+        if (!Prefs.simulate(ctx) && !HvacCommands.canSubmit(ctx, "setTempDual")) return
+        val sequence = preview(CLIMATE_GROUP) { current -> current.copy(tempDualOn = on) }
         if (Prefs.simulate(ctx)) return
-        HvacCommands.submit(ctx, "temp_dual target=$on") { HvacWriteActions.writeDual(ctx, on) }
+        HvacCommands.submit(ctx, "temp_dual target=$on targetSeq=$sequence", { cancelTarget(sequence) }) {
+            if (!HvacWriteActions.writeDual(ctx, on)) cancelTarget(sequence)
+        }
+        scheduleRefresh(ctx, CLIMATE_GROUP)
     }
 
     /** ★ v1.4.35：前挡加热 开/关（0x10040100）*/
@@ -1376,7 +1385,7 @@ object VehicleController {
         val current = (if (driver) state.driverTempC else state.passengerTempC) ?: Prefs.tempBase(ctx)
         val next = (current + step * Prefs.tempStep(ctx)).coerceIn(TEMP_MIN_C, TEMP_MAX_C)
         if (next == current || !next.isFinite()) return false
-        val sync = Prefs.syncTemp(ctx)
+        val sync = state.tempDualOn == true
         val sequence = preview(TEMPERATURE_GROUP) { s ->
             when {
                 sync -> s.copy(driverTempC = next, passengerTempC = next)

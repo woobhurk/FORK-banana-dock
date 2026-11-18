@@ -38,7 +38,7 @@ class HvacEventSubscriptionTest {
     @Test
     fun climatePollingRemainsFallbackUntilAllConfiguredEventsAreProven() {
         val configured = HvacRefreshPolicy.mask(
-            setOf("fan_manual", "fan_auto", "ac", "recirc", "air_direction")
+            setOf("fan_manual", "fan_auto", "ac", "recirc", "air_direction", "temp_dual")
         )
         val climateSeen = HvacRefreshPolicy.mask(setOf("ac", "recirc"))
 
@@ -61,6 +61,22 @@ class HvacEventSubscriptionTest {
             )
         )
 
+    }
+
+    @Test
+    fun dualTemperatureIsIncludedInClimatePollingProof() {
+        val configured = HvacRefreshPolicy.mask(setOf("ac", "recirc", "air_direction", "temp_dual"))
+
+        assertTrue(HvacRefreshPolicy.bit("temp_dual") != 0)
+        assertEquals(
+            2_500L,
+            HvacRefreshPolicy.intervalMs(
+                VehicleRefreshGroup.CLIMATE,
+                configured,
+                configured,
+                registered = true
+            )
+        )
     }
     @Test
     fun explicitEmptySelectionDoesNotRegainDefaultClimateSubscriptions() {
