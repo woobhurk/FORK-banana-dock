@@ -143,6 +143,8 @@ object VehicleBridge {
     private var glyCarObj: Any? = null
     private var glyFloatRead: Method? = null
     private var glyFloatWrite: Method? = null
+    private var glyIntRead: Method? = null
+    private var glyIntWrite: Method? = null
     private var registerMethod: Method? = null
     private var unregisterMethod: Method? = null
     private var watcherIface: Class<*>? = null
@@ -246,12 +248,14 @@ object VehicleBridge {
             val carClass = loadClass(CAR_CLASS_GLYCAR, ctx) ?: return null
             val car = carClass.getMethod(Sec.m(Sec.M_CREATE), Context::class.java).invoke(null, ctx) ?: return null
             glyCarObj = car
+            glyIntRead = pickMethod(car.javaClass, Sec.m(Sec.M_GETINTPROPERTY), intArrayOf(2))
+            glyIntWrite = pickMethod(car.javaClass, Sec.m(Sec.M_SETINTPROPERTY), intArrayOf(3))
             glyFloatRead = findCustomizeMethod(car.javaClass, Sec.m(Sec.M_GETFLOATPROPERTY), 2)
             glyFloatWrite = pickMethod(car.javaClass, Sec.m(Sec.M_SETFLOATPROPERTY), intArrayOf(3))
                 ?: pickMethod(car.javaClass, Sec.m(Sec.M_SETFLOATPROPERTY), intArrayOf(2))
             Logx.d(
-                "车控通道 B 浮点：读=${glyFloatRead?.let { it.name + "(" + it.parameterTypes.joinToString(",") { t -> t.simpleName } + ")" } ?: "无"} " +
-                "写=${glyFloatWrite?.let { it.name + "(" + it.parameterTypes.joinToString(",") { t -> t.simpleName } + ")" } ?: "无"}"
+                "车控通道 B：整型读=${glyIntRead != null} 整型写=${glyIntWrite != null} " +
+                    "浮点读=${glyFloatRead != null} 浮点写=${glyFloatWrite != null}"
             )
             car
         } catch (t: Throwable) {
@@ -312,6 +316,52 @@ object VehicleBridge {
             false
         }
     }
+    /** 显式验证使用的 GlyCar 整型写入；返回值只表示调用接受。 */
+    fun writeIntViaGlyCar(functionId: Int, zone: Int, value: Int): Boolean {
+        val generation = connectionGeneration
+        if (!HvacCommands.canWrite(appCtx, "writeIntViaGlyCar")) return rejectWrite(functionId, zone, value, "GlyCar整型：门禁拒绝")
+        val obj = glyCarObj ?: return rejectWrite(functionId, zone, value, "GlyCar整型：无会话")
+        val method = glyIntWrite ?: return rejectWrite(functionId, zone, value, "GlyCar整型：无写方法")
+        val ticket = beginNativeWrite(generation, functionId, zone, value, "GlyCar:${method.name}") ?: return false
+        return try {
+            if (!activateNativeWrite(ticket)) return false
+            val result = invokeNativeWrite(ticket, false) { method.invoke(obj, functionId, zone, value) }
+            result == null || result == true
+        } catch (t: Throwable) {
+            Logx.e("GlyCar 整型写异常：${t.javaClass.simpleName}: ${t.message}")
+            false
+        }
+    }
+
+    /** 显式验证使用的 GlyCar 整型读取；不改变常态读取路径。 */
+    fun readIntViaGlyCar(functionId: Int, zone: Int): Int? {
+        val obj = glyCarObj ?: return null
+        val method = glyIntRead ?: return null
+        val observedAt = SystemClock.elapsedRealtime()
+        return runCatching {
+            val raw = (method.invoke(obj, functionId, zone) as? Number)?.toInt()
+            if (raw != null) HvacCommands.observe(functionId, zone, raw, "READ_INT_GLYCAR", observedAt, connectionGeneration)
+            raw
+        }.getOrNull()
+    }
+
+    /** GlyCar 整型写入的延迟回读，和 ECarX verifyWrite 保持同一日志语义。 */
+    fun verifyIntViaGlyCar(functionId: Int, zone: Int, value: Int, delayMs: Long = 400L): Boolean {
+        val generation = connectionGeneration
+        val accepted = writeIntViaGlyCar(functionId, zone, value)
+        if (accepted) {
+            verifyTimer.postDelayed({
+                HvacCommands.executor.execute {
+                    if (generation != connectionGeneration || !isReady) return@execute
+                    val after = readIntViaGlyCar(functionId, zone)
+                    Logx.d("HVAC_VERIFY_GLYCAR 0x${functionId.toString(16)} zone=$zone 调用接受=true 写值=$value 回读=$after " +
+                        "match=${after == value} 统一观测=${HvacCommands.describeLastWrite(functionId, zone, 0L)}")
+                }
+            }, delayMs)
+        }
+        return accepted
+    }
+
 
     /** GlyCar 浮点属性读取只把真实返回值交给统一观测，不使用本地显示目标。 */
     fun readTempViaGlyCar(functionId: Int, areaId: Int): Float? {
@@ -1136,6 +1186,8 @@ object VehicleBridge {
         glyCarObj = null
         glyFloatRead = null
         glyFloatWrite = null
+        glyIntRead = null
+        glyIntWrite = null
         customizeReadMethod = null
         customizeWriteMethod = null
         supportMethod = null

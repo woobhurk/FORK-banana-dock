@@ -1691,7 +1691,8 @@ object VehicleController {
         }
         if (Prefs.simulate(ctx)) return
         HvacCommands.submit(ctx, "seatComfort driver=$driver heat=$heat vent=$vent targetSeq=$sequence", { cancelTarget(sequence) }) {
-            if (!HvacWriteActions.writeSeatComfort(ctx, driver, heating, next)) cancelTarget(sequence)
+            val mode = activeValidationMode()?.seatWriteMode ?: SeatWriteValidationMode.ECARX_DIRECT
+            if (!HvacWriteActions.writeSeatComfort(ctx, driver, heating, next, mode)) cancelTarget(sequence)
         }
         scheduleRefresh(ctx, COMFORT_GROUP)
     }

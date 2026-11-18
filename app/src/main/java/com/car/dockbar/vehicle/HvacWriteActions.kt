@@ -7,6 +7,25 @@ import com.car.dockbar.util.Prefs
 
 /** 只执行共享车控后台队列上的协议动作；返回值仅表示调用接受，不表示真实车辆效果。 */
 internal object HvacWriteActions {
+    data class SeatWriteStep(val key: String, val value: Int)
+
+    internal fun seatWritePlan(
+        driver: Boolean,
+        heating: Boolean,
+        level: Int,
+        mode: SeatWriteValidationMode
+    ): List<SeatWriteStep> {
+        val heatKey = if (driver) "seat_heat" else "seat_heat_passenger"
+        val ventKey = if (driver) "seat_vent" else "seat_vent_passenger"
+        if (level == 0) return listOf(SeatWriteStep(heatKey, 0), SeatWriteStep(ventKey, 0))
+        val active = if (heating) heatKey else ventKey
+        val inactive = if (heating) ventKey else heatKey
+        return if (mode == SeatWriteValidationMode.ECARX_COMBINED) {
+            listOf(SeatWriteStep(inactive, 0), SeatWriteStep(active, level))
+        } else {
+            listOf(SeatWriteStep(active, level))
+        }
+    }
     fun writeChannel(ctx: Context, key: String, value: Int): Boolean {
         if (!HvacCommands.canWrite(ctx, key)) return false
         val function = VehicleChannels.funcOf(ctx, key)
@@ -27,23 +46,41 @@ internal object HvacWriteActions {
         return !verified && encoded != value && VehicleBridge.verifyWrite(function, zone, value)
     }
 
-    /** 组合操作不拆队列；关闭调用未接受时不继续请求相反模式，不能据此推断物理效果。 */
-    fun writeSeatComfort(ctx: Context, driver: Boolean, heating: Boolean, level: Int): Boolean {
-        val heatKey = if (driver) "seat_heat" else "seat_heat_passenger"
-        val ventKey = if (driver) "seat_vent" else "seat_vent_passenger"
-        if (level == 0) {
-            // 关闭时分别尝试两项，不因第一项拒绝而跳过另一项。
-            val heatAccepted = writeChannel(ctx, heatKey, 0)
-            val ventAccepted = writeChannel(ctx, ventKey, 0)
-            return heatAccepted && ventAccepted
+    /** 默认沿用原厂直接写目标档位的路径，不让相反模式关闭失败阻断目标写入。 */
+    fun writeSeatComfort(ctx: Context, driver: Boolean, heating: Boolean, level: Int): Boolean =
+        writeSeatComfort(ctx, driver, heating, level, SeatWriteValidationMode.ECARX_DIRECT)
+
+    fun writeSeatComfort(
+        ctx: Context,
+        driver: Boolean,
+        heating: Boolean,
+        level: Int,
+        mode: SeatWriteValidationMode
+    ): Boolean {
+        val steps = seatWritePlan(driver, heating, level, mode)
+        var accepted = true
+        for ((index, step) in steps.withIndex()) {
+            val stepAccepted = writeSeatChannel(ctx, step.key, step.value, mode)
+            accepted = accepted && stepAccepted
+            if (!stepAccepted && level > 0 && mode == SeatWriteValidationMode.ECARX_COMBINED && index == 0) {
+                Logx.w("座椅组合操作停止：${step.key} 关闭调用未接受，未请求后续档位")
+                return false
+            }
         }
-        val inactiveKey = if (heating) ventKey else heatKey
-        val activeKey = if (heating) heatKey else ventKey
-        if (!writeChannel(ctx, inactiveKey, 0)) {
-            Logx.w("座椅组合操作停止：$inactiveKey 关闭调用未接受，未请求 $activeKey 档位 $level")
-            return false
+        return accepted
+    }
+
+    private fun writeSeatChannel(ctx: Context, key: String, value: Int, mode: SeatWriteValidationMode): Boolean {
+        if (!HvacCommands.canWrite(ctx, key)) return false
+        val function = VehicleChannels.funcOf(ctx, key)
+        val zone = VehicleChannels.zoneOf(ctx, key)
+        val encoded = HvacChannels.encodeInt(function, key, value) ?: return false
+        val raw = when (mode) {
+            SeatWriteValidationMode.GLYCAR_DIRECT -> VehicleBridge.verifyIntViaGlyCar(function, zone, encoded)
+            else -> VehicleBridge.verifyWrite(function, zone, encoded)
         }
-        return writeChannel(ctx, activeKey, level)
+        Logx.d("HVAC_TEST SEAT_WRITE mode=$mode key=$key fid=0x${function.toString(16)} zone=$zone raw=$encoded value=$value accepted=$raw")
+        return raw
     }
 
     fun writeSwitch(

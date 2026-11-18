@@ -376,25 +376,24 @@ internal class LogsSettingsPage(activity: MainActivity) :
         root.addView(smallBtn("原车空调接口验证（2分钟）") {
             val modes = HvacValidationMode.values()
             var selected = 0
+            val labels = modes.map { it.label }.toTypedArray()
             AlertDialog.Builder(activity)
-                .setTitle("选择空调验证范围")
-                .setSingleChoiceItems(arrayOf(
-                    "风量（默认）：手动 / 自动风量",
-                    "常用空调：风量 + A/C / 循环 / 风向",
-                    "含温度（高风险）：额外调用浮点 Customize/native"
-                ), selected) { _, which -> selected = which }
+                .setTitle("选择空调/座椅验证范围")
+                .setSingleChoiceItems(labels, selected) { _, which -> selected = which }
                 .setPositiveButton("下一步") { _, _ ->
                     val mode = modes[selected]
+                    val warning = when (mode.seatWriteMode) {
+                        null -> if (mode == HvacValidationMode.TEMPERATURE)
+                            "温度模式会额外触发浮点 Customize/native 读取和事件，可能使进程直接闪退。"
+                        else "本模式只订阅和读取，不自动写入车控。"
+                        else -> "座椅模式会在验证窗口内允许显式测试写入；请停车操作，命令接受不等于车辆生效。"
+                    }
                     AlertDialog.Builder(activity)
                         .setTitle("开启2分钟验证：${mode.name}")
-                        .setMessage("仅临时启用所选通道的订阅、能力查询与主动读取，不开启写入或补权，不修改原有功能开关。\n" +
-                            "开启后可切页，在原车空调或 Dock 手动操作，再回来查看报告。命令接受不等于生效，无事件不等于权限拒绝。\n" +
-                            if (mode == HvacValidationMode.TEMPERATURE)
-                                "⚠ 温度模式会额外触发浮点 Customize/native 读取和事件，可能使进程直接闪退，Java 异常捕获无法保护。请只在停车安全时验证。"
-                            else "⚠ 厂商事件回调可能导致 native 闪退，请在停车安全时验证。本模式不新增温度浮点主动读取，原有监听（含用户原已开启的温度监听）保持。")
+                        .setMessage("${warning}\n开启后可切页，操作后回来查看 HVAC_TEST 报告。")
                         .setPositiveButton("开始验证") { _, _ ->
                             VehicleController.startHvacValidation(this, mode)
-                            toastOnce("空调验证已请求；请操作后查看报告")
+                            toastOnce("验证已请求；请按模式操作后查看报告")
                         }
                         .setNegativeButton("取消", null)
                         .show()

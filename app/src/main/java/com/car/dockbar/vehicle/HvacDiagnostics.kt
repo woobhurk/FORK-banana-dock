@@ -5,10 +5,35 @@ import android.os.SystemClock
 import com.car.dockbar.config.VehicleChannels
 import com.car.dockbar.util.Logx
 
-internal enum class HvacValidationMode(val keys: List<String>) {
-    FAN(listOf("fan_manual", "fan_auto")),
-    CLIMATE(FAN.keys + listOf("ac", "recirc", "air_direction", "temp_dual")),
-    TEMPERATURE(CLIMATE.keys + listOf("temp_driver", "temp_passenger"))
+internal enum class SeatWriteValidationMode(val label: String) {
+    ECARX_DIRECT("ECarX 直接目标写入"),
+    ECARX_COMBINED("ECarX 先关闭相反模式"),
+    GLYCAR_DIRECT("GlyCar 属性直接写入")
+}
+
+internal enum class HvacValidationMode(
+    val label: String,
+    val keys: List<String>,
+    val seatWriteMode: SeatWriteValidationMode? = null
+) {
+    FAN("风量：手动 / 自动风量", listOf("fan_manual", "fan_auto")),
+    CLIMATE("常用空调：风量 + A/C / 循环 / 风向 / 双温", FAN.keys + listOf("ac", "recirc", "air_direction", "temp_dual")),
+    TEMPERATURE("含温度：额外调用浮点 Customize/native", CLIMATE.keys + listOf("temp_driver", "temp_passenger")),
+    SEAT_ECARX_DIRECT(
+        "座椅：${SeatWriteValidationMode.ECARX_DIRECT.label}",
+        listOf("seat_vent", "seat_heat", "seat_vent_passenger", "seat_heat_passenger"),
+        SeatWriteValidationMode.ECARX_DIRECT
+    ),
+    SEAT_ECARX_COMBINED(
+        "座椅：${SeatWriteValidationMode.ECARX_COMBINED.label}",
+        listOf("seat_vent", "seat_heat", "seat_vent_passenger", "seat_heat_passenger"),
+        SeatWriteValidationMode.ECARX_COMBINED
+    ),
+    SEAT_GLYCAR_DIRECT(
+        "座椅：${SeatWriteValidationMode.GLYCAR_DIRECT.label}",
+        listOf("seat_vent", "seat_heat", "seat_vent_passenger", "seat_heat_passenger"),
+        SeatWriteValidationMode.GLYCAR_DIRECT
+    )
 }
 
 /** 仅保存本次和最近完成的验证；锁内不调用厂商接口、日志文件或网络。 */
