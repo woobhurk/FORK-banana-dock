@@ -908,12 +908,13 @@ class DockOverlayService : Service() {
     }
 
     /**
-     * 点击 Dock 上的「主驾温度 / 副驾温度」时触发：开关**系统原生的空调窗口**
+     * 旧版独立「主驾温度 / 副驾温度」值控件短按时，开关系统原生的空调窗口
      * （com.geely.hvac，即车机原本那个），而不是我们自绘的面板。
      *
      * 逻辑与之前一致：没开就打开主面板；已经开着时再点一次就关闭（回桌面收起）。
-     * 主副驾温度的默认长按操作均切换 AC。
+     * 组合温度控件的短按／长按由默认手势分别负责切换 AC 和打开温度弹窗。
      */
+
     private fun toggleSystemHvacWindow() {
         onUserInteraction()
         if (isSystemHvacOpen()) {
@@ -1008,7 +1009,7 @@ class DockOverlayService : Service() {
     }
 
     /**
-     * ★ v1.4.34：温度组合按钮中间值单击 → 温度弹窗。
+     * ★ v1.4.34：温度组合按钮中间值长按 → 温度弹窗。
      * 主驾 / 副驾是两个不同布局（左栏温度档位 + 右栏功能），zone 变化时重建实例。
      * 不再进系统空调页面。位置贴着触发图标、点外面关闭、无 × 按钮（统一规范）。
      */
@@ -1093,12 +1094,12 @@ class DockOverlayService : Service() {
         runCatching { VehicleController.setTempDual(this, next) }
     }
 
-    /** 长按主副驾温度切换 AC。 */
+    /** 短按主副驾温度中间值切换 AC。 */
     private fun toggleAcFromDock() {
         onUserInteraction()
         VehicleController.toggleAc(this)
         val ac = VehicleController.state.acOn
-        Logx.d("AC → ${if (ac) "开" else "关"}（长按温度切换）")
+        Logx.d("AC → ${if (ac) "开" else "关"}（短按温度切换）")
     }
 
     // =====================================================================

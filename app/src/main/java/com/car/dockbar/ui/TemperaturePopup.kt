@@ -23,7 +23,7 @@ import com.car.dockbar.vehicle.SensorBridge
 import com.car.dockbar.vehicle.VehicleController
 
 /**
- * 温度弹窗（主驾 / 副驾）—— 点击 Dock 温度组合按钮的中间值弹出（不再进系统空调页面）。
+ * 温度弹窗（主驾 / 副驾）—— 长按 Dock 温度组合按钮的中间值弹出（不再进系统空调页面）。
  *
  * 布局（按用户示意图）：
  *  左栏：温度档位竖排列表（15.5~28.5℃，步进 0.5），当前温度对应档位蓝字高亮，点某项直接设温；

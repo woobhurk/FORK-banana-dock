@@ -282,13 +282,13 @@ internal object BuiltinWidgets {
         comboWidget(
             Builtin.TEMP_DRIVER_COMBO,
             DockAction.TempStep(true, -1), DockAction.TempStep(true, 1),
-            DockAction.ShowPopup("temperatureDriver"), DockAction.ToggleAcFromDock,
+            DockAction.ToggleAcFromDock, DockAction.ShowPopup("temperatureDriver"),
             BindKind.TEMP_DRIVER,
         ),
         comboWidget(
             Builtin.TEMP_PASSENGER_COMBO,
             DockAction.TempStep(false, -1), DockAction.TempStep(false, 1),
-            DockAction.ShowPopup("temperaturePassenger"), DockAction.ToggleAcFromDock,
+            DockAction.ToggleAcFromDock, DockAction.ShowPopup("temperaturePassenger"),
             BindKind.TEMP_PASSENGER,
         ),
         comboWidget(

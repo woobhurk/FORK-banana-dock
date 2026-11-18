@@ -41,11 +41,12 @@ class DockCatalogTest {
     }
 
     @Test
-    fun hiddenTempLongPressDoesNotShowTheStatusPopup() {
+    fun legacyTempAndComboUseTheirCurrentTemperatureGestures() {
         val legacy = DockCatalog.of("temp_driver")!!.defaultGestures()[HitTargets.ROOT]!!
         assertEquals(DockAction.ToggleAc, legacy.longPress)
         val combo = DockCatalog.of("temp_driver_combo")!!.defaultGestures()[HitTargets.VALUE]!!
-        assertEquals(DockAction.ToggleAcFromDock, combo.longPress)
+        assertEquals(DockAction.ToggleAcFromDock, combo.tap)
+        assertEquals(DockAction.ShowPopup("temperatureDriver"), combo.longPress)
     }
 
     @Test
@@ -87,8 +88,8 @@ class DockCatalogTest {
             "vent" to "root:levelBump:vent:down/long:showPopup:seatClimate",
             "seat_heat" to "root:levelBump:seatHeat:down/long:levelBump:seatHeat:up",
             "steering_heat" to "root:levelBump:steeringHeat:down/long:levelBump:steeringHeat:up",
-            "temp_driver_combo" to "minus:tempStep:true:-1|plus:tempStep:true:1|value:showPopup:temperatureDriver/long:toggleAcFromDock",
-            "temp_passenger_combo" to "minus:tempStep:false:-1|plus:tempStep:false:1|value:showPopup:temperaturePassenger/long:toggleAcFromDock",
+            "temp_driver_combo" to "minus:tempStep:true:-1|plus:tempStep:true:1|value:toggleAcFromDock/long:showPopup:temperatureDriver",
+            "temp_passenger_combo" to "minus:tempStep:false:-1|plus:tempStep:false:1|value:toggleAcFromDock/long:showPopup:temperaturePassenger",
             "fan_combo" to "minus:fanStep:-1|plus:fanStep:1|value:toggleFanAuto/long:fanOff",
             "temp_down_driver" to "root:tempStep:true:-1",
             "temp_up_driver" to "root:tempStep:true:1",
