@@ -5,18 +5,26 @@ import android.media.AudioManager
 import com.car.dockbar.util.Logx
 
 /**
- * 媒体、导航音量。
+ * 媒体、导航、电话、语音音量。
  *
  * 显示和写入都用 AudioManager 的流索引，与系统同一套数字。
  * DCY11 日志里媒体流 3、导航流 15 的上限都是 39。
+ * 电话通道最低保持为 1；语音通道使用厂商流 11。
  * 不再加减 5：界面 0 写入 0，界面 15 写入 15。
  */
 object CabinVolume {
 
-    data class Channel(val title: String, val groupId: Int, val stream: Int)
+    data class Channel(
+        val title: String,
+        val groupId: Int,
+        val stream: Int,
+        val minValue: Int = 0
+    )
 
     val MEDIA = Channel("媒体", 0, 3)
     val NAVI = Channel("导航", 1, 15)
+    val PHONE = Channel("电话", 2, 0, minValue = 1)
+    val VOICE = Channel("语音", 3, 11)
 
     private val mediaShownListeners = mutableListOf<(Int) -> Unit>()
     private val mediaLock = Any()
@@ -35,14 +43,14 @@ object CabinVolume {
 
     data class Level(val value: Int, val max: Int)
 
-    /** 读取流索引，并在媒体流读取成功时更新缓存；上限用系统自己的 getStreamMaxVolume。 */
+    /** 读取流索引；各通道的最小值和上限均使用系统返回的范围。 */
     fun read(ctx: Context, channel: Channel): Level {
         val max = streamMax(ctx, channel)
         val readGeneration = if (channel == MEDIA) {
             synchronized(mediaLock) { mediaWriteGeneration }
         } else null
         val observed = runCatching { audio(ctx).getStreamVolume(channel.stream) }.getOrNull()
-        val level = Level((observed ?: 0).coerceIn(0, max), max)
+        val level = Level(clamp(channel, observed ?: 0, max), max)
         if (observed != null && channel == MEDIA) recordMediaLevel(level, readGeneration)
         return level
     }
@@ -53,9 +61,9 @@ object CabinVolume {
     }
 
     /** [shown] 直接写入同号的流索引，不再加 5。 */
-    fun write(ctx: Context, channel: Channel, shown: Int) {
+    fun write(ctx: Context, channel: Channel, shown: Int): Int {
         val max = streamMax(ctx, channel)
-        val written = shown.coerceIn(0, max)
+        val written = clamp(channel, shown, max)
         val writeGeneration = if (channel == MEDIA) {
             synchronized(mediaLock) {
                 mediaWriteGeneration++
@@ -72,6 +80,7 @@ object CabinVolume {
         } else emptyList()
         listeners.forEach { it(raw ?: written) }
         Logx.d("音量 ${channel.title} 流${channel.stream} 写入 $written 读回 ${raw ?: "失败"} 上限 $max")
+        return written
     }
 
     /** 返回媒体缓存；冷启动没有缓存时只进行一次真实读取。 */
@@ -105,6 +114,11 @@ object CabinVolume {
             if (changed) mediaShownListeners.toList() else emptyList()
         }
         return listeners
+    }
+
+    private fun clamp(channel: Channel, value: Int, max: Int): Int {
+        val min = channel.minValue.coerceIn(0, max)
+        return value.coerceIn(min, max)
     }
 
     private fun streamMax(ctx: Context, channel: Channel): Int =

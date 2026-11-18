@@ -21,8 +21,8 @@ import com.car.dockbar.util.Prefs
 
 /**
  * 音量面板。窗口规范和空调控制弹窗一致：贴着触发图标、点外面关闭、无关闭按钮、超时收起。
- * 媒体、导航各一条竖向音量条，条上显示当前数值，上下是 + / −。
- * 最多放大 1.8 倍，小屏按实际可用高度收敛。
+ * 媒体、导航、电话、语音各一条竖向音量条，条上显示当前数值，上下是 + / −。
+ * 最多放大 1.8 倍，小屏按实际可用宽高收敛。
  */
 class VolumePopup(private val ctx: Context) {
 
@@ -109,6 +109,8 @@ class VolumePopup(private val ctx: Context) {
         }
         row.addView(column(CabinVolume.MEDIA), colParams())
         row.addView(column(CabinVolume.NAVI), colParams())
+        row.addView(column(CabinVolume.PHONE), colParams())
+        row.addView(column(CabinVolume.VOICE), colParams())
         card.addView(row)
 
         val p = DockPopupChrome.anchoredParams(ctx, anchor, card)
@@ -120,7 +122,7 @@ class VolumePopup(private val ctx: Context) {
         render()
         main.postDelayed(refreshRunnable, 500L)
         resetTimer()
-        Logx.d("音量面板：显示（媒体 group=0，导航 group=1）")
+        Logx.d("音量面板：显示（媒体 group=0，导航 group=1，电话 group=2，语音 group=3）")
     }
 
     private fun column(channel: CabinVolume.Channel): LinearLayout {
@@ -129,7 +131,7 @@ class VolumePopup(private val ctx: Context) {
             gravity = Gravity.CENTER_HORIZONTAL
         }
         box.addView(ImageView(ctx).apply {
-            setImageResource(if (channel == CabinVolume.MEDIA) R.drawable.ic_music_note else R.drawable.ic_popup_navigation)
+            setImageResource(iconFor(channel))
             setColorFilter(DockIconView.popupFg)
             scaleType = ImageView.ScaleType.FIT_CENTER
             contentDescription = "${channel.title}音量"
@@ -144,8 +146,7 @@ class VolumePopup(private val ctx: Context) {
         }.apply { contentDescription = "${channel.title}音量增加" })
         val bar = LevelBar(ctx)
         bar.onSeek = { shown ->
-            bar.value = shown
-            CabinVolume.write(ctx, channel, shown)
+            bar.value = CabinVolume.write(ctx, channel, shown)
             resetTimer()
         }
         bars[channel] = bar
@@ -158,6 +159,13 @@ class VolumePopup(private val ctx: Context) {
             render()
         }.apply { contentDescription = "${channel.title}音量降低" })
         return box
+    }
+    private fun iconFor(channel: CabinVolume.Channel): Int = when (channel) {
+        CabinVolume.MEDIA -> R.drawable.ic_music_note
+        CabinVolume.NAVI -> R.drawable.ic_popup_navigation
+        CabinVolume.PHONE -> R.drawable.ic_popup_phone
+        CabinVolume.VOICE -> R.drawable.ic_popup_voice
+        else -> R.drawable.ic_volume
     }
 
     private fun stepBtn(label: String, onClick: () -> Unit): TextView = TextView(ctx).apply {
@@ -211,8 +219,14 @@ class VolumePopup(private val ctx: Context) {
         } else {
             dm.heightPixels - Prefs.dockHeightPx(ctx) - Prefs.dockMarginPx(ctx) - 40 * dm.density
         }
-        // 标题、通道图标、音量条、加减按钮及间距预留 432dp。
-        scale = minOf(1.8f, availableHeight.coerceAtLeast(1f) / (432 * dm.density))
+        // 标题、四个通道图标、音量条、加减按钮及间距预留 432dp；宽度按四列收敛。
+        val availableWidth = dm.widthPixels - 24 * dm.density
+        val widthScale = availableWidth.coerceAtLeast(1f) / (336 * dm.density)
+        scale = minOf(
+            1.8f,
+            availableHeight.coerceAtLeast(1f) / (432 * dm.density),
+            widthScale
+        )
     }
 
     private fun dp(v: Int): Int = (v * scale * ctx.resources.displayMetrics.density).toInt()
