@@ -223,9 +223,8 @@ object Prefs {
 
     // ---------------- 车控诊断开关（排查闪退用） ----------------
     /**
-     * 旧基础全量监听开关保持默认关闭，避免升级自动扩展到未验证车控通道。
-     * 历史CX11部分固件出现过原生回调崩溃；当前本车的按需风量、AC和温度回调已短时验证。
-     * 未配置时仅默认订阅风量；其他日常通道仍显式选择，保留崩溃熔断和轮询兜底。
+     * 历史CX11部分固件出现过原生回调崩溃；当前本车的按需风量、AC、循环、风向和温度回调已短时验证。
+     * 未配置时默认订阅风量、AC、循环和风向；其他日常通道仍显式选择，保留崩溃熔断和轮询兜底。
      */
     fun vehicleWatcherEnabled(ctx: Context) = sp(ctx).getBoolean("vehicle_watcher_enabled", false)
     fun setVehicleWatcherEnabled(ctx: Context, v: Boolean) =
@@ -246,9 +245,9 @@ object Prefs {
         "fan_manual", "fan_auto", "ac", "temp_driver", "temp_passenger", "recirc", "air_direction"
     )
 
-    private val DEFAULT_HVAC_EVENT_KEYS = setOf("fan_manual", "fan_auto")
+    private val DEFAULT_HVAC_EVENT_KEYS = setOf("fan_manual", "fan_auto", "ac", "recirc", "air_direction")
 
-    /** 仅无保存记录时启用默认风量；用户保存为空或熔断清空后不得自动补回。 */
+    /** 仅无保存记录时启用已验证的默认通道；用户保存为空或熔断清空后不得自动补回。 */
     fun hvacEventKeys(ctx: Context): Set<String> =
         sp(ctx).getStringSet("hvac_event_keys", DEFAULT_HVAC_EVENT_KEYS).orEmpty()
             .filterTo(mutableSetOf()) { it in HVAC_EVENT_KEYS }
