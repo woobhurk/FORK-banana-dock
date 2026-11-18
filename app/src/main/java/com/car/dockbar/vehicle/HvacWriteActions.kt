@@ -27,6 +27,25 @@ internal object HvacWriteActions {
         return !verified && encoded != value && VehicleBridge.verifyWrite(function, zone, value)
     }
 
+    /** 组合操作不拆队列；关闭调用未接受时不继续请求相反模式，不能据此推断物理效果。 */
+    fun writeSeatComfort(ctx: Context, driver: Boolean, heating: Boolean, level: Int): Boolean {
+        val heatKey = if (driver) "seat_heat" else "seat_heat_passenger"
+        val ventKey = if (driver) "seat_vent" else "seat_vent_passenger"
+        if (level == 0) {
+            // 关闭时分别尝试两项，不因第一项拒绝而跳过另一项。
+            val heatAccepted = writeChannel(ctx, heatKey, 0)
+            val ventAccepted = writeChannel(ctx, ventKey, 0)
+            return heatAccepted && ventAccepted
+        }
+        val inactiveKey = if (heating) ventKey else heatKey
+        val activeKey = if (heating) heatKey else ventKey
+        if (!writeChannel(ctx, inactiveKey, 0)) {
+            Logx.w("座椅组合操作停止：$inactiveKey 关闭调用未接受，未请求 $activeKey 档位 $level")
+            return false
+        }
+        return writeChannel(ctx, activeKey, level)
+    }
+
     fun writeSwitch(
         ctx: Context, key: String, func: Int, zone: Int, on: Boolean, label: String,
         bareFirst: Boolean = false

@@ -288,7 +288,7 @@ internal object BuiltinWidgets {
         comboWidget(
             Builtin.TEMP_PASSENGER_COMBO,
             DockAction.TempStep(false, -1), DockAction.TempStep(false, 1),
-            DockAction.ShowPopup("temperaturePassenger"), DockAction.ToggleDualSyncFromDock,
+            DockAction.ShowPopup("temperaturePassenger"), DockAction.ToggleAcFromDock,
             BindKind.TEMP_PASSENGER,
         ),
         comboWidget(
@@ -304,7 +304,7 @@ internal object BuiltinWidgets {
         valueWidget(Builtin.TEMP_DRIVER, root(tapLong(DockAction.ToggleHvacWindow, DockAction.ToggleAc)), BindKind.TEMP_DRIVER),
         iconWidget(Builtin.TEMP_UP_DRIVER, root(tap(DockAction.TempStep(true, 1)))),
         iconWidget(Builtin.AIR, root(tapLong(DockAction.ShowPopup("airDirection"), DockAction.OpenAirPanel)), BindKind.AIR),
-        iconWidget(Builtin.VENT, root(tapLong(DockAction.LevelBump("vent", "down"), DockAction.LevelBump("vent", "up"))), BindKind.VENT, preserveColors = true),
+        iconWidget(Builtin.VENT, root(tapLong(DockAction.LevelBump("vent", "down"), DockAction.ShowPopup("seatClimate"))), BindKind.VENT, preserveColors = true),
         iconWidget(Builtin.SEAT_HEAT, root(tapLong(DockAction.LevelBump("seatHeat", "down"), DockAction.LevelBump("seatHeat", "up"))), BindKind.SEAT_HEAT, preserveColors = true),
         iconWidget(Builtin.FAN_DOWN, root(tap(DockAction.FanStep(-1)))),
         valueWidget(Builtin.FAN, root(tapLong(DockAction.ToggleHvacWindow, DockAction.FanOff)), BindKind.FAN),
@@ -312,7 +312,7 @@ internal object BuiltinWidgets {
         iconWidget(Builtin.RECIRC, root(tap(DockAction.ToggleRecirc)), BindKind.RECIRC),
         iconWidget(Builtin.SEAT, root(tap(DockAction.ShowPopup("seat")))),
         iconWidget(Builtin.TEMP_DOWN_PASSENGER, root(tap(DockAction.TempStep(false, -1)))),
-        valueWidget(Builtin.TEMP_PASSENGER, root(tapLong(DockAction.ToggleHvacWindow, DockAction.ToggleDualSyncFromDock)), BindKind.TEMP_PASSENGER),
+        valueWidget(Builtin.TEMP_PASSENGER, root(tapLong(DockAction.ToggleHvacWindow, DockAction.ToggleAc)), BindKind.TEMP_PASSENGER),
         iconWidget(Builtin.TEMP_UP_PASSENGER, root(tap(DockAction.TempStep(false, 1)))),
         iconWidget(Builtin.DEFROST_FRONT, root(tap(DockAction.ToggleDefrostFront)), BindKind.DEFROST_FRONT),
         iconWidget(Builtin.DEFROST_REAR, root(tap(DockAction.ToggleDefrostRear)), BindKind.DEFROST_REAR),

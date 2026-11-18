@@ -1668,6 +1668,24 @@ object VehicleController {
         set = { s, v -> s.copy(seatHeat = v) },
         label = "座椅加热"
     )
+
+    /** 同侧加热与通风作为一次保序操作；关闭相反模式后才请求所选档位。 */
+    fun setSeatComfortLevel(ctx: Context, driver: Boolean, heating: Boolean, level: Int) {
+        if (Looper.myLooper() != main.looper) { main.post { setSeatComfortLevel(ctx, driver, heating, level) }; return }
+        if (!Prefs.simulate(ctx) && !HvacCommands.canSubmit(ctx, "setSeatComfortLevel")) return
+        val next = level.coerceIn(0, SEAT_LEVEL_MAX)
+        val heat = if (heating) next else 0
+        val vent = if (heating) 0 else next
+        val sequence = preview(COMFORT_GROUP) {
+            if (driver) it.copy(seatHeat = heat, seatVent = vent)
+            else it.copy(seatHeatPassenger = heat, seatVentPassenger = vent)
+        }
+        if (Prefs.simulate(ctx)) return
+        HvacCommands.submit(ctx, "seatComfort driver=$driver heat=$heat vent=$vent targetSeq=$sequence", { cancelTarget(sequence) }) {
+            if (!HvacWriteActions.writeSeatComfort(ctx, driver, heating, next)) cancelTarget(sequence)
+        }
+        scheduleRefresh(ctx, COMFORT_GROUP)
+    }
     private fun writeSeatLevel(
         ctx: Context,
         key: String,

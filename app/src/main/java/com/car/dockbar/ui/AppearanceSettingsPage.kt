@@ -54,7 +54,7 @@ class AppearanceSettingsPage(activity: MainActivity) : SettingsPage(activity, Ma
         appearance.getChildAt(appearance.childCount - 1).id = R.id.settingsFollowNightRow
 
         // （「空调温度」分区已按用户要求从设置页移除：
-        //   双温联动改由长按副驾温度切换、HI/LO 阈值用车机默认 15.5~28.5℃）
+        //   双温联动保留在副驾温度弹窗，HI/LO 阈值用车机默认 15.5~28.5℃）
 
         // --- 底色（形态 + 参数）────────────────
         appearance.addView(TextView(this).apply {

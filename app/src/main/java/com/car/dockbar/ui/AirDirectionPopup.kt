@@ -94,9 +94,8 @@ class AirDirectionPopup(private val ctx: Context) {
     }
 
     private fun buildAndShow(anchor: View?) {
-        // 未放大时内容总高约 104dp（内边距 20 + 标题 24 + 图标按钮行 42 + 间距 8）
-        // ★ v3.13.14：去掉按钮文字标签后，按钮行从 58dp 降到 42dp
-        computeScale(ctx, 104)
+        // 标题与三个竖排图标按钮，未放大时内容总高约 200dp。
+        computeScale(ctx, 200)
         wm = ctx.getSystemService(Context.WINDOW_SERVICE) as WindowManager
 
         val card = LinearLayout(ctx).apply {
@@ -121,8 +120,8 @@ class AirDirectionPopup(private val ctx: Context) {
         })
 
         // 三个独立开关
-        val row = LinearLayout(ctx).apply {
-            orientation = LinearLayout.HORIZONTAL
+        val column = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
@@ -138,10 +137,10 @@ class AirDirectionPopup(private val ctx: Context) {
             root.setOnClickListener { toggle(AirFlowDrawable.DEFROST) }
         }
         // 顺序：① 吹前挡 ② 吹脸 ③ 吹脚
-        row.addView(btnDefrost?.root, quickParams())
-        row.addView(btnFace?.root, quickParams())
-        row.addView(btnFoot?.root, quickParams())
-        card.addView(row)
+        column.addView(btnDefrost?.root, quickParams())
+        column.addView(btnFace?.root, quickParams())
+        column.addView(btnFoot?.root, quickParams())
+        card.addView(column)
 
         // 窗口参数：统一规范 —— 贴着触发图标（DockPopupChrome 负责位置 + flags）
         val p = DockPopupChrome.anchoredParams(ctx, anchor, card)
@@ -257,9 +256,10 @@ class AirDirectionPopup(private val ctx: Context) {
 
 
     private fun quickParams(): LinearLayout.LayoutParams =
-        LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-            marginStart = dp(4)
-            marginEnd = dp(4)
+        LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+            gravity = Gravity.CENTER_HORIZONTAL
+            topMargin = dp(4)
+            bottomMargin = dp(4)
         }
 
     // ★ v1.4.50：整体放大 2 倍（用户反馈原尺寸在车机上偏小、不好点）

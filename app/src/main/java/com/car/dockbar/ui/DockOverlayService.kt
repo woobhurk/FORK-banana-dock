@@ -158,6 +158,7 @@ class DockOverlayService : Service() {
     private var appDrawerPop: AppDrawerPopup? = null
     private var airQualityPop: TemperaturePopup? = null
     private var seatPopup: SeatPopup? = null
+    private var seatClimatePopup: SeatClimatePopup? = null
     private var volumePop: VolumePopup? = null
 
     // --- Dock 上方常驻状态小字（显示长按类功能的当前状态，如双温同步） ---
@@ -435,6 +436,8 @@ class DockOverlayService : Service() {
         airQualityPop = null
         seatPopup?.destroy()
         seatPopup = null
+        seatClimatePopup?.destroy()
+        seatClimatePopup = null
         volumePop?.destroy()
         volumePop = null
         statusLabel?.destroy()
@@ -909,7 +912,7 @@ class DockOverlayService : Service() {
      * （com.geely.hvac，即车机原本那个），而不是我们自绘的面板。
      *
      * 逻辑与之前一致：没开就打开主面板；已经开着时再点一次就关闭（回桌面收起）。
-     * 长按温度仍走各自功能：主驾=AC 开关，副驾=双温同步。
+     * 主副驾温度的默认长按操作均切换 AC。
      */
     private fun toggleSystemHvacWindow() {
         onUserInteraction()
@@ -1069,21 +1072,33 @@ class DockOverlayService : Service() {
         }
     }
 
-    /** 长按「副驾温度」切换双温同步。 */
+    private fun showSeatClimatePopup(anchor: View? = null) {
+        pauseAutoHide()
+        val pop = seatClimatePopup ?: SeatClimatePopup(this).also {
+            it.onDismissed = { stateMachine?.onUserIdle() }
+            seatClimatePopup = it
+        }
+        if (pop.isShowing) pop.hide() else if (!DockPopupChrome.shouldSuppressShow()) pop.show(anchor)
+        if (stateMachine?.state == DockState.HIDDEN) {
+            stateMachine?.requestTempShow(8000L)
+        }
+    }
+
+    /** Dock 动作切换双温同步。 */
     private fun toggleDualSync() {
         onUserInteraction()
         val next = !Prefs.syncTemp(this)
         Prefs.setSyncTemp(this, next)
-        Logx.d("双温同步 → ${if (next) "开" else "关"}（长按副驾温度切换）")
+        Logx.d("双温同步 → ${if (next) "开" else "关"}（Dock 动作）")
         runCatching { VehicleController.setTempDual(this, next) }
     }
 
-    /** 长按「主驾温度」切换 AC。 */
+    /** 长按主副驾温度切换 AC。 */
     private fun toggleAcFromDock() {
         onUserInteraction()
         VehicleController.toggleAc(this)
         val ac = VehicleController.state.acOn
-        Logx.d("AC → ${if (ac) "开" else "关"}（长按主驾温度切换）")
+        Logx.d("AC → ${if (ac) "开" else "关"}（长按温度切换）")
     }
 
     // =====================================================================
@@ -1415,6 +1430,7 @@ class DockOverlayService : Service() {
                 "temperaturePassenger" -> showAirQualityPopup(anchor, false)
                 "volume" -> showVolumePopup(anchor)
                 "seat" -> showSeatPopup(anchor)
+                "seatClimate" -> showSeatClimatePopup(anchor)
             }
         }
         override fun toggleHvacWindow() = toggleSystemHvacWindow()
