@@ -12,15 +12,17 @@ import android.view.View
 import android.view.WindowManager
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.widget.ImageView
 import androidx.core.content.ContextCompat
 import com.car.dockbar.R
 import com.car.dockbar.media.CabinVolume
 import com.car.dockbar.util.Logx
+import com.car.dockbar.util.Prefs
 
 /**
  * 音量面板。窗口规范和空调控制弹窗一致：贴着触发图标、点外面关闭、无关闭按钮、超时收起。
  * 媒体、导航各一条竖向音量条，条上显示当前数值，上下是 + / −。
- * 整体按 1.8 倍放大。
+ * 最多放大 1.8 倍，小屏按实际可用高度收敛。
  */
 class VolumePopup(private val ctx: Context) {
 
@@ -79,6 +81,7 @@ class VolumePopup(private val ctx: Context) {
     }
 
     private fun buildAndShow(anchor: View?) {
+        computeScale(anchor)
         wm = ctx.getSystemService(Context.WINDOW_SERVICE) as WindowManager
         bars.clear()
 
@@ -125,20 +128,20 @@ class VolumePopup(private val ctx: Context) {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
         }
-        box.addView(TextView(ctx).apply {
-            text = channel.title
-            setTextColor(DockIconView.popupFgDim)
-            textSize = sp(13f)
-            gravity = Gravity.CENTER
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { bottomMargin = dp(6) }
+        box.addView(ImageView(ctx).apply {
+            setImageResource(if (channel == CabinVolume.MEDIA) R.drawable.ic_music_note else R.drawable.ic_popup_navigation)
+            setColorFilter(DockIconView.popupFg)
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            contentDescription = "${channel.title}音量"
+            layoutParams = LinearLayout.LayoutParams(dp(24), dp(24)).apply {
+                gravity = Gravity.CENTER_HORIZONTAL
+                bottomMargin = dp(6)
+            }
         })
         box.addView(stepBtn("+") {
             CabinVolume.step(ctx, channel, 1)
             render()
-        })
+        }.apply { contentDescription = "${channel.title}音量增加" })
         val bar = LevelBar(ctx)
         bar.onSeek = { shown ->
             bar.value = shown
@@ -153,7 +156,7 @@ class VolumePopup(private val ctx: Context) {
         box.addView(stepBtn("−") {
             CabinVolume.step(ctx, channel, -1)
             render()
-        })
+        }.apply { contentDescription = "${channel.title}音量降低" })
         return box
     }
 
@@ -196,8 +199,21 @@ class VolumePopup(private val ctx: Context) {
             marginEnd = dp(10)
         }
 
-    /** 1.8 倍。车机 1080 高放得下，不再按屏幕收缩。 */
-    private val scale = 1.8f
+    private var scale = 1.8f
+
+    private fun computeScale(anchor: View?) {
+        val dm = ctx.resources.displayMetrics
+        val availableHeight = if (anchor != null && anchor.width > 0 && anchor.height > 0) {
+            val location = IntArray(2)
+            anchor.getLocationOnScreen(location)
+            if (Prefs.dockAtBottom(ctx)) location[1] - 18 * dm.density
+            else dm.heightPixels - location[1] - anchor.height - 18 * dm.density
+        } else {
+            dm.heightPixels - Prefs.dockHeightPx(ctx) - Prefs.dockMarginPx(ctx) - 40 * dm.density
+        }
+        // 标题、通道图标、音量条、加减按钮及间距预留 432dp。
+        scale = minOf(1.8f, availableHeight.coerceAtLeast(1f) / (432 * dm.density))
+    }
 
     private fun dp(v: Int): Int = (v * scale * ctx.resources.displayMetrics.density).toInt()
 

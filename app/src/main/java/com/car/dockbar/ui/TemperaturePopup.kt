@@ -32,7 +32,7 @@ import com.car.dockbar.vehicle.VehicleController
  *
  * 遵循 [DockPopupChrome] 统一规范，风格与 [AirDirectionPopup] 一致：
  *  bg_card 圆角卡、贴着触发图标、点弹窗外面关闭、无 × 按钮、5 秒自动消失。
- * 激活状态一律「字体变蓝」（[DockIconView.accentColor]）。
+ * 功能使用图标，保留温度、档位与自动阈值；选中边框补充颜色反馈。
  */
 class TemperaturePopup(
     private val ctx: Context,
@@ -42,6 +42,12 @@ class TemperaturePopup(
     companion object {
         const val ZONE_DRIVER = "driver"
         const val ZONE_PASSENGER = "passenger"
+        private val STEERING_HEAT_ICONS = intArrayOf(
+            R.drawable.ic_sw_heat_off,
+            R.drawable.ic_sw_heat_01,
+            R.drawable.ic_sw_heat_02,
+            R.drawable.ic_sw_heat_03
+        )
     }
 
     private var wm: WindowManager? = null
@@ -101,15 +107,15 @@ class TemperaturePopup(
     private var lastRenderedTemp: Float? = null
 
     // 右栏 主驾
-    private var btnDefrostFront: TextView? = null
-    private var btnDefrostRear: TextView? = null
-    private var btnSteerHeat: TextView? = null
+    private var btnDefrostFront: DockPopupIconButton? = null
+    private var btnDefrostRear: DockPopupIconButton? = null
+    private var btnSteerHeat: DockPopupIconButton? = null
 
     // 右栏 副驾
-    private var btnDualSync: TextView? = null
-    private var tvCabinTemp: TextView? = null
-    private var btnVentHot: TextView? = null
-    private var btnHeatCold: TextView? = null
+    private var btnDualSync: DockPopupIconButton? = null
+    private var tvCabinTemp: DockPopupIconButton? = null
+    private var btnVentHot: DockPopupIconButton? = null
+    private var btnHeatCold: DockPopupIconButton? = null
 
     var onDismissed: (() -> Unit)? = null
 
@@ -253,42 +259,57 @@ class TemperaturePopup(
             orientation = LinearLayout.VERTICAL
         }
         if (isDriver) {
-            // ── [P01] 前挡加热 ─────────────────────
-            btnDefrostFront = funcBtn("前挡加热") { VehicleController.toggleDefrostFront(ctx); resetTimer() }
-            // ── [P02] 后挡加热 ─────────────────────
-            btnDefrostRear = funcBtn("后挡加热") { VehicleController.toggleDefrostRear(ctx); resetTimer() }
-            // ── [P03] 极速降温 ─────────────────────
-            val fastCool = funcBtn("极速降温") { VehicleController.fastCool(ctx); resetTimer() }
-            // ── [P04] 极速升温（★ v3.13.12 新增，紧跟极速降温下面）──
-            val fastHeat = funcBtn("极速升温") { VehicleController.fastHeat(ctx); resetTimer() }
-            // ── [P05] 方向盘加热 ────────────────────
-            btnSteerHeat = funcBtn("方向盘加热 关") { VehicleController.steeringHeatCycle(ctx); resetTimer() }
+            btnDefrostFront = funcBtn(R.drawable.ic_defrost, "前挡加热") {
+                VehicleController.toggleDefrostFront(ctx)
+                resetTimer()
+            }
+            btnDefrostRear = funcBtn(R.drawable.ic_rear_defrost, "后挡加热") {
+                VehicleController.toggleDefrostRear(ctx)
+                resetTimer()
+            }
+            val fastCool = funcBtn(R.drawable.ic_popup_cool, "极速降温", "MAX") {
+                VehicleController.fastCool(ctx)
+                resetTimer()
+            }
+            val fastHeat = funcBtn(R.drawable.ic_popup_heat, "极速升温", "MAX") {
+                VehicleController.fastHeat(ctx)
+                resetTimer()
+            }
+            btnSteerHeat = funcBtn(
+                R.drawable.ic_sw_heat_off, "方向盘加热关闭", "0", preserveIconColors = true
+            ) {
+                VehicleController.steeringHeatCycle(ctx)
+                resetTimer()
+            }
             rightCol.addView(btnDefrostFront, funcLp())
             rightCol.addView(btnDefrostRear, funcLp())
             rightCol.addView(fastCool, funcLp())
             rightCol.addView(fastHeat, funcLp())
             rightCol.addView(btnSteerHeat, funcLp())
         } else {
-            // ── [P05] 双温同步 ─────────────────────
-            btnDualSync = funcBtn("双温同步") {
+            btnDualSync = funcBtn(R.drawable.ic_popup_sync, "双温同步", "SYNC") {
                 val next = !Prefs.syncTemp(ctx)
                 Prefs.setSyncTemp(ctx, next)
-                // ★ v1.4.86：写车机（原来只改本地开关 → 车机收不到命令，按钮等于坏的）
                 runCatching { VehicleController.setTempDual(ctx, next) }
                     .onFailure { Logx.e("双温同步：写车机失败", it) }
                 render(VehicleController.state)
                 resetTimer()
             }
-            // ── [P06] 车内温度 ─────────────────────
-            tvCabinTemp = valueBox("车内温度")
-            // ── [P07] 高于 25℃ 自动开主驾通风 ────────
-            btnVentHot = funcBtn("高于25°通风") {
+            tvCabinTemp = DockPopupIconButton(
+                ctx, SCALE, R.drawable.ic_popup_cabin_temp, "车内温度暂不可用", "--"
+            ).apply {
+                minimumWidth = dp(116)
+                isClickable = false
+                isFocusable = false
+                background = ContextCompat.getDrawable(ctx, R.drawable.bg_dock_popup_field)
+            }
+            // 自动规则保留阈值和 AUTO，避免与立即调节座椅档位混淆。
+            btnVentHot = funcBtn(R.drawable.ic_seat_vent, "高于25℃自动通风", ">25℃\nAUTO") {
                 Prefs.setAutoSeatVentHot(ctx, !Prefs.autoSeatVentHot(ctx))
                 render(VehicleController.state)
                 resetTimer()
             }
-            // ── [P08] 低于 15℃ 自动开主/副驾加热 ────
-            btnHeatCold = funcBtn("低于15°加热") {
+            btnHeatCold = funcBtn(R.drawable.ic_seat_hot_03, "低于15℃自动加热", "<15℃\nAUTO") {
                 Prefs.setAutoSeatHeatCold(ctx, !Prefs.autoSeatHeatCold(ctx))
                 render(VehicleController.state)
                 resetTimer()
@@ -324,39 +345,23 @@ class TemperaturePopup(
     }
 
     /** 右栏功能按钮（激活时字体变蓝） */
-    private fun funcBtn(text: String, onClick: () -> Unit): TextView = TextView(ctx).apply {
-        this.text = text
-        textSize = sp(14f)
-        typeface = AppFont.bold(ctx)
-        gravity = Gravity.CENTER
-        setTextColor(DockIconView.popupFg)
-        background = ContextCompat.getDrawable(ctx, R.drawable.bg_item_press)
-        minHeight = dp(40)
-        minWidth = dp(116)
-        isClickable = true
+    private fun funcBtn(
+        iconRes: Int,
+        description: String,
+        caption: String = "",
+        preserveIconColors: Boolean = false,
+        onClick: () -> Unit
+    ): DockPopupIconButton = DockPopupIconButton(
+        ctx, SCALE, iconRes, description, caption, preserveIconColors
+    ).apply {
+        minimumWidth = dp(116)
         setOnClickListener { onClick() }
     }
-
-    /** 右栏数值方框（数字蓝字显示实际读数） */
-    private fun valueBox(label: String): TextView = TextView(ctx).apply {
-        text = "$label --"
-        textSize = sp(14f)
-        typeface = AppFont.bold(ctx)
-        gravity = Gravity.CENTER
-        setTextColor(DockIconView.accentColor)
-        background = ContextCompat.getDrawable(ctx, R.drawable.bg_dock_popup_field)
-        minHeight = dp(40)
-        minWidth = dp(116)
-    }
-
     private fun funcLp(): LinearLayout.LayoutParams =
         LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT
         ).apply { bottomMargin = dp(4) }
 
-    private fun TextView.setActive(on: Boolean) {
-        setTextColor(if (on) DockIconView.accentColor else DockIconView.popupFg)
-    }
 
     private fun render(st: VehicleController.State) {
         val isDriver = zone == ZONE_DRIVER
@@ -394,31 +399,33 @@ class TemperaturePopup(
         }
         if (isDriver) {
             btnDefrostFront?.let {
-                it.text = if (st.defrostFront) "前挡加热 开" else "前挡加热"
+                it.contentDescription = "前挡加热${if (st.defrostFront) "开启" else "关闭"}"
                 it.setActive(st.defrostFront)
             }
             btnDefrostRear?.let {
-                it.text = if (st.defrostRear) "后挡加热 开" else "后挡加热"
+                it.contentDescription = "后挡加热${if (st.defrostRear) "开启" else "关闭"}"
                 it.setActive(st.defrostRear)
             }
             btnSteerHeat?.let {
-                it.text = if (st.steeringHeat > 0) "方向盘加热 ${st.steeringHeat} 档" else "方向盘加热 关"
+                it.setIcon(STEERING_HEAT_ICONS[st.steeringHeat.coerceIn(0, STEERING_HEAT_ICONS.lastIndex)])
+                it.setCaption(st.steeringHeat.toString())
+                it.contentDescription = if (st.steeringHeat > 0) "方向盘加热 ${st.steeringHeat} 档" else "方向盘加热关闭"
                 it.setActive(st.steeringHeat > 0)
             }
         } else {
             val sync = Prefs.syncTemp(ctx)
             btnDualSync?.let {
-                it.text = if (sync) "双温同步 开" else "双温同步 关"
+                it.contentDescription = "双温同步${if (sync) "开启" else "关闭"}"
                 it.setActive(sync)
             }
             btnVentHot?.let {
                 val on = Prefs.autoSeatVentHot(ctx)
-                it.text = if (on) "高于25°通风 开" else "高于25°通风 关"
+                it.contentDescription = "高于25℃自动通风${if (on) "开启" else "关闭"}"
                 it.setActive(on)
             }
             btnHeatCold?.let {
                 val on = Prefs.autoSeatHeatCold(ctx)
-                it.text = if (on) "低于15°加热 开" else "低于15°加热 关"
+                it.contentDescription = "低于15℃自动加热${if (on) "开启" else "关闭"}"
                 it.setActive(on)
             }
         }
@@ -429,7 +436,9 @@ class TemperaturePopup(
         if (zone == ZONE_DRIVER) return
         SensorBridge.init(ctx)
         val cabin = SensorBridge.readFloat(SensorBridge.TEMP_INDOOR)
-        tvCabinTemp?.text = "车内温度 " + if (cabin == null) "--" else String.format("%.1f°", cabin)
+        val value = if (cabin == null) "--" else String.format("%.1f℃", cabin)
+        tvCabinTemp?.setCaption(value)
+        tvCabinTemp?.contentDescription = if (cabin == null) "车内温度暂不可用" else "车内温度 $value"
     }
 
     /** 档位显示：超出可调范围显示 "--" */

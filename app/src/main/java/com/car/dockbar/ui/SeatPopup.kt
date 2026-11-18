@@ -6,7 +6,6 @@
 package com.car.dockbar.ui
 
 import android.content.Context
-import android.graphics.Typeface
 import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
@@ -22,14 +21,13 @@ import com.car.dockbar.vehicle.VehicleController
 /**
  * 座椅弹窗 —— 点击 Dock「座椅」按钮弹出（不再进座椅设置 App）。
  *
- * 布局（按用户示意图）：
- *  第一行：座椅1 / 座椅2 / 座椅3（座位选择，选中项字体变蓝）
- *  第二行：主驾通风（档位）/ 副驾通风（档位）
- *  第三行：主驾加热（档位）/ 副驾加热（档位）
+ * 布局：
+ *  第一行：座椅记忆位置 1 / 2 / 3（图标加数字，按实际读回位置高亮）
+ *  下方：主驾 / 副驾列名，两行分别为通风和加热图标及当前档位。
  *
  * 遵循 [DockPopupChrome] 统一规范，风格与 [AirDirectionPopup] 一致：
  *  bg_card 圆角卡、贴着触发图标、点弹窗外面关闭、无 × 按钮、8 秒自动消失。
- * 激活（档位 > 0 / 被选中）= 字体变蓝（[DockIconView.accentColor]）。
+ * 激活（档位 > 0 / 被选中）显示边框，通风和加热图标保留原始档位颜色。
  */
 class SeatPopup(private val ctx: Context) {
 
@@ -41,14 +39,14 @@ class SeatPopup(private val ctx: Context) {
     private val dismissRunnable = Runnable { hide() }
     private val AUTO_DISMISS_MS = 8000L
 
-    private val seatButtons = mutableListOf<TextView>()
+    private val seatButtons = mutableListOf<DockPopupIconButton>()
     /** 当前座椅记忆位置（1/2/3），读不到为 null —— 由 SEAT_NUM 0x2d410f00 主动读取 */
     private var currentSeat: Int? = null
 
-    private var btnVentDriver: TextView? = null
-    private var btnVentPassenger: TextView? = null
-    private var btnHeatDriver: TextView? = null
-    private var btnHeatPassenger: TextView? = null
+    private var btnVentDriver: DockPopupIconButton? = null
+    private var btnVentPassenger: DockPopupIconButton? = null
+    private var btnHeatDriver: DockPopupIconButton? = null
+    private var btnHeatPassenger: DockPopupIconButton? = null
 
     var onDismissed: (() -> Unit)? = null
 
@@ -80,7 +78,8 @@ class SeatPopup(private val ctx: Context) {
     }
 
     private fun buildAndShow(anchor: View?) {
-        computeScale(ctx, 240)
+        // 标题、记忆位、列名及两行控制，加上内边距和间隔，按约 204dp 自然高度缩放。
+        computeScale(ctx, 204)
         wm = ctx.getSystemService(Context.WINDOW_SERVICE) as WindowManager
 
         val card = LinearLayout(ctx).apply {
@@ -104,7 +103,7 @@ class SeatPopup(private val ctx: Context) {
             ).apply { bottomMargin = dp(6) }
         })
 
-        // 第一行：座椅1 / 座椅2 / 座椅3 —— ★ 座椅记忆的三个位置，点击应用对应记忆位
+        // 第一行：三个座椅记忆位置，保留实际读回高亮和点击后的短暂反馈。
         val seatRow = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
@@ -112,11 +111,14 @@ class SeatPopup(private val ctx: Context) {
         seatButtons.clear()
         for (i in 0 until 3) {
             // ── [P19] 记忆位按钮 ×3 ─────────────────
-            val btn = funcBtn("座椅${i + 1}").apply {
+            val btn = DockPopupIconButton(
+                ctx, SCALE, R.drawable.ic_seat_open, "座椅记忆位置 ${i + 1}", "${i + 1}"
+            ).apply {
+                minimumWidth = dp(96)
                 setOnClickListener { v ->
                     VehicleController.applySeatMemory(ctx, i + 1)
                     // 视觉反馈：点击后短暂高亮；1.5 秒后重新按「当前实际位置」渲染
-                    (v as? TextView)?.setActive(true)
+                    (v as? DockPopupIconButton)?.setActive(true)
                     main.postDelayed({
                         currentSeat = VehicleController.readSeatMemoryIndex(ctx)
                         render(VehicleController.state)
@@ -133,13 +135,36 @@ class SeatPopup(private val ctx: Context) {
             LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
         ).apply { bottomMargin = dp(4) })
 
+        // 主副驾列名与下方两列按钮对齐，功能和档位由图标、数字及无障碍说明表达。
+        val columnNames = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+        }
+        for (name in listOf("主驾", "副驾")) {
+            columnNames.addView(TextView(ctx).apply {
+                text = name
+                setTextColor(DockIconView.popupFg)
+                textSize = sp(13f)
+                typeface = AppFont.bold(ctx)
+                gravity = Gravity.CENTER
+            }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                marginStart = dp(3); marginEnd = dp(3)
+            })
+        }
+        card.addView(columnNames, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+        ).apply { bottomMargin = dp(4) })
+
         // 第二行：主驾通风 / 副驾通风
         val ventRow = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
         }
         // ── [P15] 主驾座椅通风 ───────────────────
-        btnVentDriver = funcBtn("主驾通风 关").apply {
+        btnVentDriver = DockPopupIconButton(
+            ctx, SCALE, R.drawable.ic_seat_feng_off, "主驾座椅通风关闭", "0", preserveIconColors = true
+        ).apply {
+            minimumWidth = dp(96)
             setOnClickListener {
                 val cur = VehicleController.state.seatVent
                 // ★ 用户要求：从高档位往低调（关 → 最高档 → … → 关）
@@ -150,7 +175,10 @@ class SeatPopup(private val ctx: Context) {
             }
         }
         // ── [P17] 副驾座椅通风 ───────────────────
-        btnVentPassenger = funcBtn("副驾通风 关").apply {
+        btnVentPassenger = DockPopupIconButton(
+            ctx, SCALE, R.drawable.ic_seat_feng_off, "副驾座椅通风关闭", "0", preserveIconColors = true
+        ).apply {
+            minimumWidth = dp(96)
             setOnClickListener {
                 val cur = VehicleController.state.seatVentPassenger
                 VehicleController.setSeatVentLevelPassenger(
@@ -175,7 +203,10 @@ class SeatPopup(private val ctx: Context) {
             gravity = Gravity.CENTER
         }
         // ── [P16] 主驾座椅加热 ───────────────────
-        btnHeatDriver = funcBtn("主驾加热 关").apply {
+        btnHeatDriver = DockPopupIconButton(
+            ctx, SCALE, R.drawable.ic_seat_hot_off, "主驾座椅加热关闭", "0", preserveIconColors = true
+        ).apply {
+            minimumWidth = dp(96)
             setOnClickListener {
                 val cur = VehicleController.state.seatHeat
                 // ★ 从高档位往低调
@@ -186,7 +217,10 @@ class SeatPopup(private val ctx: Context) {
             }
         }
         // ── [P18] 副驾座椅加热 ───────────────────
-        btnHeatPassenger = funcBtn("副驾加热 关").apply {
+        btnHeatPassenger = DockPopupIconButton(
+            ctx, SCALE, R.drawable.ic_seat_hot_off, "副驾座椅加热关闭", "0", preserveIconColors = true
+        ).apply {
+            minimumWidth = dp(96)
             setOnClickListener {
                 val cur = VehicleController.state.seatHeatPassenger
                 VehicleController.setSeatHeatLevelPassenger(
@@ -223,23 +257,6 @@ class SeatPopup(private val ctx: Context) {
         Logx.d("座椅弹窗：显示（当前记忆位=$currentSeat；座椅选择 + 主副驾通风/加热档位）")
     }
 
-    private fun funcBtn(text: String): TextView = TextView(ctx).apply {
-        this.text = text
-        textSize = sp(14f)
-        typeface = AppFont.bold(ctx)
-        gravity = Gravity.CENTER
-        setTextColor(DockIconView.popupFg)
-        background = ContextCompat.getDrawable(ctx, R.drawable.bg_item_press)
-        minHeight = dp(40)
-        minWidth = dp(96)
-        isClickable = true
-    }
-
-    /** 激活（档位 > 0 / 被选中）= 字体变蓝，与风向弹窗一致 */
-    private fun TextView.setActive(on: Boolean) {
-        setTextColor(if (on) DockIconView.accentColor else DockIconView.popupFg)
-        alpha = if (on) 1f else 0.85f
-    }
 
     private fun render(st: VehicleController.State) {
         // ★ 座椅记忆按钮：读出当前位置就高亮它；读不到才全部普通色
@@ -248,19 +265,47 @@ class SeatPopup(private val ctx: Context) {
         seatButtons.forEachIndexed { i, btn -> btn.setActive(cur != null && cur == i + 1) }
 
         btnVentDriver?.let {
-            it.text = if (st.seatVent > 0) "主驾通风 ${st.seatVent} 档" else "主驾通风 关"
+            it.setIcon(when (st.seatVent) {
+                1 -> R.drawable.ic_seat_feng_01
+                2 -> R.drawable.ic_seat_feng_02
+                3 -> R.drawable.ic_seat_feng_03
+                else -> R.drawable.ic_seat_feng_off
+            })
+            it.setCaption(if (st.seatVent > 0) "${st.seatVent}" else "0")
+            it.contentDescription = if (st.seatVent > 0) "主驾座椅通风 ${st.seatVent} 档" else "主驾座椅通风关闭"
             it.setActive(st.seatVent > 0)
         }
         btnVentPassenger?.let {
-            it.text = if (st.seatVentPassenger > 0) "副驾通风 ${st.seatVentPassenger} 档" else "副驾通风 关"
+            it.setIcon(when (st.seatVentPassenger) {
+                1 -> R.drawable.ic_seat_feng_01
+                2 -> R.drawable.ic_seat_feng_02
+                3 -> R.drawable.ic_seat_feng_03
+                else -> R.drawable.ic_seat_feng_off
+            })
+            it.setCaption(if (st.seatVentPassenger > 0) "${st.seatVentPassenger}" else "0")
+            it.contentDescription = if (st.seatVentPassenger > 0) "副驾座椅通风 ${st.seatVentPassenger} 档" else "副驾座椅通风关闭"
             it.setActive(st.seatVentPassenger > 0)
         }
         btnHeatDriver?.let {
-            it.text = if (st.seatHeat > 0) "主驾加热 ${st.seatHeat} 档" else "主驾加热 关"
+            it.setIcon(when (st.seatHeat) {
+                1 -> R.drawable.ic_seat_hot_01
+                2 -> R.drawable.ic_seat_hot_02
+                3 -> R.drawable.ic_seat_hot_03
+                else -> R.drawable.ic_seat_hot_off
+            })
+            it.setCaption(if (st.seatHeat > 0) "${st.seatHeat}" else "0")
+            it.contentDescription = if (st.seatHeat > 0) "主驾座椅加热 ${st.seatHeat} 档" else "主驾座椅加热关闭"
             it.setActive(st.seatHeat > 0)
         }
         btnHeatPassenger?.let {
-            it.text = if (st.seatHeatPassenger > 0) "副驾加热 ${st.seatHeatPassenger} 档" else "副驾加热 关"
+            it.setIcon(when (st.seatHeatPassenger) {
+                1 -> R.drawable.ic_seat_hot_01
+                2 -> R.drawable.ic_seat_hot_02
+                3 -> R.drawable.ic_seat_hot_03
+                else -> R.drawable.ic_seat_hot_off
+            })
+            it.setCaption(if (st.seatHeatPassenger > 0) "${st.seatHeatPassenger}" else "0")
+            it.contentDescription = if (st.seatHeatPassenger > 0) "副驾座椅加热 ${st.seatHeatPassenger} 档" else "副驾座椅加热关闭"
             it.setActive(st.seatHeatPassenger > 0)
         }
     }
