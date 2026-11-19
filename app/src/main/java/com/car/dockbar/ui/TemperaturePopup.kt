@@ -267,12 +267,12 @@ class TemperaturePopup(
             orientation = LinearLayout.VERTICAL
         }
         if (isDriver) {
-            btnDefrostFront = funcBtn(R.drawable.ic_defrost, "前挡加热") {
+            btnDefrostFront = funcBtn(R.drawable.ic_popup_defrost_front, "前挡加热") {
                 VehicleController.toggleDefrostFront(ctx)
                 resetTimer()
             }
             btnDefrostRear = funcBtn(
-                R.drawable.ic_rear_defrost, "后挡加热", iconScale = ICON_SCALE_REAR_DEFROST
+                R.drawable.ic_popup_defrost_rear, "后挡加热", iconScale = ICON_SCALE_REAR_DEFROST
             ) {
                 VehicleController.toggleDefrostRear(ctx)
                 resetTimer()
@@ -325,11 +325,11 @@ class TemperaturePopup(
                 minimumWidth = dp(116)
                 isClickable = false
                 isFocusable = false
-                background = ContextCompat.getDrawable(ctx, R.drawable.bg_dock_popup_field)
+                background = null
             }
             // 自动规则保留阈值和 AUTO，避免与立即调节座椅档位混淆。
             btnVentHot = funcBtn(
-                R.drawable.ic_seat_vent,
+                R.drawable.ic_seat_feng_03,
                 "高于25℃自动通风",
                 ">25℃\nAUTO",
                 iconScale = ICON_SCALE_AUTO_SEAT

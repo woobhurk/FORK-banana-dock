@@ -357,7 +357,7 @@ class DockEntriesActivity : AppCompatActivity() {
 
     private fun bindIcon(view: ImageView, entry: DockEntry) {
         if (entry.kind == "builtin") {
-            view.setImageResource(DockCatalog.of(entry.action)?.spec?.catalogIcon ?: R.drawable.ic_car)
+            view.setImageResource(DockCatalog.of(entry.action)?.spec?.catalogIcon ?: R.drawable.ic_dock_car)
             return
         }
         val cached = icons[entry.action]

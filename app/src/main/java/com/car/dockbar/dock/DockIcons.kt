@@ -36,14 +36,14 @@ private fun ventIcon(level: Int, dark: Boolean): Int = when (level) {
     1 -> if (dark) R.drawable.ic_seat_feng_01_dark else R.drawable.ic_seat_feng_01
     2 -> if (dark) R.drawable.ic_seat_feng_02_dark else R.drawable.ic_seat_feng_02
     3 -> if (dark) R.drawable.ic_seat_feng_03_dark else R.drawable.ic_seat_feng_03
-    else -> if (dark) R.drawable.ic_seat_feng_off_dark else R.drawable.ic_seat_feng_off
+    else -> if (dark) R.drawable.ic_seat_off_dark else R.drawable.ic_seat_off
 }
 
 private fun seatHeatIcon(level: Int, dark: Boolean): Int = when (level) {
     1 -> if (dark) R.drawable.ic_seat_hot_01_dark else R.drawable.ic_seat_hot_01
     2 -> if (dark) R.drawable.ic_seat_hot_02_dark else R.drawable.ic_seat_hot_02
     3 -> if (dark) R.drawable.ic_seat_hot_03_dark else R.drawable.ic_seat_hot_03
-    else -> if (dark) R.drawable.ic_seat_hot_off_dark else R.drawable.ic_seat_hot_off
+    else -> if (dark) R.drawable.ic_seat_off_dark else R.drawable.ic_seat_off
 }
 
 private fun steeringHeatIcon(level: Int, dark: Boolean): Int = when (level) {

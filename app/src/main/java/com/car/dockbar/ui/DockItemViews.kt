@@ -341,12 +341,7 @@ class DockMusicView @JvmOverloads constructor(
     /** ★ v3.13.11：当前生效的字号缓存（避免每次 onMeasure 都 setTextSize 触发 requestLayout 死循环） */
     private var curTitlePx = -1f
     private var curArtistPx = -1f
-    // ★ v3.13.2：用户反馈「放大后还是很小」→ 定位到根因不是按钮容器，
-    //   而是 ic_pause / ic_play 矢量图自带大片空白边距（56×56 viewport 里
-    //   图形只占 35% 宽），FIT_CENTER 按整个 viewport 缩放 → 放大倍数被空白吃掉。
-    //   已把两个 drawable 的 viewport 裁到图形边界（图形铺满画布），
-    //   现在这里的 px 就是**屏幕上真正看到的像素高**。
-    //   18px 基准 × 1.8 倍 = 32px 实际可见高度（之前 1.8 倍时只有约 18px 可见）。
+    // 媒体矢量裁去多余留白，避免 FIT_CENTER 缩小播放、暂停和下一首的可见轮廓。
     val btnPlay = DockIconView(context, R.drawable.ic_pause, (18 * 1.8f * iconScale).toInt())
     val btnNext = DockIconView(context, R.drawable.ic_next, (18 * 1.8f * iconScale).toInt()).apply {
         contentDescription = "下一首"

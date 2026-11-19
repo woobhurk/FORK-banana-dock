@@ -2,6 +2,7 @@ package com.car.dockbar.dock
 
 import com.car.dockbar.R
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Test
 
 class DockIconsTest {
@@ -29,8 +30,12 @@ class DockIconsTest {
 
     @Test
     fun levelIconsFollowChannelAndTheme() {
-        assertEquals(R.drawable.ic_seat_feng_off, levelIcon("vent", 0, false))
-        assertEquals(R.drawable.ic_seat_feng_off_dark, levelIcon("vent", 0, true))
+        val lightOff = levelIcon("vent", 0, false)
+        val darkOff = levelIcon("vent", 0, true)
+        assertEquals(lightOff, levelIcon("seatHeat", 0, false))
+        assertEquals(darkOff, levelIcon("seatHeat", 0, true))
+        assertNotEquals(lightOff, darkOff)
+        assertNotEquals(lightOff, levelIcon("steeringHeat", 0, false))
         assertEquals(R.drawable.ic_seat_feng_01, levelIcon("vent", 1, false))
         assertEquals(R.drawable.ic_seat_feng_01_dark, levelIcon("vent", 1, true))
         assertEquals(R.drawable.ic_seat_feng_03, levelIcon("vent", 3, false))

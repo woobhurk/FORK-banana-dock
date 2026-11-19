@@ -223,7 +223,7 @@ class SeatClimatePopup(private val ctx: Context) {
             R.drawable.ic_seat_hot_03,
             R.drawable.ic_seat_hot_02,
             R.drawable.ic_seat_hot_01,
-            R.drawable.ic_seat_feng_off,
+            R.drawable.ic_seat_off,
             R.drawable.ic_seat_feng_01,
             R.drawable.ic_seat_feng_02,
             R.drawable.ic_seat_feng_03

@@ -164,7 +164,7 @@ class SeatPopup(private val ctx: Context) {
         this.ventRow = ventRow
         // ── [P15] 主驾座椅通风 ───────────────────
         btnVentDriver = DockPopupIconButton(
-            ctx, SCALE, R.drawable.ic_seat_feng_off, "主驾座椅通风关闭", "0", preserveIconColors = true
+            ctx, SCALE, R.drawable.ic_seat_off, "主驾座椅通风关闭", "0", preserveIconColors = true
         ).apply {
             minimumWidth = dp(96)
             setOnClickListener {
@@ -178,7 +178,7 @@ class SeatPopup(private val ctx: Context) {
         }
         // ── [P17] 副驾座椅通风 ───────────────────
         btnVentPassenger = DockPopupIconButton(
-            ctx, SCALE, R.drawable.ic_seat_feng_off, "副驾座椅通风关闭", "0", preserveIconColors = true
+            ctx, SCALE, R.drawable.ic_seat_off, "副驾座椅通风关闭", "0", preserveIconColors = true
         ).apply {
             minimumWidth = dp(96)
             setOnClickListener {
@@ -206,7 +206,7 @@ class SeatPopup(private val ctx: Context) {
         }
         // ── [P16] 主驾座椅加热 ───────────────────
         btnHeatDriver = DockPopupIconButton(
-            ctx, SCALE, R.drawable.ic_seat_hot_off, "主驾座椅加热关闭", "0", preserveIconColors = true
+            ctx, SCALE, R.drawable.ic_seat_off, "主驾座椅加热关闭", "0", preserveIconColors = true
         ).apply {
             minimumWidth = dp(96)
             setOnClickListener {
@@ -220,7 +220,7 @@ class SeatPopup(private val ctx: Context) {
         }
         // ── [P18] 副驾座椅加热 ───────────────────
         btnHeatPassenger = DockPopupIconButton(
-            ctx, SCALE, R.drawable.ic_seat_hot_off, "副驾座椅加热关闭", "0", preserveIconColors = true
+            ctx, SCALE, R.drawable.ic_seat_off, "副驾座椅加热关闭", "0", preserveIconColors = true
         ).apply {
             minimumWidth = dp(96)
             setOnClickListener {
@@ -277,7 +277,7 @@ class SeatPopup(private val ctx: Context) {
                 1 -> R.drawable.ic_seat_feng_01
                 2 -> R.drawable.ic_seat_feng_02
                 3 -> R.drawable.ic_seat_feng_03
-                else -> R.drawable.ic_seat_feng_off
+                else -> R.drawable.ic_seat_off
             })
             it.setCaption(if (st.seatVent > 0) "${st.seatVent}" else "0")
             it.contentDescription = if (st.seatVent > 0) "主驾座椅通风 ${st.seatVent} 档" else "主驾座椅通风关闭"
@@ -288,7 +288,7 @@ class SeatPopup(private val ctx: Context) {
                 1 -> R.drawable.ic_seat_feng_01
                 2 -> R.drawable.ic_seat_feng_02
                 3 -> R.drawable.ic_seat_feng_03
-                else -> R.drawable.ic_seat_feng_off
+                else -> R.drawable.ic_seat_off
             })
             it.setCaption(if (st.seatVentPassenger > 0) "${st.seatVentPassenger}" else "0")
             it.contentDescription = if (st.seatVentPassenger > 0) "副驾座椅通风 ${st.seatVentPassenger} 档" else "副驾座椅通风关闭"
@@ -299,7 +299,7 @@ class SeatPopup(private val ctx: Context) {
                 1 -> R.drawable.ic_seat_hot_01
                 2 -> R.drawable.ic_seat_hot_02
                 3 -> R.drawable.ic_seat_hot_03
-                else -> R.drawable.ic_seat_hot_off
+                else -> R.drawable.ic_seat_off
             })
             it.setCaption(if (st.seatHeat > 0) "${st.seatHeat}" else "0")
             it.contentDescription = if (st.seatHeat > 0) "主驾座椅加热 ${st.seatHeat} 档" else "主驾座椅加热关闭"
@@ -310,7 +310,7 @@ class SeatPopup(private val ctx: Context) {
                 1 -> R.drawable.ic_seat_hot_01
                 2 -> R.drawable.ic_seat_hot_02
                 3 -> R.drawable.ic_seat_hot_03
-                else -> R.drawable.ic_seat_hot_off
+                else -> R.drawable.ic_seat_off
             })
             it.setCaption(if (st.seatHeatPassenger > 0) "${st.seatHeatPassenger}" else "0")
             it.contentDescription = if (st.seatHeatPassenger > 0) "副驾座椅加热 ${st.seatHeatPassenger} 档" else "副驾座椅加热关闭"

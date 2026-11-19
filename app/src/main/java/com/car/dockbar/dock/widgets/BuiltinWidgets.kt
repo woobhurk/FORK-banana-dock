@@ -64,20 +64,21 @@ private fun tapLong(tap: DockAction, longPress: DockAction) =
     GestureBinding(tap = tap, longPress = longPress)
 
 private fun iconFor(action: String): Int = when (action) {
-    "home" -> R.drawable.ic_home_circle
-    "music", "lyric" -> R.drawable.ic_music_note
+    "home" -> R.drawable.ic_dock_home
+    "music" -> R.drawable.ic_music_note
+    "lyric" -> R.drawable.ic_dock_lyrics
     "volume" -> R.drawable.ic_volume
-    "settings" -> R.drawable.ic_car
-    "app_drawer" -> R.drawable.ic_apps
-    "air" -> R.drawable.ic_airflow
-    "vent" -> R.drawable.ic_seat_vent
+    "settings" -> R.drawable.ic_dock_car
+    "app_drawer" -> R.drawable.ic_dock_apps
+    "air" -> R.drawable.ic_blowing_facefoot
+    "vent" -> R.drawable.ic_seat_feng_03
     "seat" -> R.drawable.ic_seat_open
     "seat_heat" -> R.drawable.ic_seat_hot_03
-    "recirc" -> R.drawable.ic_recirc
+    "recirc" -> R.drawable.ic_ac_cycle_inner
     "defrost_front" -> R.drawable.ic_defrost
     "defrost_rear" -> R.drawable.ic_rear_defrost
     "steering_heat" -> R.drawable.ic_sw_heat_03
-    else -> R.drawable.ic_car
+    else -> R.drawable.ic_dock_car
 }
 
 private fun iconWidget(
@@ -254,7 +255,7 @@ internal object AppWidget : DockWidget {
     override fun create(ctx: Context, entry: DockEntry, iconPx: Int): MountedEntry {
         val view = DockIconView(ctx, 0, iconPx)
         runCatching { view.setDynamic(ctx.packageManager.getApplicationIcon(entry.action)) }
-            .onFailure { runCatching { view.setIcon(R.drawable.ic_car) } }
+            .onFailure { runCatching { view.setIcon(R.drawable.ic_dock_car) } }
         return mounted(this, entry, view, linkedMapOf(HitTargets.ROOT to view), null)
             .copy(span = entry.span.coerceIn(1, 6), separator = false)
     }
@@ -263,11 +264,11 @@ internal object AppWidget : DockWidget {
 internal class MissingWidget(action: String) : DockWidget {
     override val spec = WidgetSpec(
         action = action, label = "", span = 1, separatorBefore = false, hint = "",
-        hidden = true, catalogIcon = R.drawable.ic_car,
+        hidden = true, catalogIcon = R.drawable.ic_dock_car,
     )
     override fun defaultGestures() = emptyMap<String, GestureBinding>()
     override fun create(ctx: Context, entry: DockEntry, iconPx: Int): MountedEntry {
-        val view = DockIconView(ctx, R.drawable.ic_car, iconPx)
+        val view = DockIconView(ctx, R.drawable.ic_dock_car, iconPx)
         return mounted(this, entry, view, emptyMap(), null)
     }
 }

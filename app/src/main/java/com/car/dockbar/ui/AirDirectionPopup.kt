@@ -24,8 +24,7 @@ import com.car.dockbar.vehicle.VehicleController
  *
  * 与 [HvacControlPopup] 同一套 WindowManager 方案，但更小、更轻：
  *  - 三个独立开关：吹脸 / 吹脚 / 吹前挡，每个单独开 / 关（位掩码组合，至少保留一项）
- *    ★ v3.13.13：按钮改成「**系统风向矢量图标 + 文字**」——
- *      图标直接用系统 Dock（com.geely.dockbar）的 ic_blowing_face / _foot / _window。
+ *  - 按钮仅展示对应风向图标，与 Dock 主栏共用矢量资源。
  *  - 5 秒自动消失；点击面板外部立即关闭（统一规范 [DockPopupChrome]，无 × 按钮）
  *  - 位置贴着触发它的「风向」图标
  *  - 订阅 [VehicleController] 状态，开关实时反映当前风向组合
@@ -46,8 +45,7 @@ class AirDirectionPopup(private val ctx: Context) {
     private var btnDefrost: IconBtn? = null
 
     /**
-     * ★ v3.13.13：图标按钮（系统风向矢量）。
-     * ★ v3.13.14：按用户要求**去掉下面的文字标签**，只留图标。
+     * 图标按钮只显示风向图标，不在下方加文字标签。
      */
     private class IconBtn(
         val root: LinearLayout,
@@ -229,7 +227,7 @@ class AirDirectionPopup(private val ctx: Context) {
     /**
      * ★ v3.13.13：图标按钮。
      * ★ v3.13.14：按用户要求去掉文字标签，只留图标。
-     * @param iconRes 系统风向矢量（ic_blowing_face / _foot / _window）
+     * @param iconRes 对应的 Dock 风向矢量（ic_blowing_face / _foot / _window）
      */
     private fun makeIconBtn(iconRes: Int): IconBtn {
         val img = android.widget.ImageView(ctx).apply {
