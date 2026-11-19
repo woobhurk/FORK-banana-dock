@@ -411,6 +411,17 @@ object Prefs {
     fun fadeDurationMs(ctx: Context) = sp(ctx).getLong("fade_duration_ms", 350L)
     fun setFadeDurationMs(ctx: Context, v: Long) = sp(ctx).edit().putLong("fade_duration_ms", v).apply()
 
+    /**
+     * 歌名和歌手滚到开头或结尾后，停住再反向的时间（毫秒）。
+     * 0 表示立刻反向。设置页按 [MUSIC_SCROLL_HOLD_STEP_MS] 步进，最大 [MUSIC_SCROLL_HOLD_MAX_MS]。
+     */
+    const val MUSIC_SCROLL_HOLD_STEP_MS = 100L
+    const val MUSIC_SCROLL_HOLD_MAX_MS = 5000L
+    fun musicScrollHoldMs(ctx: Context) =
+        sp(ctx).getLong("music_scroll_hold_ms", 2000L).coerceIn(0L, MUSIC_SCROLL_HOLD_MAX_MS)
+    fun setMusicScrollHoldMs(ctx: Context, v: Long) =
+        sp(ctx).edit().putLong("music_scroll_hold_ms", v.coerceIn(0L, MUSIC_SCROLL_HOLD_MAX_MS)).apply()
+
     // ---------------- 底部上滑临时显示 Dock（v1.4.73） ----------------
     /**
      * Dock 被「打开时隐藏名单」里的应用藏起来后，从屏幕底部往上滑 → 临时显示 Dock

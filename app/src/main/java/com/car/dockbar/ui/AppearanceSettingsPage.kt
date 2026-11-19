@@ -46,6 +46,19 @@ class AppearanceSettingsPage(activity: MainActivity) : SettingsPage(activity, Ma
             saveAppearance()
             reloadService()
         }
+        val holdStep = Prefs.MUSIC_SCROLL_HOLD_STEP_MS
+        val holdMax = (Prefs.MUSIC_SCROLL_HOLD_MAX_MS / holdStep).toInt()
+        addSeekRow(
+            root, "首尾停顿",
+            (Prefs.musicScrollHoldMs(this) / holdStep).toInt().coerceIn(0, holdMax), holdMax,
+            { "%.1f 秒".format(it * holdStep / 1000f) },
+            reloadDock = false,
+            onChange = {
+                Prefs.setMusicScrollHoldMs(this, it * holdStep)
+                DockMusicView.refreshScrollHold()
+            },
+            separateValue = true
+        ).id = R.id.settingsMusicScrollHoldRow
         val appearance = root
         addSwitchRow(
             appearance, "底色跟随系统日夜模式",

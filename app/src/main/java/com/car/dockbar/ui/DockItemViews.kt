@@ -324,6 +324,7 @@ class DockValueView @JvmOverloads constructor(
 /**
  * 音乐信息卡片：封面 + 歌名 + 歌手（仅 2 行文字）+ 播放/暂停。
  * 歌名和歌手放得下时静止显示，超出宽度时在卡片内左右来回滚动。
+ * 滚到开头或结尾后，按设置里的停顿时间再反向。
  */
 class DockMusicView @JvmOverloads constructor(
     context: Context,
@@ -415,6 +416,21 @@ class DockMusicView @JvmOverloads constructor(
         renderEmpty()
     }
 
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        if (!scrollHoldViews.contains(this)) scrollHoldViews.add(this)
+    }
+
+    override fun onDetachedFromWindow() {
+        scrollHoldViews.remove(this)
+        super.onDetachedFromWindow()
+    }
+
+    private fun restartTextScroll() {
+        (tvTitle as OverflowTextView).applyHoldChange()
+        (tvArtist as OverflowTextView).applyHoldChange()
+    }
+
     /**
      * 播放/暂停和下一首使用相同的图标大小与点击热区：
      * 卡宽 295px → 图标 32px / 热区 48px；卡宽 500px → 图标 40px / 热区 64px。
@@ -468,6 +484,13 @@ class DockMusicView @JvmOverloads constructor(
     }
 
     companion object {
+        private val scrollHoldViews = ArrayList<DockMusicView>()
+
+        /** 设置里的首尾停顿变了，让正在显示的音乐卡按新时间重新滚动。 */
+        fun refreshScrollHold() {
+            scrollHoldViews.toList().forEach { it.restartTextScroll() }
+        }
+
         /** 两个媒体按钮的自适应规格（px），热区至少比图标宽 12px。 */
         const val CARD_MIN_WIDTH_PX = 295
         const val CARD_MAX_WIDTH_PX = 500
@@ -580,6 +603,9 @@ private class OverflowTextView(context: Context) : TextView(context) {
         post(syncRunnable)
     }
 
+    /** 按当前停顿时间重算；时间变了会从开头重新滚动。 */
+    fun applyHoldChange() = requestSync()
+
     private fun resetScroll() {
         animator?.cancel()
         animator = null
@@ -594,7 +620,8 @@ private class OverflowTextView(context: Context) : TextView(context) {
             return
         }
         val nextOverflow = overflowPx()
-        val key = "${text}|${textSize}|$width|$nextOverflow"
+        val pauseMs = Prefs.musicScrollHoldMs(context)
+        val key = "${text}|${textSize}|$width|$nextOverflow|$pauseMs"
         if (key == scrollKey && (nextOverflow <= 1 || animator?.isRunning == true)) return
         animator?.cancel()
         animator = null
@@ -605,7 +632,6 @@ private class OverflowTextView(context: Context) : TextView(context) {
         val distance = overflow
         val pxPerSec = 30f * resources.displayMetrics.density.coerceAtLeast(1f)
         val travelMs = (distance / pxPerSec * 1000f).toLong().coerceIn(1400L, 8000L)
-        val pauseMs = 900L
         val duration = travelMs * 2 + pauseMs * 2
         val pause = pauseMs.toFloat() / duration
         val move = travelMs.toFloat() / duration

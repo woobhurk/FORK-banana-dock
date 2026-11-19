@@ -23,6 +23,7 @@ internal class AppearanceSettingsLayout(activity: Activity) : SettingsPageLayout
         val night = activity.findViewById<View>(R.id.settingsNightTransparencyRow)
         val overlay = activity.findViewById<View>(R.id.settingsOverlayControls)
         val preview = activity.findViewById<View>(R.id.settingsGradientPreview)
+        val musicHold = activity.findViewById<View>(R.id.settingsMusicScrollHoldRow)
         val scales = listOf(
             Triple("圆角半径", R.id.tvCorner, R.id.sbCorner),
             Triple("图标缩放", R.id.tvIconScale, R.id.sbIconScale),
@@ -30,7 +31,7 @@ internal class AppearanceSettingsLayout(activity: Activity) : SettingsPageLayout
         val scaleViews = scales.map { (_, valueId, seekId) ->
             activity.findViewById<TextView>(valueId) to activity.findViewById<SeekBar>(seekId)
         }
-        (listOf(separators, modeRow, followNight, day, night, overlay, preview) +
+        (listOf(separators, modeRow, followNight, day, night, overlay, preview, musicHold) +
             scaleViews.flatMap { listOf(it.first, it.second) }).forEach { take(it) }
         page.removeAllViews()
         page.background = null
@@ -96,6 +97,9 @@ internal class AppearanceSettingsLayout(activity: Activity) : SettingsPageLayout
             seek.minimumHeight = dp(44)
             add(sizing, seek, 6)
         }
+        val music = card(left, "音乐信息", "滚到开头或结尾后，停顿多久再反向滚动")
+        musicHold.setPadding(0, dp(6), 0, dp(6))
+        add(music, musicHold, 8)
         val lighting = card(right, "日夜与透明度", "按当前背景形态显示可用选项").apply {
             layoutParams = (layoutParams as LinearLayout.LayoutParams).apply {
                 height = 0
