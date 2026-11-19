@@ -2,6 +2,7 @@
 .gradle/
 .kotlin/
 .superpowers/
+.logs/
 apks/
 build/
 app/build/
