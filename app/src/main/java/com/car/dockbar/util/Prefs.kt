@@ -248,8 +248,10 @@ object Prefs {
         "seat_vent_passenger", "defrost_front", "defrost_rear", "steering_heat"
     ) + SEAT_CLIMATE_EVENT_KEYS
 
-    private val DEFAULT_HVAC_EVENT_KEYS =
-        setOf("fan_manual", "fan_auto", "ac", "recirc", "air_direction") + SEAT_CLIMATE_EVENT_KEYS
+    private val DEFAULT_HVAC_EVENT_KEYS = setOf(
+        "fan_manual", "fan_auto", "ac", "recirc", "air_direction",
+        "seat_vent_passenger", "defrost_front", "defrost_rear"
+    ) + SEAT_CLIMATE_EVENT_KEYS
 
     /** 升级时只补入旧版还没有的座椅选项，已全关或因崩溃清空的配置继续保留。 */
     internal fun migrateHvacSeatEventDefaults(ctx: Context) {

@@ -1,8 +1,13 @@
 package com.car.dockbar.ui
 
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
 import android.animation.ValueAnimator
 import android.content.Context
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Path
+import android.graphics.drawable.GradientDrawable
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
@@ -22,10 +27,11 @@ class DockIconView @JvmOverloads constructor(
     @DrawableRes iconRes: Int = 0,
     private val iconPx: Int = 26,
     /**
-     * true = 保留矢量图自带的颜色（如座椅通风里的蓝色标识），只用透明度表现激活态；
-     * false = 整体染成白色 / 强调色
+     * true = 保留矢量图自带的颜色（如座椅通风里的蓝色档位标识）；
+     * false = 整体染成前景色 / 强调色。
      */
-    private val preserveColors: Boolean = false
+    private val preserveColors: Boolean = false,
+    private val inactiveAlpha: Float = 1f
 ) : FrameLayout(context) {
 
     companion object {
@@ -106,11 +112,10 @@ class DockIconView @JvmOverloads constructor(
 
     private fun applyTint() {
         if (custom) return
+        image.alpha = if (active) 1f else inactiveAlpha
         if (preserveColors) {
             image.clearColorFilter()
-            image.alpha = if (active) 1f else 0.72f
         } else {
-            image.alpha = 1f
             image.setColorFilter(if (active) accentColor else fgColor)
         }
     }
@@ -359,8 +364,23 @@ class DockMusicView @JvmOverloads constructor(
         setPadding((4 * textScale).toInt(), 0, (10 * textScale).toInt(), 0)
 
         // 封面（占位是紫粉渐变 + 音符）
-        val albumFrame = FrameLayout(context)
-        albumFrame.background = androidx.core.content.ContextCompat.getDrawable(context, R.drawable.bg_album)
+        val albumFrame = object : FrameLayout(context) {
+            private val clip = Path()
+
+            override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+                super.onSizeChanged(w, h, oldw, oldh)
+                val radius = (background as GradientDrawable).cornerRadius
+                clip.rewind()
+                clip.addRoundRect(0f, 0f, w.toFloat(), h.toFloat(), radius, radius, Path.Direction.CW)
+            }
+
+            override fun dispatchDraw(canvas: Canvas) {
+                val saved = canvas.save()
+                canvas.clipPath(clip)
+                super.dispatchDraw(canvas)
+                canvas.restoreToCount(saved)
+            }
+        }.apply { setBackgroundResource(R.drawable.bg_album) }
         albumFrame.addView(
             album, FrameLayout.LayoutParams(albumSize, albumSize, Gravity.CENTER)
                 .apply { album.scaleType = ImageView.ScaleType.CENTER_CROP }
@@ -545,10 +565,21 @@ class DockMusicView @JvmOverloads constructor(
 private class OverflowTextView(context: Context) : TextView(context) {
 
     private var animator: ValueAnimator? = null
-    private var scrollKey = ""
+    private var holdMs = 0L
     private var overflow = 0
     private var shown = false
     private var syncPosted = false
+
+    private val moveRunnable = Runnable {
+        val movement = animator ?: return@Runnable
+        if (!ValueAnimator.areAnimatorsEnabled()) {
+            resetScroll()
+        } else if (scrollX == 0) {
+            movement.start()
+        } else {
+            movement.reverse()
+        }
+    }
 
     private val syncRunnable = Runnable {
         syncPosted = false
@@ -602,9 +633,10 @@ private class OverflowTextView(context: Context) : TextView(context) {
     fun applyHoldChange() = requestSync()
 
     private fun resetScroll() {
+        removeCallbacks(moveRunnable)
+        animator?.removeAllListeners()
         animator?.cancel()
         animator = null
-        scrollKey = ""
         overflow = 0
         if (scrollX != 0) scrollTo(0, 0)
     }
@@ -614,34 +646,31 @@ private class OverflowTextView(context: Context) : TextView(context) {
             resetScroll()
             return
         }
-        val nextOverflow = overflowPx()
-        val pauseMs = Prefs.musicScrollHoldMs(context)
-        val key = "${text}|${textSize}|$width|$nextOverflow|$pauseMs"
-        if (key == scrollKey && (nextOverflow <= 1 || animator?.isRunning == true)) return
-        animator?.cancel()
-        animator = null
-        scrollKey = key
-        overflow = nextOverflow.coerceAtLeast(0)
-        if (scrollX != 0) scrollTo(0, 0)
+        val nextOverflow = overflowPx().coerceAtLeast(0)
+        val nextHoldMs = Prefs.musicScrollHoldMs(context)
+        if (nextOverflow == overflow && nextHoldMs == holdMs) return
+        resetScroll()
+        overflow = nextOverflow
+        holdMs = nextHoldMs
         if (overflow <= 1) return
         val distance = overflow
         val pxPerSec = 30f * resources.displayMetrics.density.coerceAtLeast(1f)
         val travelMs = (distance / pxPerSec * 1000f).toLong().coerceIn(1400L, 8000L)
-        val duration = travelMs * 2 + pauseMs * 2
-        val pause = pauseMs.toFloat() / duration
-        val move = travelMs.toFloat() / duration
         animator = ValueAnimator.ofFloat(0f, 1f).apply {
-            this.duration = duration
-            repeatCount = ValueAnimator.INFINITE
-            repeatMode = ValueAnimator.RESTART
+            duration = travelMs
             interpolator = LinearInterpolator()
             addUpdateListener { anim ->
-                val pos = pingPong(anim.animatedFraction, pause, move)
-                val x = (distance * pos).roundToInt()
+                val x = (distance * anim.animatedFraction).roundToInt()
                 if (scrollX != x) scrollTo(x, 0)
             }
-            start()
+            addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    // 停顿按主线程时钟计时，不随系统动画倍率缩放。
+                    postDelayed(moveRunnable, holdMs)
+                }
+            })
         }
+        postDelayed(moveRunnable, holdMs)
     }
 
     private fun overflowPx(): Int {
@@ -660,17 +689,5 @@ private class OverflowTextView(context: Context) : TextView(context) {
     private fun visibleText(): CharSequence {
         val raw = text ?: return ""
         return transformationMethod?.getTransformation(raw, this) ?: raw
-    }
-
-    /** [t] 为 0..1 的整段进度：停在开头、滚到末尾、停住、再滚回开头。 */
-    private fun pingPong(t: Float, pause: Float, move: Float): Float {
-        val back = pause + move + pause
-        val pos = when {
-            t < pause -> 0f
-            t < pause + move -> (t - pause) / move
-            t < back -> 1f
-            else -> 1f - (t - back) / move
-        }
-        return pos.coerceIn(0f, 1f)
     }
 }

@@ -88,6 +88,7 @@ private fun iconWidget(
     lockSpan: Boolean = false,
     iconScale: Float = 1f,
     preserveColors: Boolean = false,
+    inactiveAlpha: Float = 1f,
 ): DockWidget = object : DockWidget {
     override val spec = spec(
         builtin, iconFor(builtin.action), bindKind, lockSpan,
@@ -99,7 +100,7 @@ private fun iconWidget(
     override fun defaultGestures() = gestures
     override fun create(ctx: Context, entry: DockEntry, iconPx: Int): MountedEntry {
         val size = (iconPx * spec.iconScale).toInt().coerceAtLeast(1)
-        val view = DockIconView(ctx, spec.catalogIcon, size, spec.preserveColors)
+        val view = DockIconView(ctx, spec.catalogIcon, size, spec.preserveColors, inactiveAlpha)
         return mounted(this, entry, view, linkedMapOf(HitTargets.ROOT to view), null)
     }
 }
@@ -318,7 +319,7 @@ internal object BuiltinWidgets {
         iconWidget(Builtin.TEMP_UP_PASSENGER, root(tap(DockAction.TempStep(false, 1)))),
         iconWidget(Builtin.DEFROST_FRONT, root(tap(DockAction.ToggleDefrostFront)), BindKind.DEFROST_FRONT),
         iconWidget(Builtin.DEFROST_REAR, root(tap(DockAction.ToggleDefrostRear)), BindKind.DEFROST_REAR),
-        iconWidget(Builtin.STEERING_HEAT, root(tapLong(DockAction.LevelBump("steeringHeat", "down"), DockAction.LevelBump("steeringHeat", "up"))), BindKind.STEERING_HEAT, preserveColors = true),
+        iconWidget(Builtin.STEERING_HEAT, root(tapLong(DockAction.LevelBump("steeringHeat", "down"), DockAction.LevelBump("steeringHeat", "up"))), BindKind.STEERING_HEAT, preserveColors = true, inactiveAlpha = 0.72f),
     )
 }
 
@@ -341,11 +342,9 @@ private fun paintIcon(view: DockIconView, kind: BindKind, snapshot: DockSnapshot
                 view.contentDescription = if (snapshot.seatVent > 0) "主驾座椅通风 ${snapshot.seatVent} 档"
                     else "主驾座椅通风和加热关闭"
             }
-            view.setActive(snapshot.seatHeat > 0 || snapshot.seatVent > 0)
         }
         BindKind.SEAT_HEAT -> {
             view.setIcon(levelIcon("seatHeat", snapshot.seatHeat, snapshot.darkIcons))
-            view.setActive(snapshot.seatHeat > 0)
         }
         BindKind.STEERING_HEAT -> {
             view.visibility = if (snapshot.steeringHeatVisible) View.VISIBLE else View.GONE

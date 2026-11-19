@@ -9,7 +9,7 @@
         android:strokeWidth="3.45"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
-        android:pathData="M8 39.7V43q0 2 2 2h5.7a5 5 0 0 1 10 0h12.6a5 5 0 0 1 10 0H54q2 0 2-2V31.6q0-2.5-2.3-3.6l-5.2-2.3-6.8-7.5q-1.4-1.6-3.7-1.6h-9.7q-2.1 0-3.6 1.4l-8.1 8.1-6.3 1.3q-2.3.5-2.3 2.8V39.7" />
+        android:pathData="M8 39.7V43q0 2 2 2h5.7a5 5 0 0 0 10 0h12.6a5 5 0 0 0 10 0H54q2 0 2-2V31.6q0-2.5-2.3-3.6l-5.2-2.3-6.8-7.5q-1.4-1.6-3.7-1.6h-9.7q-2.1 0-3.6 1.4l-8.1 8.1-6.3 1.3q-2.3.5-2.3 2.8V39.7" />
     <path
         android:strokeColor="#FFFFFFFF"
         android:strokeWidth="2.9"
