@@ -3,6 +3,7 @@ package com.car.dockbar.vehicle
 import android.content.Context
 import android.os.SystemClock
 import com.car.dockbar.config.VehicleChannels
+import com.car.dockbar.config.VehicleChannels.AC_MAX_VALIDATION_KEY
 import com.car.dockbar.util.Logx
 
 internal enum class SeatWriteValidationMode(val label: String) {
@@ -20,6 +21,7 @@ internal enum class HvacValidationMode(
     FAN("风量：手动 / 自动风量", listOf("fan_manual", "fan_auto")),
     CLIMATE("常用空调：风量 + A/C / 循环 / 风向 / 双温", FAN.keys + listOf("ac", "recirc", "air_direction", "temp_dual")),
     TEMPERATURE("含温度：额外调用浮点 Customize/native", CLIMATE.keys + listOf("temp_driver", "temp_passenger")),
+    AC_MAX("急速降温：原厂 MAX A/C", listOf(AC_MAX_VALIDATION_KEY)),
     SEAT_ECARX_DIRECT(
         "座椅：${SeatWriteValidationMode.ECARX_DIRECT.label}",
         listOf("seat_vent", "seat_heat", "seat_vent_passenger", "seat_heat_passenger"),
@@ -50,7 +52,8 @@ internal object HvacDiagnostics {
         var events: Int = 0, var validEvents: Int = 0, var changedEvents: Int = 0,
         var reads: Int = 0, var validReads: Int = 0,
         var last: String = "未观测", var capability: String = "未查询",
-        var lastReadLog: String? = null, var lastReadLogAt: Long = 0
+        var lastReadLog: String? = null, var lastReadLogAt: Long = 0,
+        var lastAcMaxRead: Int? = null, var lastAcMaxEvent: Int? = null
     )
     private data class Session(
         val mode: HvacValidationMode, val start: Long, val channels: List<Channel>,
@@ -100,6 +103,7 @@ internal object HvacDiagnostics {
             val ch = current.channels.find { it.key == key } ?: return
             ch.reads++
             if (valid) ch.validReads++
+            if (key == AC_MAX_VALIDATION_KEY && valid) ch.lastAcMaxRead = raw as? Int
             // source 由读取端提供实际命中的 zone；缺失时不能冒充配置位置或匹配命令。
             val actualZone = source.substringAfter("zone=", "").substringBefore(' ').toIntOrNull()
             val detail = "READ ${identity(ch)} actualZone=${actualZone ?: "UNKNOWN"} raw=$raw valid=$valid source=$source observedAtMs=$observedAtMs"
@@ -125,9 +129,16 @@ internal object HvacDiagnostics {
             val ch = current.channels.find { it.key == key } ?: return
             ch.events++
             val applicable = valid && zone == ch.zone
-            if (applicable) ch.validEvents++
-            if (applicable && changed) ch.changedEvents++
-            val detail = "EVENT ${identity(ch)} actualZone=$zone raw=$raw valid=$valid applicable=$applicable changed=$changed delayMs=$delayMs"
+            val stateChanged = if (key == AC_MAX_VALIDATION_KEY) {
+                val previous = ch.lastAcMaxEvent ?: ch.lastAcMaxRead
+                if (applicable) ch.lastAcMaxEvent = raw as? Int
+                applicable && previous != null && previous != raw
+            } else changed
+            if (applicable) {
+                ch.validEvents++
+                if (stateChanged) ch.changedEvents++
+            }
+            val detail = "EVENT ${identity(ch)} actualZone=$zone raw=$raw valid=$valid applicable=$applicable changed=$stateChanged delayMs=$delayMs"
             ch.last = detail
             detail
         }
@@ -174,6 +185,9 @@ internal object HvacDiagnostics {
             appendLine(identity(ch))
             appendLine("  能力=${ch.capability}")
             appendLine("  EVENT收到=${ch.events} 有效且zone匹配=${ch.validEvents} 状态变化=${ch.changedEvents}；业务采样READ总数=${ch.reads} 有效=${ch.validReads}")
+            if (ch.key == AC_MAX_VALIDATION_KEY) {
+                appendLine("  最近有效状态：读回=${acMaxText(ch.lastAcMaxRead)}；事件=${acMaxText(ch.lastAcMaxEvent)}")
+            }
             appendLine("  最后观测=${ch.last}")
             appendLine("  最近实际调用=${HvacCommands.describeLastWrite(ch.fid, ch.zone, current.start)}")
         }
@@ -182,6 +196,12 @@ internal object HvacDiagnostics {
         appendLine("UNKNOWN/无事件/无读回不代表0或关闭，也不是成功或权限拒绝。READ实际zone以source/后端日志为准。")
         appendLine("上述READ仅统计业务采样；原生写后校验另见最近实际调用与HVAC_VERIFY日志，不重复计入采样次数。")
         append("命令接受、注册接受、观测匹配均不证明真车物理效果，请人工观察；温度 Customize/native 接口可能导致进程闪退。")
+    }
+
+    private fun acMaxText(value: Int?): String = when (value) {
+        0 -> "关闭(0)"
+        1 -> "开启(1)"
+        else -> "未知"
     }
 
     private fun identity(ch: Channel) = "key=${ch.key} fid=0x${ch.fid.toUInt().toString(16)} configuredZone=${ch.zone}"

@@ -1,5 +1,6 @@
 package com.car.dockbar.vehicle
 
+import com.car.dockbar.config.VehicleChannels.AC_MAX_VALIDATION_KEY
 import com.car.dockbar.vehicle.VehicleController.State
 import kotlin.math.abs
 
@@ -162,6 +163,7 @@ internal object HvacChannels {
             "fan_manual" -> value in 0..FAN_LEVEL_AUTO
             "fan_auto" -> fanAutoLevelOf(raw) > 0 || boolValue(raw) != null
             "ac", "recirc", "defrost_front", "defrost_rear" -> boolValue(raw) != null
+            AC_MAX_VALIDATION_KEY -> raw in 0..1
             "temp_dual" -> value in 0..1
             "air_direction" -> value in 1..7
             "seat_vent", "seat_heat", "seat_vent_passenger", "seat_heat_passenger", "steering_heat" ->

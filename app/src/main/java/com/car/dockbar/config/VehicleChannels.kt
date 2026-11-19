@@ -120,6 +120,7 @@ object VehicleChannels {
     const val FUNC_AUTO = 0x10010200            // ★ v3.5：HVAC_FUNC_AUTO（AUTO 总开关，AutoSwitchSignalClick）
     const val FUNC_AC = 0x10010300              // HVAC_FUNC_AC（A/C 压缩机）
     const val FUNC_AC_MAX = 0x10010400          // HVAC_FUNC_AC_MAX
+    internal const val AC_MAX_VALIDATION_KEY = "ac_max"  // 仅两分钟接口验证
     const val FUNC_DEFROST_FRONT = 0x10040100   // HVAC_FUNC_DEFROST_FRONT
     const val FUNC_DEFROST_FRONT_MAX = 0x10040200 // HVAC_FUNC_DEFROST_FRONT_MAX
     const val FUNC_DEFROST_REAR = 0x10040300    // HVAC_FUNC_DEFROST_REAR
@@ -244,12 +245,13 @@ object VehicleChannels {
         "defrost_front" -> FUNC_DEFROST_FRONT_MAX
         "defrost_rear" -> FUNC_DEFROST_REAR
         "steering_heat" -> FUNC_STEERING_WHEEL_HEAT
+        AC_MAX_VALIDATION_KEY -> FUNC_AC_MAX
         else -> funcOf(ctx, key)
     }
 
     /** 方向盘等状态按全局区观测；不改变方向盘写入的配置区域。 */
     internal fun observationZoneOf(ctx: Context, key: String): Int = when (key) {
-        "defrost_front", "defrost_rear", "steering_heat" -> ZONE_GLOBAL
+        "defrost_front", "defrost_rear", "steering_heat", AC_MAX_VALIDATION_KEY -> ZONE_GLOBAL
         else -> zoneOf(ctx, key)
     }
 

@@ -393,6 +393,8 @@ internal class LogsSettingsPage(activity: MainActivity) :
                     val mode = modes[selected]
                     val warning = when (mode.seatWriteMode) {
                         null -> when {
+                            mode == HvacValidationMode.AC_MAX ->
+                                "请停车操作。开始时只读和订阅，厂商回调可能导致闪退。先在原车空调界面开关急速降温，回来看报告；需要验证写入时，再点「急速降温测试写入」。"
                             mode.comfortReadOnly -> "只临时加入所选通道的订阅，不自动写入或更改日常配置。厂商回调可能导致闪退。请停车后在原车界面改变状态，并查看报告的有效 EVENT 是否增加。"
                             mode == HvacValidationMode.TEMPERATURE ->
                                 "温度模式会额外触发浮点 Customize/native 读取和事件，可能使进程直接闪退。"
@@ -410,6 +412,25 @@ internal class LogsSettingsPage(activity: MainActivity) :
                         .setNegativeButton("取消", null)
                         .show()
                 }
+                .setNegativeButton("取消", null)
+                .show()
+        })
+        root.addView(smallBtn("急速降温测试写入") {
+            val epoch = VehicleController.acMaxValidationEpoch()
+            if (epoch == null) {
+                toastOnce("请先开始「急速降温：原厂 MAX A/C」验证")
+                return@smallBtn
+            }
+            fun submit(on: Boolean) {
+                val queued = VehicleController.writeAcMaxForValidation(this, epoch, on)
+                toastOnce(if (queued) "已排队，请观察原车界面并查看验证报告"
+                    else "未提交：验证已结束或车控写入不可用，请查看日志")
+            }
+            AlertDialog.Builder(activity)
+                .setTitle("急速降温测试写入")
+                .setMessage("请停车操作。只向原厂 MAX A/C 写入开或关，不另外写风量和温度。需要启用车控写入。停止或到期不会撤销已发出的命令。")
+                .setPositiveButton("测试开启") { _, _ -> submit(true) }
+                .setNeutralButton("测试关闭") { _, _ -> submit(false) }
                 .setNegativeButton("取消", null)
                 .show()
         })

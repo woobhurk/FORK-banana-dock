@@ -6,6 +6,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import com.car.dockbar.config.VehicleChannels
+import com.car.dockbar.config.VehicleChannels.AC_MAX_VALIDATION_KEY
 import com.car.dockbar.ui.AirFlowDrawable
 import com.car.dockbar.util.Logx
 import com.car.dockbar.util.Prefs
@@ -381,7 +382,11 @@ object VehicleController {
     }
 
     private fun validationGroups(mode: HvacValidationMode): Int =
-        if (mode.comfortReadOnly) COMFORT_GROUP else ALL_GROUPS
+        when {
+            mode == HvacValidationMode.AC_MAX -> CLIMATE_GROUP
+            mode.comfortReadOnly -> COMFORT_GROUP
+            else -> ALL_GROUPS
+        }
 
     /** 只在用户明确开始验证后增加订阅和浮点读取，绝不自动发出车控写命令。 */
     internal fun startHvacValidation(ctx: Context, mode: HvacValidationMode) {
@@ -491,6 +496,20 @@ object VehicleController {
             Prefs.vehicleApiEnabled(c) && !Prefs.simulate(c) }
     }
 
+    private fun isAcMaxValidation(epoch: Long): Boolean =
+        activeValidationMode() == HvacValidationMode.AC_MAX && validationEpoch == epoch
+
+    internal fun acMaxValidationEpoch(): Long? = validationEpoch.takeIf(::isAcMaxValidation)
+
+    /** 只写原厂 MAX 开关；不修改温度、风量或 Dock 显示目标。 */
+    internal fun writeAcMaxForValidation(ctx: Context, epoch: Long, on: Boolean): Boolean {
+        if (!isAcMaxValidation(epoch)) return false
+        val value = if (on) 1 else 0
+        return HvacCommands.submit(ctx, "ac_max_validation target=$value") {
+            VehicleBridge.writeInt(VehicleChannels.FUNC_AC_MAX, ZONE_GLOBAL, value) { isAcMaxValidation(epoch) }
+        }
+    }
+
     /** 基础监听和验证监听共用唯一集合，包含共用功能号的不同区域。 */
     private fun configureWatcher(c: Context): Boolean {
         val keys = if (Prefs.vehicleApiEnabled(c) && !Prefs.simulate(c)) watcherKeys(c) else emptyList()
@@ -499,7 +518,8 @@ object VehicleController {
         val epoch = validationEpoch
         val connection = VehicleBridge.connectionGeneration
         // 配置目录仅在订阅重配时生成，不在每次轮询或回调重建。
-        val pollingKeys = refreshKeys.flatMap { it.asList() }.toSet()
+        val pollingKeys = refreshKeys.flatMapTo(mutableSetOf()) { it.asList() }
+        if (AC_MAX_VALIDATION_KEY in requested) pollingKeys.add(AC_MAX_VALIDATION_KEY)
         val evidenceKeys = (VehicleChannels.ALL.map { it.key } + pollingKeys).distinct()
         val functions = linkedSetOf<Int>()
         val evidenceConfigs = evidenceKeys.map { key ->
@@ -526,6 +546,10 @@ object VehicleController {
                             if (config.key in requested && config.fid == fid) {
                                 HvacChannelEvidence.event(connection, configuration, config.key, fid, zone,
                                     value as? Number, false, receivedAt)
+                                if (config.key == AC_MAX_VALIDATION_KEY) {
+                                    HvacDiagnostics.event(config.key, value, false, false, zone,
+                                        SystemClock.elapsedRealtime() - receivedAt)
+                                }
                             }
                         }
                         if (HvacDiagnostics.active) Logx.w("HVAC_TEST stage=EVENT_IGNORED fid=0x${fid.toString(16)} zone=$zone raw=$value reason=未订阅或区域不匹配")
@@ -537,6 +561,12 @@ object VehicleController {
                     val raw = if (value is Int || value is Short || value is Byte) (value as Number).toInt() else null
                     val accepted = float != null || (raw != null && validReading(c, key, raw))
                     HvacChannelEvidence.event(connection, configuration, key, fid, zone, value as? Number, accepted, receivedAt)
+                    if (key == AC_MAX_VALIDATION_KEY) {
+                        if (accepted && raw != null) HvacCommands.observe(fid, zone, raw, "EVENT", receivedAt, connection)
+                        HvacDiagnostics.event(key, raw ?: value, accepted, false, zone,
+                            SystemClock.elapsedRealtime() - receivedAt)
+                        return@runCatching
+                    }
                     if (accepted) {
                         update(groupMaskOf(key), observedProperties = HvacChannels.observationProperties(key, value)) { current ->
                             val next = if (float != null) {
@@ -646,8 +676,10 @@ object VehicleController {
         val registered = subscriptionAccepted && watcherConnection == connection
         if (!registered) seenEventMask = 0
         seenEventMask = seenEventMask and configuredEventMask
+        val acMaxValidating = validationMode == HvacValidationMode.AC_MAX
         for (group in REFRESH_GROUPS) {
             val interval = when {
+                group == VehicleRefreshGroup.CLIMATE && acMaxValidating -> group.intervalMs
                 group == VehicleRefreshGroup.TEMPERATURE && temperatureNeedsConfirmation(now) -> 500L
                 group == VehicleRefreshGroup.COMFORT && seatClimatePopupVisible -> 500L
                 else -> HvacRefreshPolicy.intervalMs(group, configuredEventMask, seenEventMask, registered)
@@ -752,6 +784,17 @@ object VehicleController {
         val epoch = validationEpoch
         val connection = VehicleBridge.connectionGeneration
         val evidenceSubscription = watcherConfiguration
+        if (group == VehicleRefreshGroup.CLIMATE && isAcMaxValidation(epoch) &&
+            connection == VehicleBridge.connectionGeneration) {
+            val key = AC_MAX_VALIDATION_KEY
+            val fid = VehicleChannels.observationFuncOf(c, key)
+            val zone = VehicleChannels.observationZoneOf(c, key)
+            val observedAt = SystemClock.elapsedRealtime()
+            val raw = readEvidenceInt(c, key, fid, zone, zone, epoch, connection, evidenceSubscription)
+            if (isAcMaxValidation(epoch) && connection == VehicleBridge.connectionGeneration) {
+                HvacDiagnostics.read(key, raw, raw != null && validReading(c, key, raw), "INT_READ zone=$zone", observedAt)
+            }
+        }
         val normalKeys = Prefs.hvacEventKeys(c)
         val temperatures = if (group == VehicleRefreshGroup.TEMPERATURE &&
             (activeValidationMode() == HvacValidationMode.TEMPERATURE || normalKeys.any { it == "temp_driver" || it == "temp_passenger" } ||

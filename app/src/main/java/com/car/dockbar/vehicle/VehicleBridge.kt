@@ -586,9 +586,10 @@ object VehicleBridge {
      *    **第二参是 value，不是 zone**。早期实现传了 `(functionId, zone)`，
      *    导致走 2 参重载时把 zone 当成要写的值 → 写入无效。
      */
-    fun writeInt(functionId: Int, zone: Int, value: Int): Boolean {
+    fun writeInt(functionId: Int, zone: Int, value: Int, stillValid: (() -> Boolean)? = null): Boolean {
         val generation = connectionGeneration
         if (!HvacCommands.canWrite(appCtx, "writeInt")) return rejectWrite(functionId, zone, value, "整型写:门禁拒绝")
+        if (stillValid?.invoke() == false) return rejectWrite(functionId, zone, value, "整型写:验证已停止或过期")
         val m = writeMethod ?: run {
             Logx.e("HVAC_WRITE 写失败：当前通道没有可用的写方法（后端=${backend}），写 0x${functionId.toString(16)} zone=$zone value=$value")
             return rejectWrite(functionId, zone, value, "$backend:无整型写方法")
@@ -606,7 +607,7 @@ object VehicleBridge {
         // 能力查询可能阻塞；最终门禁与连接检查仍紧邻真实调用。
         val ticket = beginNativeWrite(generation, functionId, actualZone, value, "$backend:${m.name}") ?: return false
         return runCatching {
-            if (!activateNativeWrite(ticket)) return false
+            if (!activateNativeWrite(ticket, stillValid = stillValid)) return false
             val r = invokeNativeWrite(ticket) { m.invoke(s, *coerced) }
             val ok = r !is Boolean || r
             Logx.d(
@@ -659,10 +660,15 @@ object VehicleBridge {
         return ticket
     }
 
-    private fun activateNativeWrite(ticket: HvacWriteTicket, requireCustomizeEnabled: Boolean = false): Boolean {
+    private fun activateNativeWrite(
+        ticket: HvacWriteTicket,
+        requireCustomizeEnabled: Boolean = false,
+        stillValid: (() -> Boolean)? = null
+    ): Boolean {
         // 准备日志/配置采样全部结束后复核；激活本身绝不能写日志或触发配置 IO。
         if (ticket.connection != connectionGeneration || !HvacCommands.canWrite(appCtx, "native") ||
-            (requireCustomizeEnabled && !customizeWriteEnabled) || !HvacCommands.activateWrite(ticket)) {
+            (requireCustomizeEnabled && !customizeWriteEnabled) || stillValid?.invoke() == false ||
+            !HvacCommands.activateWrite(ticket)) {
             HvacCommands.abortWrite(ticket, "native:SKIPPED_OR_STALE")
             return false
         }
