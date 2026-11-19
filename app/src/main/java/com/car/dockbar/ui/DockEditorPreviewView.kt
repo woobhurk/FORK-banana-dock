@@ -84,7 +84,7 @@ internal class DockEditorPreviewView(context: Context) : View(context) {
         // 每次显式渲染刷新一次媒体真实读值，整批条目复用同一快照。
         val darkIcons = Color.red(DockIconView.fgColor) < 128
         CabinVolume.read(ctx, CabinVolume.MEDIA)
-        val snapshot = DockSnapshots.capture(ctx, darkIcons)
+        val snapshot = DockSnapshots.capture(ctx, darkIcons, preview = true)
         items.forEach { entry ->
             val iconPx = (65 * Prefs.iconScale(ctx)).toInt().coerceAtLeast(12)
             val mounted = DockCatalog.mount(ctx, entry, SilentDockHost, attachGestures = false, iconPx)

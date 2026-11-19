@@ -282,7 +282,9 @@ class DockLayout @JvmOverloads constructor(
         var flexMin = 0
         var flexMax = 0
         for (i in 0 until childCount) {
-            val lp = getChildAt(i).layoutParams as Lp
+            val child = getChildAt(i)
+            if (child.visibility == View.GONE) continue
+            val lp = child.layoutParams as Lp
             if (lp.flexMaxPx > 0 && flexIdx < 0) {
                 flexIdx = i; flexMin = lp.flexMinPx; flexMax = lp.flexMaxPx
             } else {
@@ -299,6 +301,7 @@ class DockLayout @JvmOverloads constructor(
         var cursor = plan.startX
         for (i in 0 until childCount) {
             val c = getChildAt(i)
+            if (c.visibility == View.GONE) continue
             val lp = c.layoutParams as Lp
             val segW = if (i == flexIdx) musicW.toFloat()
             else (lp.fixedWidthPx * scale).coerceAtLeast(0f)
@@ -319,6 +322,7 @@ class DockLayout @JvmOverloads constructor(
     override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
         for (i in 0 until childCount) {
             val c = getChildAt(i)
+            if (c.visibility == View.GONE) continue
             val left = if (i < lefts.size) lefts[i] else 0
             val right = if (i < rights.size) rights[i] else width
             c.layout(left, 0, right, height)
@@ -359,7 +363,13 @@ class DockLayout @JvmOverloads constructor(
         if (!showSeparators) return
         sepPaint.color = separatorColor
         val inset = height * separatorInsetRatio
-        for (i in 1 until childCount) {
+        var firstVisible = true
+        for (i in 0 until childCount) {
+            if (getChildAt(i).visibility == View.GONE) continue
+            if (firstVisible) {
+                firstVisible = false
+                continue
+            }
             if (i >= lefts.size) continue
             val x = lefts[i].toFloat()
             canvas.drawLine(x, inset, x, height - inset, sepPaint)

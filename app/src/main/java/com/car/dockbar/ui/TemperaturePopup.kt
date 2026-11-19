@@ -442,6 +442,7 @@ class TemperaturePopup(
                 it.setActive(st.defrostRear)
             }
             btnSteerHeat?.let {
+                it.visibility = if (st.steeringHeatVisible) View.VISIBLE else View.GONE
                 it.setIcon(STEERING_HEAT_ICONS[st.steeringHeat.coerceIn(0, STEERING_HEAT_ICONS.lastIndex)])
                 it.setCaption(st.steeringHeat.toString())
                 it.contentDescription = if (st.steeringHeat > 0) "方向盘加热 ${st.steeringHeat} 档" else "方向盘加热关闭"
@@ -458,6 +459,7 @@ class TemperaturePopup(
                 it.setActive(sync == true)
             }
             btnVentHot?.let {
+                it.visibility = if (st.seatVentVisible(driver = true)) View.VISIBLE else View.GONE
                 val on = Prefs.autoSeatVentHot(ctx)
                 it.contentDescription = "高于25℃自动通风${if (on) "开启" else "关闭"}"
                 it.setActive(on)

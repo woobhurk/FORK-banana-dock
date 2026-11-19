@@ -14,6 +14,7 @@ import com.car.dockbar.dock.levelIcon
 
 import android.content.Context
 import android.view.Gravity
+import android.view.View
 import android.widget.LinearLayout
 import com.car.dockbar.R
 import com.car.dockbar.model.Builtin
@@ -330,6 +331,7 @@ private fun paintIcon(view: DockIconView, kind: BindKind, snapshot: DockSnapshot
         BindKind.DEFROST_REAR -> view.setActive(snapshot.defrostRear)
         BindKind.LYRIC -> view.setActive(snapshot.lyricOn)
         BindKind.VENT -> {
+            view.visibility = if (snapshot.driverVentVisible) View.VISIBLE else View.GONE
             if (snapshot.seatHeat > 0) {
                 view.setIcon(levelIcon("seatHeat", snapshot.seatHeat, snapshot.darkIcons))
                 view.contentDescription = "主驾座椅加热 ${snapshot.seatHeat} 档"
@@ -345,6 +347,7 @@ private fun paintIcon(view: DockIconView, kind: BindKind, snapshot: DockSnapshot
             view.setActive(snapshot.seatHeat > 0)
         }
         BindKind.STEERING_HEAT -> {
+            view.visibility = if (snapshot.steeringHeatVisible) View.VISIBLE else View.GONE
             view.setIcon(levelIcon("steeringHeat", snapshot.steeringHeat, snapshot.darkIcons))
             view.setActive(snapshot.steeringHeat > 0)
         }

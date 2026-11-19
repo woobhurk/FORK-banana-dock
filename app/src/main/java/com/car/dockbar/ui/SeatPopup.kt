@@ -43,6 +43,7 @@ class SeatPopup(private val ctx: Context) {
     /** 当前座椅记忆位置（1/2/3），读不到为 null —— 由 SEAT_NUM 0x2d410f00 主动读取 */
     private var currentSeat: Int? = null
 
+    private var ventRow: LinearLayout? = null
     private var btnVentDriver: DockPopupIconButton? = null
     private var btnVentPassenger: DockPopupIconButton? = null
     private var btnHeatDriver: DockPopupIconButton? = null
@@ -160,6 +161,7 @@ class SeatPopup(private val ctx: Context) {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
         }
+        this.ventRow = ventRow
         // ── [P15] 主驾座椅通风 ───────────────────
         btnVentDriver = DockPopupIconButton(
             ctx, SCALE, R.drawable.ic_seat_feng_off, "主驾座椅通风关闭", "0", preserveIconColors = true
@@ -264,6 +266,12 @@ class SeatPopup(private val ctx: Context) {
         val cur = currentSeat
         seatButtons.forEachIndexed { i, btn -> btn.setActive(cur != null && cur == i + 1) }
 
+        val driverVentVisible = st.seatVentVisible(driver = true)
+        val passengerVentVisible = st.seatVentVisible(driver = false)
+        ventRow?.visibility = if (driverVentVisible || passengerVentVisible) View.VISIBLE else View.GONE
+        // 单侧不显示时为另一侧保留列对齐，不把副驾按钮挪到主驾标题下。
+        btnVentDriver?.visibility = if (driverVentVisible) View.VISIBLE else View.INVISIBLE
+        btnVentPassenger?.visibility = if (passengerVentVisible) View.VISIBLE else View.INVISIBLE
         btnVentDriver?.let {
             it.setIcon(when (st.seatVent) {
                 1 -> R.drawable.ic_seat_feng_01

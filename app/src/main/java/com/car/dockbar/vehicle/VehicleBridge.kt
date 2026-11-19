@@ -792,18 +792,24 @@ object VehicleBridge {
         }
     }
 
-    private fun probeSupport(functionId: Int, zone: Int): String {
+    private fun probeSupport(functionId: Int, zone: Int, requireArea: Boolean = false): String {
         val target = session ?: return "未探测"
         if (!supportProbed) {
             supportMethod = findSupportMethod(target)
             supportProbed = true
             if (supportMethod == null) Logx.d("能力查询不可用：${target.javaClass.name} 无精确支持状态方法")
         }
-        return querySupport(target, supportMethod, functionId, zone)
+        val method = supportMethod
+        if (requireArea && method?.parameterCount != 2) return "未探测"
+        return querySupport(target, method, functionId, zone)
     }
 
     /** 规范化能力状态；available 只表示接口能力，不等于读写权限或车辆效果已验证。 */
     fun supportOf(functionId: Int, zone: Int): String = probeSupport(functionId, zone)
+
+    /** 单参数结果无法区分主副驾，不能用它隐藏任一分区控件。 */
+    internal fun isComfortUnavailable(functionId: Int, zone: Int, requireArea: Boolean): Boolean =
+        isReady && probeSupport(functionId, zone, requireArea) == "notavailable"
 
     fun supportedValues(functionId: Int, zone: Int): IntArray? {
         val target = session ?: return null

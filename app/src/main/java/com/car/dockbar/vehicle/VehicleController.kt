@@ -40,8 +40,17 @@ object VehicleController {
         val seatHeatPassenger: Int = 0,
         val defrostFront: Boolean = false,      // 前挡除霜/加热（0x10040100）
         val defrostRear: Boolean = false,       // 后挡除霜/加热（0x10040300）
-        val steeringHeat: Int = 0               // 方向盘加热档位（0x10090100）
-    )
+        val steeringHeat: Int = 0,             // 方向盘加热档位（0x10090100）
+        internal val unavailableComfort: Int = 0
+    ) {
+        internal fun seatVentVisible(driver: Boolean): Boolean {
+            val property = if (driver) HvacProperty.SEAT_VENT else HvacProperty.SEAT_VENT_PASSENGER
+            return unavailableComfort and property.mask == 0
+        }
+
+        internal val steeringHeatVisible: Boolean
+            get() = unavailableComfort and HvacProperty.STEERING_HEAT.mask == 0
+    }
 
     /** 空调风向：吹脸 / 吹脚 / 吹前挡 三个方向可按位组合（共 7 种模式） */
     const val AIR_FACE = AirFlowDrawable.FACE      // 1
@@ -141,6 +150,11 @@ object VehicleController {
     )
     private val nextFallbackProbeAt = Array(REFRESH_GROUPS.size) { LongArray(refreshKeys[it].size) }
     private val nextRefreshLogAt = LongArray(REFRESH_GROUPS.size)
+    private val comfortCapabilities = arrayOf(HvacProperty.SEAT_VENT, HvacProperty.SEAT_VENT_PASSENGER, HvacProperty.STEERING_HEAT)
+    // 查询与档位读取共用后台队列，但不跟随弹窗的 500ms 档位轮询加速。
+    private var comfortProbeConnection = Long.MIN_VALUE
+    private var nextComfortProbeAt = 0L
+    private var comfortVisibilityConnection = Long.MIN_VALUE
     private var seatClimatePopupVisible = false
     private var forcedProbeGroups = 0
     private var pendingRefreshGroups = 0
@@ -259,7 +273,7 @@ object VehicleController {
     fun init(ctx: Context) {
         appCtx = ctx.applicationContext
         if (Prefs.simulate(ctx) || !Prefs.vehicleApiEnabled(ctx)) {
-            onMain { hvacState.clearTargets(); publishDisplay() }
+            onMain { hvacState.clearTargets(); clearStaleComfortVisibility(ctx); publishDisplay() }
         }
         // 车机在空调关闭时通常返回 UNKNOWN；先恢复上次有效设定，避免 Dock 显示两个 OFF。
         val cachedDriverTemp = Prefs.lastDriverTempC(ctx)
@@ -582,7 +596,8 @@ object VehicleController {
         val indoor: Float? = null,
         val ambient: Float? = null,
         val temperatures: FloatArray? = null,
-        val validationEpoch: Long = 0L
+        val validationEpoch: Long = 0L,
+        val unavailableComfort: Int? = null
     )
 
     private val EMPTY_READING = GroupReading(IntArray(0), 0)
@@ -651,6 +666,7 @@ object VehicleController {
     internal fun poll(ctx: Context) {
         onMain {
             val c = ctx.applicationContext
+            clearStaleComfortVisibility(c)
             if (!Prefs.vehicleApiEnabled(c)) return@onMain
             appCtx = c
             val now = SystemClock.elapsedRealtime()
@@ -663,6 +679,7 @@ object VehicleController {
     private fun requestRefresh(ctx: Context, groups: Int) {
         onMain {
             val c = ctx.applicationContext
+            clearStaleComfortVisibility(c)
             if (!Prefs.vehicleApiEnabled(c)) return@onMain
             appCtx = c
             forcedProbeGroups = forcedProbeGroups or groups
@@ -698,7 +715,7 @@ object VehicleController {
                 try {
                     if (reading != null && epoch == validationEpoch && connection == VehicleBridge.connectionGeneration &&
                         (validationMode == null || activeValidationMode() != null)) {
-                        applyReading(c, group, revision, reading, startedAt - queuedAt, ioMs)
+                        applyReading(c, group, revision, connection, reading, startedAt - queuedAt, ioMs)
                     }
                 } finally {
                     refreshQueue.complete(group, SystemClock.elapsedRealtime())
@@ -775,18 +792,59 @@ object VehicleController {
             }
         }
         if (group == VehicleRefreshGroup.CLIMATE && evidenceOn()) evidencePoll(c)
-        return GroupReading(values, present, temperatures = temperatures, validationEpoch = epoch)
+        val unavailable = if (group == VehicleRefreshGroup.COMFORT) readUnavailableComfort(c, forceProbe, epoch, connection) else null
+        return GroupReading(values, present, temperatures = temperatures, validationEpoch = epoch, unavailableComfort = unavailable)
+    }
+
+    private fun readUnavailableComfort(c: Context, forceProbe: Boolean, epoch: Long, connection: Long): Int? {
+        val now = SystemClock.elapsedRealtime()
+        if (!forceProbe && connection == comfortProbeConnection && now < nextComfortProbeAt) return null
+        var unavailable = 0
+        for (property in comfortCapabilities) {
+            if (epoch != validationEpoch || connection != VehicleBridge.connectionGeneration ||
+                !VehicleBridge.isReady || !Prefs.vehicleApiEnabled(c) || Prefs.simulate(c) ||
+                (validationMode != null && activeValidationMode() == null)) return null
+            val function = evidenceFunction(c, property.key)
+            // 方向盘按原厂查询全局区；座椅查询配置中的各自区域，不借另一侧读回推断。
+            val area = evidenceZone(c, property.key)
+            val requireArea = property != HvacProperty.STEERING_HEAT
+            if (function > 0 && VehicleBridge.isComfortUnavailable(function, area, requireArea)) {
+                unavailable = unavailable or property.mask
+            }
+        }
+        comfortProbeConnection = connection
+        nextComfortProbeAt = SystemClock.elapsedRealtime() + VehicleRefreshGroup.COMFORT.intervalMs
+        return unavailable
+    }
+
+    private fun clearStaleComfortVisibility(c: Context) {
+        if (state.unavailableComfort == 0) return
+        if (comfortVisibilityConnection != VehicleBridge.connectionGeneration ||
+            !VehicleBridge.isReady || !Prefs.vehicleApiEnabled(c) || Prefs.simulate(c)) {
+            update(invalidateReads = false) { it.copy(unavailableComfort = 0) }
+        }
     }
 
     private fun applyReading(
         c: Context,
         group: VehicleRefreshGroup,
         revision: Long,
+        connection: Long,
         reading: GroupReading,
         waitMs: Long,
         ioMs: Long
     ) {
         if (!Prefs.vehicleApiEnabled(c)) return
+        clearStaleComfortVisibility(c)
+        // 档位事件可能使同组的值过期，但不能使独立的能力查询失效。
+        if (!Prefs.simulate(c) && VehicleBridge.isReady && connection == VehicleBridge.connectionGeneration) {
+            reading.unavailableComfort?.let { unavailable ->
+                comfortVisibilityConnection = connection
+                if (state.unavailableComfort != unavailable) {
+                    update(invalidateReads = false) { it.copy(unavailableComfort = unavailable) }
+                }
+            }
+        }
         // 同组回调或用户操作比本次读取新时，整组旧结果不得覆盖新状态。
         if (refreshRevisions[group.ordinal] != revision) return
         val simulated = Prefs.simulate(c)

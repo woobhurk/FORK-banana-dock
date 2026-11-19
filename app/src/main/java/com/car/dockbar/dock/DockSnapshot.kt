@@ -29,10 +29,12 @@ data class DockSnapshot(
     val mediaArtist: String,
     val mediaArt: Bitmap?,
     val mediaPlaying: Boolean,
+    val driverVentVisible: Boolean = true,
+    val steeringHeatVisible: Boolean = true,
 )
 
 object DockSnapshots {
-    fun capture(ctx: Context, darkIcons: Boolean): DockSnapshot {
+    fun capture(ctx: Context, darkIcons: Boolean, preview: Boolean = false): DockSnapshot {
         val state = VehicleController.state
         val media = MediaBridge.info
         return DockSnapshot(
@@ -56,6 +58,8 @@ object DockSnapshots {
             mediaArtist = media.artist,
             mediaArt = media.art,
             mediaPlaying = media.isPlaying,
+            driverVentVisible = preview || state.seatVentVisible(driver = true),
+            steeringHeatVisible = preview || state.steeringHeatVisible,
         )
     }
 }

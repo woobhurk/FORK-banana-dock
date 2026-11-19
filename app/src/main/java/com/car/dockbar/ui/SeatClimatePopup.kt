@@ -155,7 +155,17 @@ class SeatClimatePopup(private val ctx: Context) {
         for (choice in choices) {
             val heat = if (choice.driver) state.seatHeat else state.seatHeatPassenger
             val vent = if (choice.driver) state.seatVent else state.seatVentPassenger
-            val selected = if (choice.level == 0) heat == 0 && vent == 0
+            val ventVisible = state.seatVentVisible(choice.driver)
+            choice.root.visibility = if (choice.level == 0 || choice.heating || ventVisible) View.VISIBLE else View.GONE
+            if (choice.level == 0) {
+                val description = if (choice.driver) {
+                    if (ventVisible) "主驾 关闭加热和通风" else "主驾 关闭加热"
+                } else {
+                    if (ventVisible) "副驾 关闭加热和通风" else "副驾 关闭加热"
+                }
+                if (choice.root.contentDescription != description) choice.root.contentDescription = description
+            }
+            val selected = if (choice.level == 0) heat == 0 && (!ventVisible || vent == 0)
                 else (if (choice.heating) heat else vent) == choice.level
             choice.root.isSelected = selected
             choice.outline.alpha = if (selected) 255 else 0
