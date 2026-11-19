@@ -30,7 +30,7 @@ class HvacEventSubscriptionTest {
     @Test
     fun freshPreferencesSubscribeToValidatedClimateChannelsByDefault() {
         assertEquals(
-            setOf("fan_manual", "fan_auto", "ac", "recirc", "air_direction"),
+            setOf("fan_manual", "fan_auto", "ac", "recirc", "air_direction", "seat_vent", "seat_heat", "seat_heat_passenger"),
             Prefs.hvacEventKeys(context)
         )
     }

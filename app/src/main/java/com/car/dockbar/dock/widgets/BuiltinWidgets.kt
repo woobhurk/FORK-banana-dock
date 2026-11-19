@@ -330,8 +330,15 @@ private fun paintIcon(view: DockIconView, kind: BindKind, snapshot: DockSnapshot
         BindKind.DEFROST_REAR -> view.setActive(snapshot.defrostRear)
         BindKind.LYRIC -> view.setActive(snapshot.lyricOn)
         BindKind.VENT -> {
-            view.setIcon(levelIcon("vent", snapshot.seatVent, snapshot.darkIcons))
-            view.setActive(snapshot.seatVent > 0)
+            if (snapshot.seatHeat > 0) {
+                view.setIcon(levelIcon("seatHeat", snapshot.seatHeat, snapshot.darkIcons))
+                view.contentDescription = "主驾座椅加热 ${snapshot.seatHeat} 档"
+            } else {
+                view.setIcon(levelIcon("vent", snapshot.seatVent, snapshot.darkIcons))
+                view.contentDescription = if (snapshot.seatVent > 0) "主驾座椅通风 ${snapshot.seatVent} 档"
+                    else "主驾座椅通风和加热关闭"
+            }
+            view.setActive(snapshot.seatHeat > 0 || snapshot.seatVent > 0)
         }
         BindKind.SEAT_HEAT -> {
             view.setIcon(levelIcon("seatHeat", snapshot.seatHeat, snapshot.darkIcons))

@@ -151,9 +151,9 @@ internal class HvacState(initial: State) {
         )
     }
 
-    fun cancel(sequence: Long) {
+    fun cancel(sequence: Long, properties: Int = -1) {
         for (index in pending.indices) {
-            if (pending[index]?.sequence == sequence) pending[index] = null
+            if (properties and (1 shl index) != 0 && pending[index]?.sequence == sequence) pending[index] = null
         }
     }
 

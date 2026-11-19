@@ -203,7 +203,11 @@ internal object HvacChannels {
             }
             "air_direction" -> if (value in 1..7) (prefix or value) else null
             "temp_driver", "temp_passenger" -> if (value in 0..0xff) (prefix or value) else null
-            "seat_vent", "seat_heat", "seat_vent_passenger", "seat_heat_passenger",
+            "seat_vent", "seat_heat", "seat_vent_passenger", "seat_heat_passenger" -> when (value) {
+                0 -> 0
+                in 1..3 -> prefix or value
+                else -> null
+            }
             "steering_heat" -> if (value in 0..3) (prefix or value) else null
             "defrost_front", "defrost_rear" -> if (value in 0..1) (prefix or value) else null
             // 这些是仍存在于配置表的旧复合通道；未知 key 不扩展为任意低字节。

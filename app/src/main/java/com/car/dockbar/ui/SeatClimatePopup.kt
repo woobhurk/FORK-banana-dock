@@ -40,10 +40,8 @@ class SeatClimatePopup(private val ctx: Context) {
     var onDismissed: (() -> Unit)? = null
     val isShowing: Boolean get() = content != null
 
-    private val listener: (VehicleController.State) -> Unit = {
-        main.post {
-            if (content != null) render(VehicleController.state)
-        }
+    private val listener: (VehicleController.State) -> Unit = { state ->
+        if (content != null) render(state)
     }
 
     fun show(anchor: View? = null) {
@@ -89,7 +87,7 @@ class SeatClimatePopup(private val ctx: Context) {
         content = card
         card.animate().alpha(1f).setDuration(180L).start()
         VehicleController.addListener(listener)
-        render(VehicleController.state)
+        VehicleController.setSeatClimatePopupVisible(ctx, true)
         resetTimer()
     }
 
@@ -166,12 +164,13 @@ class SeatClimatePopup(private val ctx: Context) {
     }
 
     fun hide() {
-        // 同时取消尚未执行的显示和渲染，防止关闭后由旧回调重新挂窗。
+        // 同时取消尚未执行的显示和自动关闭任务。
         main.removeCallbacksAndMessages(null)
         val card = content ?: return
         content = null
         choices.clear()
         VehicleController.removeListener(listener)
+        VehicleController.setSeatClimatePopupVisible(ctx, false)
         card.animate().cancel()
         runCatching { wm?.removeViewImmediate(card) }
             .onFailure { Logx.e("座椅加热／通风弹窗：移除失败", it) }

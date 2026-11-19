@@ -327,9 +327,9 @@ internal class LogsSettingsPage(activity: MainActivity) :
         root.addView(smallBtn("日常空调同步通道") {
             AlertDialog.Builder(activity)
                 .setTitle("日常空调同步通道")
-                .setMessage("本车已验证风量、A/C、循环、风向的读取、写入与事件；这些通道默认采用事件订阅，定时读取作为兜底，不代表所有车型均可用。\n" +
+                .setMessage("默认订阅风量、A/C、循环、风向、主驾座椅通风和前排座椅加热，定时读取作为兜底；不代表所有车型均支持。\n" +
                     "⚠ 温度会额外启用浮点 Customize/native 读取和事件，可能使进程直接闪退，Java 异常捕获无法保护；厂商其他事件回调也有 native 风险，请在停车安全时配置。\n" +
-                    "原有温度监听、全量监听开关及其基线仍保留；未配置过日常通道时默认勾选风量（手动 + AUTO）、A/C、循环和风向，已有选择不会被覆盖；全部不选仅关闭新增日常通道。\n" +
+                    "旧版已启用日常同步的配置在升级时补入座椅；原有温度、全量监听开关和全关状态不变。取消勾选并保存后不会自动补回。\n" +
                     "保存仅调整订阅与读取，不自动写入车控或补权，也不改变车控写入开关。临时验证结束不会清除此配置。")
                 .setPositiveButton("选择通道") { _, _ ->
                     val labels = arrayOf(
@@ -337,14 +337,16 @@ internal class LogsSettingsPage(activity: MainActivity) :
                         "A/C",
                         "主副驾温度（含浮点读取，native 风险）",
                         "循环（本车仅验证读取）",
-                        "风向（0/8 语义未定）"
+                        "风向（0/8 语义未定）",
+                        "座椅通风／加热（主驾通风、前排加热）"
                     )
                     val groups = arrayOf(
                         setOf("fan_manual", "fan_auto"),
                         setOf("ac"),
                         setOf("temp_driver", "temp_passenger"),
                         setOf("recirc"),
-                        setOf("air_direction")
+                        setOf("air_direction"),
+                        Prefs.SEAT_CLIMATE_EVENT_KEYS
                     )
                     val saved = Prefs.hvacEventKeys(this)
                     val selected = BooleanArray(groups.size) { index ->

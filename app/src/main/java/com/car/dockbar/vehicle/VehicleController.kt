@@ -141,6 +141,7 @@ object VehicleController {
     )
     private val nextFallbackProbeAt = Array(REFRESH_GROUPS.size) { LongArray(refreshKeys[it].size) }
     private val nextRefreshLogAt = LongArray(REFRESH_GROUPS.size)
+    private var seatClimatePopupVisible = false
     private var forcedProbeGroups = 0
     private var pendingRefreshGroups = 0
     private val pendingRefreshAt = LongArray(REFRESH_GROUPS.size) { Long.MAX_VALUE }
@@ -592,6 +593,15 @@ object VehicleController {
         requestRefresh(c, ALL_GROUPS)
     }
 
+    /** 弹窗打开就读取舒适组；无事件时也复用原有调度做短周期兜底。 */
+    internal fun setSeatClimatePopupVisible(ctx: Context, visible: Boolean) {
+        onMain {
+            if (seatClimatePopupVisible == visible) return@onMain
+            seatClimatePopupVisible = visible
+            if (visible) requestRefresh(ctx, COMFORT_GROUP)
+        }
+    }
+
     /** 高频调用只检查期限；实际厂商读取仍由唯一 HAL 队列串行执行。 */
     private fun recordEventEvidence(key: String, raw: Any?, connection: Long) {
         if (HvacChannels.observationProperties(key, raw) == 0) return
@@ -613,8 +623,11 @@ object VehicleController {
         if (!registered) seenEventMask = 0
         seenEventMask = seenEventMask and configuredEventMask
         for (group in REFRESH_GROUPS) {
-            val interval = if (group == VehicleRefreshGroup.TEMPERATURE && temperatureNeedsConfirmation(now)) 500L
-                else HvacRefreshPolicy.intervalMs(group, configuredEventMask, seenEventMask, registered)
+            val interval = when {
+                group == VehicleRefreshGroup.TEMPERATURE && temperatureNeedsConfirmation(now) -> 500L
+                group == VehicleRefreshGroup.COMFORT && seatClimatePopupVisible -> 500L
+                else -> HvacRefreshPolicy.intervalMs(group, configuredEventMask, seenEventMask, registered)
+            }
             refreshQueue.setInterval(group, interval, now)
             if (refreshIntervals[group.ordinal] != interval) {
                 refreshIntervals[group.ordinal] = interval
@@ -1678,7 +1691,7 @@ object VehicleController {
         label = "座椅加热"
     )
 
-    /** 同侧加热与通风作为一次保序操作；关闭相反模式后才请求所选档位。 */
+    /** 默认只写所选档位；同侧关闭时独立提交加热和通风的关闭请求。 */
     fun setSeatComfortLevel(ctx: Context, driver: Boolean, heating: Boolean, level: Int) {
         if (Looper.myLooper() != main.looper) { main.post { setSeatComfortLevel(ctx, driver, heating, level) }; return }
         if (!Prefs.simulate(ctx) && !HvacCommands.canSubmit(ctx, "setSeatComfortLevel")) return
@@ -1692,7 +1705,8 @@ object VehicleController {
         if (Prefs.simulate(ctx)) return
         HvacCommands.submit(ctx, "seatComfort driver=$driver heat=$heat vent=$vent targetSeq=$sequence", { cancelTarget(sequence) }) {
             val mode = activeValidationMode()?.seatWriteMode ?: SeatWriteValidationMode.ECARX_DIRECT
-            if (!HvacWriteActions.writeSeatComfort(ctx, driver, heating, next, mode)) cancelTarget(sequence)
+            val rejected = HvacWriteActions.writeSeatComfort(ctx, driver, heating, next, mode)
+            if (rejected != 0) cancelTarget(sequence, if (next == 0) rejected else -1)
         }
         scheduleRefresh(ctx, COMFORT_GROUP)
     }
@@ -1786,8 +1800,8 @@ object VehicleController {
         }
     }
 
-    private fun cancelTarget(sequence: Long) {
-        onMain { hvacState.cancel(sequence); publishDisplay() }
+    private fun cancelTarget(sequence: Long, properties: Int = -1) {
+        onMain { hvacState.cancel(sequence, properties); publishDisplay() }
     }
 
     private fun publishDisplay(forceNotify: Boolean = false) {

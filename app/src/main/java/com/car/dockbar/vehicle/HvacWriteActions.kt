@@ -46,9 +46,7 @@ internal object HvacWriteActions {
         return !verified && encoded != value && VehicleBridge.verifyWrite(function, zone, value)
     }
 
-    /** 默认沿用原厂直接写目标档位的路径，不让相反模式关闭失败阻断目标写入。 */
-    fun writeSeatComfort(ctx: Context, driver: Boolean, heating: Boolean, level: Int): Boolean =
-        writeSeatComfort(ctx, driver, heating, level, SeatWriteValidationMode.ECARX_DIRECT)
+    /** 返回未接受的属性位；关闭时仍独立处理同侧的两条通道。 */
 
     fun writeSeatComfort(
         ctx: Context,
@@ -56,18 +54,19 @@ internal object HvacWriteActions {
         heating: Boolean,
         level: Int,
         mode: SeatWriteValidationMode
-    ): Boolean {
+    ): Int {
         val steps = seatWritePlan(driver, heating, level, mode)
-        var accepted = true
+        var rejected = 0
         for ((index, step) in steps.withIndex()) {
-            val stepAccepted = writeSeatChannel(ctx, step.key, step.value, mode)
-            accepted = accepted && stepAccepted
-            if (!stepAccepted && level > 0 && mode == SeatWriteValidationMode.ECARX_COMBINED && index == 0) {
-                Logx.w("座椅组合操作停止：${step.key} 关闭调用未接受，未请求后续档位")
-                return false
+            if (!writeSeatChannel(ctx, step.key, step.value, mode)) {
+                rejected = rejected or checkNotNull(HvacProperty.fromKey(step.key)).mask
+                if (level > 0 && mode == SeatWriteValidationMode.ECARX_COMBINED && index == 0) {
+                    Logx.w("座椅组合操作停止：${step.key} 关闭调用未接受，未请求后续档位")
+                    break
+                }
             }
         }
-        return accepted
+        return rejected
     }
 
     private fun writeSeatChannel(ctx: Context, key: String, value: Int, mode: SeatWriteValidationMode): Boolean {
@@ -75,12 +74,16 @@ internal object HvacWriteActions {
         val function = VehicleChannels.funcOf(ctx, key)
         val zone = VehicleChannels.zoneOf(ctx, key)
         val encoded = HvacChannels.encodeInt(function, key, value) ?: return false
-        val raw = when (mode) {
-            SeatWriteValidationMode.GLYCAR_DIRECT -> VehicleBridge.verifyIntViaGlyCar(function, zone, encoded)
+        val accepted = when {
+            mode == SeatWriteValidationMode.GLYCAR_DIRECT -> VehicleBridge.verifyIntViaGlyCar(function, zone, encoded)
+            key == "seat_vent_passenger" && VehicleBridge.supportOf(function, zone) == "notavailable" -> {
+                HvacCommands.skippedWrite(function, zone, encoded, "$mode:副驾通风不可用")
+                false
+            }
             else -> VehicleBridge.verifyWrite(function, zone, encoded)
         }
-        Logx.d("HVAC_TEST SEAT_WRITE mode=$mode key=$key fid=0x${function.toString(16)} zone=$zone raw=$encoded value=$value accepted=$raw")
-        return raw
+        Logx.d("HVAC_TEST SEAT_WRITE mode=$mode key=$key fid=0x${function.toString(16)} zone=$zone raw=$encoded value=$value accepted=$accepted")
+        return accepted
     }
 
     fun writeSwitch(

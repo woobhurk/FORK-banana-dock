@@ -221,7 +221,7 @@ object Prefs {
     // ---------------- 车控诊断开关（排查闪退用） ----------------
     /**
      * 历史CX11部分固件出现过原生回调崩溃；当前本车的按需风量、AC、循环、风向和温度回调已短时验证。
-     * 未配置时默认订阅风量、AC、循环和风向；其他日常通道仍显式选择，保留崩溃熔断和轮询兜底。
+     * 未配置时默认订阅风量、AC、循环、风向及座椅舒适状态；保留崩溃熔断和轮询兜底。
      */
     fun vehicleWatcherEnabled(ctx: Context) = sp(ctx).getBoolean("vehicle_watcher_enabled", false)
     fun setVehicleWatcherEnabled(ctx: Context, v: Boolean) =
@@ -237,20 +237,38 @@ object Prefs {
     fun setVehicleTempWatcherEnabled(ctx: Context, v: Boolean) =
         sp(ctx).edit().putBoolean("vehicle_temp_watcher_enabled", v).apply()
 
+    private const val HVAC_EVENT_KEYS_PREF = "hvac_event_keys"
+    private const val HVAC_SEAT_DEFAULTS_MIGRATED = "hvac_seat_defaults_migrated"
+
+    internal val SEAT_CLIMATE_EVENT_KEYS = setOf("seat_vent", "seat_heat", "seat_heat_passenger")
+
     // 仅允许已明确开放的空调通道；旧监听开关与新增常态配置互不改写。
     private val HVAC_EVENT_KEYS = setOf(
         "fan_manual", "fan_auto", "ac", "temp_driver", "temp_passenger", "recirc", "air_direction"
-    )
+    ) + SEAT_CLIMATE_EVENT_KEYS
 
-    private val DEFAULT_HVAC_EVENT_KEYS = setOf("fan_manual", "fan_auto", "ac", "recirc", "air_direction")
+    private val DEFAULT_HVAC_EVENT_KEYS =
+        setOf("fan_manual", "fan_auto", "ac", "recirc", "air_direction") + SEAT_CLIMATE_EVENT_KEYS
 
-    /** 仅无保存记录时启用已验证的默认通道；用户保存为空或熔断清空后不得自动补回。 */
+    /** 升级时只补入旧版还没有的座椅选项，已全关或因崩溃清空的配置继续保留。 */
+    internal fun migrateHvacSeatEventDefaults(ctx: Context) {
+        val prefs = sp(ctx)
+        if (prefs.getBoolean(HVAC_SEAT_DEFAULTS_MIGRATED, false)) return
+        val saved = prefs.getStringSet(HVAC_EVENT_KEYS_PREF, null)
+        val edit = prefs.edit().putBoolean(HVAC_SEAT_DEFAULTS_MIGRATED, true)
+        if (saved != null && saved.any { it in HVAC_EVENT_KEYS } && saved.none { it in SEAT_CLIMATE_EVENT_KEYS }) {
+            edit.putStringSet(HVAC_EVENT_KEYS_PREF, saved + SEAT_CLIMATE_EVENT_KEYS)
+        }
+        edit.apply()
+    }
+
+    /** 未保存时使用默认通道；已保存的选择由设置页和启动迁移维护。 */
     fun hvacEventKeys(ctx: Context): Set<String> =
-        sp(ctx).getStringSet("hvac_event_keys", DEFAULT_HVAC_EVENT_KEYS).orEmpty()
+        sp(ctx).getStringSet(HVAC_EVENT_KEYS_PREF, DEFAULT_HVAC_EVENT_KEYS).orEmpty()
             .filterTo(mutableSetOf()) { it in HVAC_EVENT_KEYS }
 
     fun setHvacEventKeys(ctx: Context, keys: Set<String>) =
-        sp(ctx).edit().putStringSet("hvac_event_keys", keys.filterTo(mutableSetOf()) {
+        sp(ctx).edit().putStringSet(HVAC_EVENT_KEYS_PREF, keys.filterTo(mutableSetOf()) {
             it in HVAC_EVENT_KEYS
         }).apply()
 
