@@ -14,7 +14,8 @@ internal enum class SeatWriteValidationMode(val label: String) {
 internal enum class HvacValidationMode(
     val label: String,
     val keys: List<String>,
-    val seatWriteMode: SeatWriteValidationMode? = null
+    val seatWriteMode: SeatWriteValidationMode? = null,
+    val comfortReadOnly: Boolean = false
 ) {
     FAN("风量：手动 / 自动风量", listOf("fan_manual", "fan_auto")),
     CLIMATE("常用空调：风量 + A/C / 循环 / 风向 / 双温", FAN.keys + listOf("ac", "recirc", "air_direction", "temp_dual")),
@@ -33,7 +34,11 @@ internal enum class HvacValidationMode(
         "座椅：${SeatWriteValidationMode.GLYCAR_DIRECT.label}",
         listOf("seat_vent", "seat_heat", "seat_vent_passenger", "seat_heat_passenger"),
         SeatWriteValidationMode.GLYCAR_DIRECT
-    )
+    ),
+    PASSENGER_SEAT_VENT_EVENTS("只读订阅：副驾座椅通风", listOf("seat_vent_passenger"), comfortReadOnly = true),
+    FRONT_DEFROST_EVENTS("只读订阅：前挡除霜", listOf("defrost_front"), comfortReadOnly = true),
+    REAR_DEFROST_EVENTS("只读订阅：后挡除霜", listOf("defrost_rear"), comfortReadOnly = true),
+    STEERING_HEAT_EVENTS("只读订阅：方向盘加热", listOf("steering_heat"), comfortReadOnly = true)
 }
 
 /** 仅保存本次和最近完成的验证；锁内不调用厂商接口、日志文件或网络。 */
@@ -58,7 +63,9 @@ internal object HvacDiagnostics {
 
     fun begin(ctx: Context, mode: HvacValidationMode) {
         // 通道配置读取在锁外完成，不保留 Context。
-        val channels = mode.keys.map { Channel(it, VehicleChannels.funcOf(ctx, it), VehicleChannels.zoneOf(ctx, it)) }
+        val channels = mode.keys.map {
+            Channel(it, VehicleChannels.observationFuncOf(ctx, it), VehicleChannels.observationZoneOf(ctx, it))
+        }
         finish("被新验证替换")
         val line = synchronized(lock) {
             val next = Session(mode, SystemClock.elapsedRealtime(), channels)

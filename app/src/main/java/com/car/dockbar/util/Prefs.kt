@@ -242,9 +242,10 @@ object Prefs {
 
     internal val SEAT_CLIMATE_EVENT_KEYS = setOf("seat_vent", "seat_heat", "seat_heat_passenger")
 
-    // 仅允许已明确开放的空调通道；旧监听开关与新增常态配置互不改写。
+    // 仅允许已开放的车控同步通道；旧监听开关与日常配置互不改写。
     private val HVAC_EVENT_KEYS = setOf(
-        "fan_manual", "fan_auto", "ac", "temp_driver", "temp_passenger", "recirc", "air_direction"
+        "fan_manual", "fan_auto", "ac", "temp_driver", "temp_passenger", "recirc", "air_direction",
+        "seat_vent_passenger", "defrost_front", "defrost_rear", "steering_heat"
     ) + SEAT_CLIMATE_EVENT_KEYS
 
     private val DEFAULT_HVAC_EVENT_KEYS =

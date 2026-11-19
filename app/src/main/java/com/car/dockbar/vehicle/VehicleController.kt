@@ -38,7 +38,7 @@ object VehicleController {
         // ★ v1.4.35：温度弹窗 / 座椅弹窗所需
         val seatVentPassenger: Int = 0,
         val seatHeatPassenger: Int = 0,
-        val defrostFront: Boolean = false,      // 前挡除霜/加热（0x10040100）
+        val defrostFront: Boolean = false,      // 前挡除霜/加热（0x10040200）
         val defrostRear: Boolean = false,       // 后挡除霜/加热（0x10040300）
         val steeringHeat: Int = 0,             // 方向盘加热档位（0x10090100）
         internal val unavailableComfort: Int = 0
@@ -78,11 +78,9 @@ object VehicleController {
     //   而非 oneOS_Hvac 常量表里的 0x10040100；三个信号的 areaId 在真车都是全局区
     //   0x80000000（日志实锤：0x10010300 / 0x10030100 事件 zone=-2147483648），不再用 zone=1
     /** 前挡除霜/加热（HVAC_DEFROST_FRONT） */
-    private const val FUNC_DEFROST_FRONT = 0x10040200
+    private const val FUNC_DEFROST_FRONT = VehicleChannels.FUNC_DEFROST_FRONT_MAX
     /** 后挡除霜/加热（HVAC_DEFROST_REAR） */
-    private const val FUNC_DEFROST_REAR = 0x10040300
-    /** 方向盘加热（STEERING_WHEEL_HEAT） */
-    private const val FUNC_STEERING_HEAT = 0x10090100
+    private const val FUNC_DEFROST_REAR = VehicleChannels.FUNC_DEFROST_REAR
     /** 座椅记忆-应用位置（SETTING_FUNC_SEAT_POSITION_SET）——写位置号 1/2/3，车机待实测 */
     private const val FUNC_SEAT_POSITION_SET = 0x2d400200
     /** 全局区 areaId：真车对无分区信号统一用 0x80000000 */
@@ -371,14 +369,19 @@ object VehicleController {
         override fun run() {
             val c = appCtx ?: return
             if (validationMode == null) return
-            if (activeValidationMode() == null) {
+            val mode = activeValidationMode()
+            if (mode == null) {
                 stopHvacValidation("验证窗口到期或车控已关闭")
                 return
             }
-            poll(c)
+            // 舒适订阅验证只驱动舒适组，避免额外启动传感器组及其自动座椅逻辑。
+            poll(c, validationGroups(mode))
             main.postDelayed(this, 250L)
         }
     }
+
+    private fun validationGroups(mode: HvacValidationMode): Int =
+        if (mode.comfortReadOnly) COMFORT_GROUP else ALL_GROUPS
 
     /** 只在用户明确开始验证后增加订阅和浮点读取，绝不自动发出车控写命令。 */
     internal fun startHvacValidation(ctx: Context, mode: HvacValidationMode) {
@@ -413,15 +416,17 @@ object VehicleController {
                     configureWatcher(c)
                     for (key in mode.keys) {
                         if (validationEpoch != epoch || connection != VehicleBridge.connectionGeneration || activeValidationMode() == null) return@runCatching
-                        val fid = VehicleChannels.funcOf(c, key)
-                        val zone = VehicleChannels.zoneOf(c, key)
+                        val fid = VehicleChannels.observationFuncOf(c, key)
+                        val zone = VehicleChannels.observationZoneOf(c, key)
                         val status = if (fid > 0) VehicleBridge.supportOf(fid, zone) else "未配置"
                         if (validationEpoch != epoch || connection != VehicleBridge.connectionGeneration || activeValidationMode() == null) return@runCatching
                         val values = if (fid > 0) VehicleBridge.supportedValues(fid, zone) else null
                         if (validationEpoch != epoch || connection != VehicleBridge.connectionGeneration || activeValidationMode() == null) return@runCatching
                         HvacDiagnostics.capability(key, status, values)
                     }
-                    if (validationEpoch == epoch && connection == VehicleBridge.connectionGeneration && activeValidationMode() != null) refresh(c)
+                    if (validationEpoch == epoch && connection == VehicleBridge.connectionGeneration && activeValidationMode() != null) {
+                        requestRefresh(c, validationGroups(mode))
+                    }
                 }.onFailure {
                     if (validationEpoch == epoch && connection == VehicleBridge.connectionGeneration && activeValidationMode() != null) {
                         HvacDiagnostics.registration(VehicleBridge.backend.label, mode.keys, false,
@@ -489,18 +494,22 @@ object VehicleController {
     /** 基础监听和验证监听共用唯一集合，包含共用功能号的不同区域。 */
     private fun configureWatcher(c: Context): Boolean {
         val keys = if (Prefs.vehicleApiEnabled(c) && !Prefs.simulate(c)) watcherKeys(c) else emptyList()
-        val funcs = keys.map { VehicleChannels.funcOf(c, it) }.filter { it > 0 }.distinct().toIntArray()
+        val requested = keys.toSet()
         val configuration = ++watcherConfiguration
         val epoch = validationEpoch
         val connection = VehicleBridge.connectionGeneration
         // 配置目录仅在订阅重配时生成，不在每次轮询或回调重建。
         val pollingKeys = refreshKeys.flatMap { it.asList() }.toSet()
         val evidenceKeys = (VehicleChannels.ALL.map { it.key } + pollingKeys).distinct()
+        val functions = linkedSetOf<Int>()
         val evidenceConfigs = evidenceKeys.map { key ->
-            HvacChannelEvidence.ChannelConfig(key, evidenceFunction(c, key), evidenceZone(c, key), key in pollingKeys)
+            val fid = VehicleChannels.observationFuncOf(c, key)
+            if (fid > 0 && key in requested) functions.add(fid)
+            HvacChannelEvidence.ChannelConfig(key, fid, VehicleChannels.observationZoneOf(c, key), key in pollingKeys)
         }
+        val funcs = functions.toIntArray()
         HvacChannelEvidence.connection(connection, VehicleBridge.backend.label, VehicleBridge.isReady)
-        HvacChannelEvidence.registration(connection, configuration, evidenceConfigs, keys.toSet(), null)
+        HvacChannelEvidence.registration(connection, configuration, evidenceConfigs, requested, null)
         Logx.w("HVAC_TEST stage=SUBSCRIBE_BEGIN backend=${VehicleBridge.backend.label} keys=$keys funcs=${funcs.joinToString { "0x" + it.toString(16) }}")
         val ok = VehicleBridge.registerWatcher(funcs) { fid, zone, value ->
             val receivedAt = SystemClock.elapsedRealtime()
@@ -510,11 +519,11 @@ object VehicleController {
                 if (validationMode != null && activeValidationMode() == null) return@post
                 runCatching {
                     val key = evidenceConfigs.firstOrNull {
-                        it.key in keys && it.fid == fid && it.configuredZone == zone
+                        it.key in requested && it.fid == fid && it.configuredZone == zone
                     }?.key
                     if (key == null) {
                         for (config in evidenceConfigs) {
-                            if (config.key in keys && config.fid == fid) {
+                            if (config.key in requested && config.fid == fid) {
                                 HvacChannelEvidence.event(connection, configuration, config.key, fid, zone,
                                     value as? Number, false, receivedAt)
                             }
@@ -552,7 +561,7 @@ object VehicleController {
             }
         }
         val currentConnection = connection == VehicleBridge.connectionGeneration
-        if (currentConnection) HvacChannelEvidence.registration(connection, configuration, evidenceConfigs, keys.toSet(), ok)
+        if (currentConnection) HvacChannelEvidence.registration(connection, configuration, evidenceConfigs, requested, ok)
         if (currentConnection) {
             watcherConnection = connection
             subscriptionAccepted = ok
@@ -627,11 +636,11 @@ object VehicleController {
         seenEventMask = seenEventMask or HvacRefreshPolicy.bit(key)
     }
 
-    private fun applyPollingPolicy(now: Long) {
+    private fun applyPollingPolicy(now: Long, groups: Int) {
         val connection = VehicleBridge.connectionGeneration
-        if (initialSnapshotConnection != connection) {
+        if (eventProofConnection != connection) { eventProofConnection = connection; seenEventMask = 0 }
+        if (groups == ALL_GROUPS && initialSnapshotConnection != connection) {
             initialSnapshotConnection = connection
-            if (eventProofConnection != connection) { eventProofConnection = connection; seenEventMask = 0 }
             for (group in REFRESH_GROUPS) refreshQueue.request(group)
         }
         val registered = subscriptionAccepted && watcherConnection == connection
@@ -663,15 +672,17 @@ object VehicleController {
         }
         if (previous != seenEventMask) Logx.d("HVAC_POLL 仅轮询发现新值 properties=$properties，暂回快兜底")
     }
-    internal fun poll(ctx: Context) {
+    internal fun poll(ctx: Context) = poll(ctx, ALL_GROUPS)
+
+    private fun poll(ctx: Context, groups: Int) {
         onMain {
             val c = ctx.applicationContext
             clearStaleComfortVisibility(c)
             if (!Prefs.vehicleApiEnabled(c)) return@onMain
             appCtx = c
             val now = SystemClock.elapsedRealtime()
-            applyPollingPolicy(now)
-            refreshQueue.poll(now)
+            applyPollingPolicy(now, groups)
+            refreshQueue.poll(now, groups)
             pumpRefreshQueue(c)
         }
     }
@@ -768,10 +779,10 @@ object VehicleController {
                     continue
                 }
             }
-            var actualZone = if (key == "defrost_front" || key == "defrost_rear" || key == "steering_heat") ZONE_GLOBAL else VehicleChannels.zoneOf(c, key)
+            var actualZone = VehicleChannels.observationZoneOf(c, key)
             val raw = when (key) {
                 "defrost_front", "defrost_rear", "steering_heat" -> readEvidenceInt(c, key,
-                    evidenceFunction(c, key), ZONE_GLOBAL, ZONE_GLOBAL, epoch, connection, evidenceSubscription)
+                    VehicleChannels.observationFuncOf(c, key), actualZone, actualZone, epoch, connection, evidenceSubscription)
                 else -> {
                     val now = SystemClock.elapsedRealtime()
                     val probe = forceProbe || now >= nextFallbackProbeAt[group.ordinal][i]
@@ -804,9 +815,9 @@ object VehicleController {
             if (epoch != validationEpoch || connection != VehicleBridge.connectionGeneration ||
                 !VehicleBridge.isReady || !Prefs.vehicleApiEnabled(c) || Prefs.simulate(c) ||
                 (validationMode != null && activeValidationMode() == null)) return null
-            val function = evidenceFunction(c, property.key)
+            val function = VehicleChannels.observationFuncOf(c, property.key)
             // 方向盘按原厂查询全局区；座椅查询配置中的各自区域，不借另一侧读回推断。
-            val area = evidenceZone(c, property.key)
+            val area = VehicleChannels.observationZoneOf(c, property.key)
             val requireArea = property != HvacProperty.STEERING_HEAT
             if (function > 0 && VehicleBridge.isComfortUnavailable(function, area, requireArea)) {
                 unavailable = unavailable or property.mask
@@ -1017,19 +1028,6 @@ object VehicleController {
     private data class ReadZone(val function: Int, val configured: Int, val actual: Int)
     private val readZoneCache = HashMap<String, ReadZone>()
     private var readZoneConnection = Long.MIN_VALUE
-
-    private fun evidenceFunction(c: Context, key: String): Int = when (key) {
-        "defrost_front" -> FUNC_DEFROST_FRONT
-        "defrost_rear" -> FUNC_DEFROST_REAR
-        "steering_heat" -> FUNC_STEERING_HEAT
-        else -> VehicleChannels.funcOf(c, key)
-    }
-
-    private fun evidenceZone(c: Context, key: String): Int = when (key) {
-        "defrost_front", "defrost_rear", "steering_heat" -> ZONE_GLOBAL
-        else -> VehicleChannels.zoneOf(c, key)
-    }
-
     /** 沿用当前真实读取；日志记录逐次区域尝试，不把失败回退样本吞成最终成功。 */
     private fun readEvidenceInt(c: Context, key: String, fid: Int, configured: Int, zone: Int,
                                 epoch: Long?, connection: Long, subscription: Long): Int? {

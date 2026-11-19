@@ -324,12 +324,11 @@ internal class LogsSettingsPage(activity: MainActivity) :
     private var refreshState: (() -> Unit)? = null
 
     private fun addHvacSubscriptionAction() {
-        root.addView(smallBtn("日常空调同步通道") {
+        root.addView(smallBtn("日常车控状态同步") {
             AlertDialog.Builder(activity)
-                .setTitle("日常空调同步通道")
-                .setMessage("默认订阅风量、A/C、循环、风向、主驾座椅通风和前排座椅加热，定时读取作为兜底；不代表所有车型均支持。\n" +
-                    "⚠ 温度会额外启用浮点 Customize/native 读取和事件，可能使进程直接闪退，Java 异常捕获无法保护；厂商其他事件回调也有 native 风险，请在停车安全时配置。\n" +
-                    "旧版已启用日常同步的配置在升级时补入座椅；原有温度、全量监听开关和全关状态不变。取消勾选并保存后不会自动补回。\n" +
+                .setTitle("日常车控状态同步")
+                .setMessage("选中的通道尝试接收原车状态变化，定时读取继续兜底。副驾通风、前后挡除霜和方向盘加热默认不勾选，建议先做两分钟验证。\n" +
+                    "⚠ 厂商回调及温度浮点读取可能导致进程闪退，请停车后配置；支持情况因车机而异。\n" +
                     "保存仅调整订阅与读取，不自动写入车控或补权，也不改变车控写入开关。临时验证结束不会清除此配置。")
                 .setPositiveButton("选择通道") { _, _ ->
                     val labels = arrayOf(
@@ -338,7 +337,11 @@ internal class LogsSettingsPage(activity: MainActivity) :
                         "主副驾温度（含浮点读取，native 风险）",
                         "循环（本车仅验证读取）",
                         "风向（0/8 语义未定）",
-                        "座椅通风／加热（主驾通风、前排加热）"
+                        "座椅通风／加热（主驾通风、前排加热）",
+                        "副驾座椅通风",
+                        "前挡除霜",
+                        "后挡除霜",
+                        "方向盘加热"
                     )
                     val groups = arrayOf(
                         setOf("fan_manual", "fan_auto"),
@@ -346,7 +349,11 @@ internal class LogsSettingsPage(activity: MainActivity) :
                         setOf("temp_driver", "temp_passenger"),
                         setOf("recirc"),
                         setOf("air_direction"),
-                        Prefs.SEAT_CLIMATE_EVENT_KEYS
+                        Prefs.SEAT_CLIMATE_EVENT_KEYS,
+                        setOf("seat_vent_passenger"),
+                        setOf("defrost_front"),
+                        setOf("defrost_rear"),
+                        setOf("steering_heat")
                     )
                     val saved = Prefs.hvacEventKeys(this)
                     val selected = BooleanArray(groups.size) { index ->
@@ -362,8 +369,8 @@ internal class LogsSettingsPage(activity: MainActivity) :
                                 .flatMapTo(mutableSetOf()) { groups[it] }
                             Prefs.setHvacEventKeys(this, keys)
                             VehicleController.reloadHvacSubscriptions(this)
-                            toastOnce(if (keys.isEmpty()) "新增日常空调同步已关闭，原有基线监听保留"
-                                else "日常空调同步已保存并请求应用")
+                            toastOnce(if (keys.isEmpty()) "日常可选订阅已关闭，原有基线监听保留"
+                                else "日常车控状态同步已保存并请求应用")
                         }
                         .setNegativeButton("取消", null)
                         .show()
@@ -375,23 +382,26 @@ internal class LogsSettingsPage(activity: MainActivity) :
 
     /** 验证会话属于 Controller，切页或销毁本页面不会停止车上操作取证。 */
     private fun addHvacValidationActions() {
-        root.addView(smallBtn("原车空调接口验证（2分钟）") {
+        root.addView(smallBtn("车控接口验证（2分钟）") {
             val modes = HvacValidationMode.values()
             var selected = 0
             val labels = modes.map { it.label }.toTypedArray()
             AlertDialog.Builder(activity)
-                .setTitle("选择空调/座椅验证范围")
+                .setTitle("选择车控验证范围")
                 .setSingleChoiceItems(labels, selected) { _, which -> selected = which }
                 .setPositiveButton("下一步") { _, _ ->
                     val mode = modes[selected]
                     val warning = when (mode.seatWriteMode) {
-                        null -> if (mode == HvacValidationMode.TEMPERATURE)
-                            "温度模式会额外触发浮点 Customize/native 读取和事件，可能使进程直接闪退。"
-                        else "本模式只订阅和读取，不自动写入车控。"
+                        null -> when {
+                            mode.comfortReadOnly -> "只临时加入所选通道的订阅，不自动写入或更改日常配置。厂商回调可能导致闪退。请停车后在原车界面改变状态，并查看报告的有效 EVENT 是否增加。"
+                            mode == HvacValidationMode.TEMPERATURE ->
+                                "温度模式会额外触发浮点 Customize/native 读取和事件，可能使进程直接闪退。"
+                            else -> "本模式只订阅和读取，不自动写入车控。"
+                        }
                         else -> "座椅模式会在验证窗口内允许显式测试写入；请停车操作，命令接受不等于车辆生效。"
                     }
                     AlertDialog.Builder(activity)
-                        .setTitle("开启2分钟验证：${mode.name}")
+                        .setTitle("开启2分钟验证：${mode.label}")
                         .setMessage("${warning}\n开启后可切页，操作后回来查看 HVAC_TEST 报告。")
                         .setPositiveButton("开始验证") { _, _ ->
                             VehicleController.startHvacValidation(this, mode)
@@ -403,11 +413,11 @@ internal class LogsSettingsPage(activity: MainActivity) :
                 .setNegativeButton("取消", null)
                 .show()
         })
-        root.addView(smallBtn("停止空调接口验证") {
+        root.addView(smallBtn("停止车控接口验证") {
             VehicleController.stopHvacValidation()
-            toastOnce("空调验证已停止，可查看报告")
+            toastOnce("车控验证已停止，可查看报告")
         })
-        root.addView(smallBtn("查看空调验证结果") { showHvacValidationReport() })
+        root.addView(smallBtn("查看车控验证结果") { showHvacValidationReport() })
     }
 
     private fun showHvacValidationReport() {
@@ -419,13 +429,13 @@ internal class LogsSettingsPage(activity: MainActivity) :
             setPadding(dp(16), dp(12), dp(16), dp(12))
         }
         AlertDialog.Builder(activity)
-            .setTitle("空调验证报告（HVAC_TEST）")
+            .setTitle("车控验证报告（HVAC_TEST）")
             .setView(ScrollView(this).apply { addView(content) })
             .setPositiveButton("关闭", null)
             .setNeutralButton("复制报告") { _, _ ->
                 val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                 clipboard.setPrimaryClip(ClipData.newPlainText("HVAC_TEST", report))
-                toastOnce("已复制空调验证报告")
+                toastOnce("已复制车控验证报告")
             }
             .show()
     }

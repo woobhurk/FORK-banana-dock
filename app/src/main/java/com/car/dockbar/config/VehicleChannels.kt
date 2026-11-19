@@ -239,6 +239,20 @@ object VehicleChannels {
         return sp.getInt("ch_zone_$key", def)
     }
 
+    /** 状态读取、事件匹配与诊断共用同一功能号，不依赖写入路由。 */
+    internal fun observationFuncOf(ctx: Context, key: String): Int = when (key) {
+        "defrost_front" -> FUNC_DEFROST_FRONT_MAX
+        "defrost_rear" -> FUNC_DEFROST_REAR
+        "steering_heat" -> FUNC_STEERING_WHEEL_HEAT
+        else -> funcOf(ctx, key)
+    }
+
+    /** 方向盘等状态按全局区观测；不改变方向盘写入的配置区域。 */
+    internal fun observationZoneOf(ctx: Context, key: String): Int = when (key) {
+        "defrost_front", "defrost_rear", "steering_heat" -> ZONE_GLOBAL
+        else -> zoneOf(ctx, key)
+    }
+
     fun save(ctx: Context, key: String, func: Int, zone: Int) {
         Prefs.sp(ctx).edit()
             .putInt("ch_func_$key", func)

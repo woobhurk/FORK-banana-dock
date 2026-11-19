@@ -65,12 +65,12 @@ internal class VehicleRefreshQueue {
         }
     }
 
-    /** 将已到期限且尚未排队或执行的分组加入待执行位集合。 */
-    fun poll(nowMs: Long) {
+    /** 将指定范围内已到期且尚未排队或执行的分组加入待执行集合。 */
+    fun poll(nowMs: Long, groups: Int = -1) {
         var ordinal = 0
         while (ordinal < GROUPS.size) {
             val bit = 1 shl ordinal
-            if (runningOrdinal != ordinal && queuedMask and bit == 0 && nowMs >= dueAtMs[ordinal]) {
+            if (groups and bit != 0 && runningOrdinal != ordinal && queuedMask and bit == 0 && nowMs >= dueAtMs[ordinal]) {
                 queuedMask = queuedMask or bit
             }
             ordinal++
