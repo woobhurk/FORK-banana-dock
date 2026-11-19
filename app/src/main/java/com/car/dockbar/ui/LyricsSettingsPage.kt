@@ -350,14 +350,22 @@ internal class LyricsSettingsPage(activity: MainActivity) : SettingsPage(activit
         val page = column()
         root.addView(page, params())
         heading(page, "歌词悬浮窗", "管理歌词窗口、显示效果与在线歌词来源")
-        var section = card(page, "窗口与运行")
+        val columns = row()
+        page.addView(columns, params())
+        val left = column()
+        val right = column()
+        columns.addView(left, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.51f))
+        columns.addView(right, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+            marginStart = dp(22)
+        })
+        var section = card(left, "窗口与运行")
         children.drop(1).forEach { view ->
             when {
                 view.id == appearanceHeadingId -> {
-                    section = card(page, "显示效果", "调整滑杆即可生效")
+                    section = card(right, "显示效果", "调整滑杆即可生效")
                 }
                 view.id == onlineRowId -> {
-                    section = card(page, "歌词来源", "允许联网后可自动查找当前歌曲的歌词")
+                    section = card(left, "歌词来源", "允许联网后可自动查找当前歌曲的歌词")
                     add(section, view)
                 }
                 else -> add(section, view)
