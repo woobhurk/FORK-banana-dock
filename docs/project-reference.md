@@ -169,6 +169,7 @@
 ### 5.1 当前模块关系
 
 - 音乐卡通过 `MediaBridge` 获取活跃媒体会话，通知使用权可作为媒体信息的补充来源。
+- 音乐卡歌名和歌手各一行。文字未超出宽度时静止显示；超出时在卡片内左右来回滚动，不再用末尾省略号截断。实现位于 `ui/DockItemViews.kt` 的 `DockMusicView`。
 - 歌词使用独立的 `LyricMonitor`、`LyricOverlayService` 和 `LyricWindows`，与 Dock 音乐卡的控制动作解耦。
 - 歌词来源依次可包括广播/MediaSession 自带字段、本地 `.lrc`、联网服务和手动导入/粘贴；切歌会清理旧歌词，进度归零会延迟重新抓取。
 - 歌词窗口支持行数、字号、颜色、透明度、尺寸、偏移、锁定穿透、开机自启和来源配置；详细 UI 以 `LyricsSettingsPage.kt` 当前实现为准。

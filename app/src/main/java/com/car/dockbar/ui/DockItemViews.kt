@@ -1,10 +1,12 @@
 package com.car.dockbar.ui
 
+import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.Color
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
+import android.view.animation.LinearInterpolator
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -320,7 +322,8 @@ class DockValueView @JvmOverloads constructor(
 }
 
 /**
- * 音乐信息卡片：封面 + 歌名 + 歌手（仅 2 行文字）+ 播放/暂停
+ * 音乐信息卡片：封面 + 歌名 + 歌手（仅 2 行文字）+ 播放/暂停。
+ * 歌名和歌手放得下时静止显示，超出宽度时在卡片内左右来回滚动。
  */
 class DockMusicView @JvmOverloads constructor(
     context: Context,
@@ -331,8 +334,8 @@ class DockMusicView @JvmOverloads constructor(
 
     val album = ImageView(context)
     val noteOverlay = ImageView(context)
-    val tvTitle = TextView(context)
-    val tvArtist = TextView(context)
+    val tvTitle: TextView = OverflowTextView(context)
+    val tvArtist: TextView = OverflowTextView(context)
 
     /** ★ v3.13.11：当前生效的字号缓存（避免每次 onMeasure 都 setTextSize 触发 requestLayout 死循环） */
     private var curTitlePx = -1f
@@ -388,15 +391,11 @@ class DockMusicView @JvmOverloads constructor(
         tvTitle.setTextSize(TypedValue.COMPLEX_UNIT_PX, 14f * textScale)
         tvTitle.setTextColor(DockIconView.fgColor)
         tvTitle.typeface = AppFont.bold(context)
-        tvTitle.maxLines = 1
-        tvTitle.ellipsize = android.text.TextUtils.TruncateAt.END
         tvTitle.text = ""
 
         tvArtist.includeFontPadding = false
         tvArtist.setTextSize(TypedValue.COMPLEX_UNIT_PX, 11f * textScale)
         tvArtist.setTextColor(DockIconView.fgColorDim)
-        tvArtist.maxLines = 1
-        tvArtist.ellipsize = android.text.TextUtils.TruncateAt.END
         tvArtist.text = ""
 
         textCol.addView(tvTitle, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
@@ -461,8 +460,9 @@ class DockMusicView @JvmOverloads constructor(
     fun renderEmpty() {
         album.visibility = View.GONE
         noteOverlay.visibility = View.VISIBLE
-        tvTitle.text = "暂无播放"
-        tvArtist.text = "点此打开播放器"
+        // 其它 Dock 状态变化也会重绑音乐卡。文字没变时不要 setText，否则滚动会被拉回开头。
+        setTextIfChanged(tvTitle, "暂无播放")
+        setTextIfChanged(tvArtist, "点此打开播放器")
         btnPlay.visibility = View.INVISIBLE
         btnNext.visibility = View.INVISIBLE
     }
@@ -507,11 +507,149 @@ class DockMusicView @JvmOverloads constructor(
             album.visibility = View.GONE
             noteOverlay.visibility = View.VISIBLE
         }
-        tvTitle.text = title.ifBlank { "未知曲目" }
-        tvArtist.text = artist.ifBlank { "—" }
+        setTextIfChanged(tvTitle, title.ifBlank { "未知曲目" })
+        setTextIfChanged(tvArtist, artist.ifBlank { "—" })
         btnPlay.visibility = View.VISIBLE
         btnNext.visibility = View.VISIBLE
         btnPlay.setIcon(if (playing) R.drawable.ic_pause else R.drawable.ic_play)
         btnPlay.contentDescription = if (playing) "暂停" else "播放"
+    }
+
+    private fun setTextIfChanged(view: TextView, value: String) {
+        if (view.text?.toString() != value) view.text = value
+    }
+}
+
+/**
+ * 单行文字超出自身宽度时，在可视区域内左右来回滚动；未超出则静止。
+ * 两端各停一会，方便看清开头和结尾。
+ */
+private class OverflowTextView(context: Context) : TextView(context) {
+
+    private var animator: ValueAnimator? = null
+    private var scrollKey = ""
+    private var overflow = 0
+    private var shown = false
+    private var syncPosted = false
+
+    private val syncRunnable = Runnable {
+        syncPosted = false
+        syncScroll()
+    }
+
+    init {
+        setSingleLine(true)
+        ellipsize = null
+        gravity = Gravity.LEFT or Gravity.CENTER_VERTICAL
+        isHorizontalFadingEdgeEnabled = true
+        setFadingEdgeLength(16)
+    }
+
+    override fun onTextChanged(text: CharSequence?, start: Int, lengthBefore: Int, lengthAfter: Int) {
+        super.onTextChanged(text, start, lengthBefore, lengthAfter)
+        resetScroll()
+        requestSync()
+    }
+
+    override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
+        super.onLayout(changed, left, top, right, bottom)
+        if (shown) requestSync()
+    }
+
+    override fun onVisibilityAggregated(isVisible: Boolean) {
+        super.onVisibilityAggregated(isVisible)
+        shown = isVisible
+        if (isVisible) requestSync() else resetScroll()
+    }
+
+    override fun onDetachedFromWindow() {
+        shown = false
+        removeCallbacks(syncRunnable)
+        syncPosted = false
+        resetScroll()
+        super.onDetachedFromWindow()
+    }
+
+    override fun getLeftFadingEdgeStrength(): Float = if (scrollX > 1) 1f else 0f
+
+    override fun getRightFadingEdgeStrength(): Float = if (overflow - scrollX > 1) 1f else 0f
+
+    private fun requestSync() {
+        if (syncPosted) return
+        syncPosted = true
+        post(syncRunnable)
+    }
+
+    private fun resetScroll() {
+        animator?.cancel()
+        animator = null
+        scrollKey = ""
+        overflow = 0
+        if (scrollX != 0) scrollTo(0, 0)
+    }
+
+    private fun syncScroll() {
+        if (!shown || !isAttachedToWindow) {
+            resetScroll()
+            return
+        }
+        val nextOverflow = overflowPx()
+        val key = "${text}|${textSize}|$width|$nextOverflow"
+        if (key == scrollKey && (nextOverflow <= 1 || animator?.isRunning == true)) return
+        animator?.cancel()
+        animator = null
+        scrollKey = key
+        overflow = nextOverflow.coerceAtLeast(0)
+        if (scrollX != 0) scrollTo(0, 0)
+        if (overflow <= 1) return
+        val distance = overflow
+        val pxPerSec = 30f * resources.displayMetrics.density.coerceAtLeast(1f)
+        val travelMs = (distance / pxPerSec * 1000f).toLong().coerceIn(1400L, 8000L)
+        val pauseMs = 900L
+        val duration = travelMs * 2 + pauseMs * 2
+        val pause = pauseMs.toFloat() / duration
+        val move = travelMs.toFloat() / duration
+        animator = ValueAnimator.ofFloat(0f, 1f).apply {
+            this.duration = duration
+            repeatCount = ValueAnimator.INFINITE
+            repeatMode = ValueAnimator.RESTART
+            interpolator = LinearInterpolator()
+            addUpdateListener { anim ->
+                val pos = pingPong(anim.animatedFraction, pause, move)
+                val x = (distance * pos).roundToInt()
+                if (scrollX != x) scrollTo(x, 0)
+            }
+            start()
+        }
+    }
+
+    private fun overflowPx(): Int {
+        val avail = width - compoundPaddingLeft - compoundPaddingRight
+        if (avail <= 0) return 0
+        val shownText = visibleText()
+        if (shownText.isEmpty()) return 0
+        var textWidth = paint.measureText(shownText, 0, shownText.length)
+        val laid = layout
+        if (laid != null && laid.lineCount > 0 && laid.text.contentEquals(shownText)) {
+            textWidth = maxOf(textWidth, laid.getLineWidth(0))
+        }
+        return (textWidth - avail).roundToInt()
+    }
+
+    private fun visibleText(): CharSequence {
+        val raw = text ?: return ""
+        return transformationMethod?.getTransformation(raw, this) ?: raw
+    }
+
+    /** [t] 为 0..1 的整段进度：停在开头、滚到末尾、停住、再滚回开头。 */
+    private fun pingPong(t: Float, pause: Float, move: Float): Float {
+        val back = pause + move + pause
+        val pos = when {
+            t < pause -> 0f
+            t < pause + move -> (t - pause) / move
+            t < back -> 1f
+            else -> 1f - (t - back) / move
+        }
+        return pos.coerceIn(0f, 1f)
     }
 }
