@@ -22,6 +22,7 @@ import com.car.dockbar.App
 import com.car.dockbar.R
 import com.car.dockbar.config.VehicleChannel
 import com.car.dockbar.config.VehicleChannels
+import com.car.dockbar.media.VolumeEventValidation
 import com.car.dockbar.util.CrashHandler
 import com.car.dockbar.util.LogUploader
 import com.car.dockbar.util.Logx
@@ -97,6 +98,7 @@ internal class LogsSettingsPage(activity: MainActivity) :
         addLogUploadSection()
         addHvacSubscriptionAction()
         addHvacValidationActions()
+        addVolumeValidationActions()
         addDiagnosticExportAction()
 
         Logx.addListener(logListener)
@@ -438,11 +440,34 @@ internal class LogsSettingsPage(activity: MainActivity) :
             VehicleController.stopHvacValidation()
             toastOnce("车控验证已停止，可查看报告")
         })
-        root.addView(smallBtn("查看车控验证结果") { showHvacValidationReport() })
+        root.addView(smallBtn("查看车控验证结果") {
+            showValidationReport("车控验证报告", "HVAC_TEST", HvacDiagnostics.report())
+        })
     }
 
-    private fun showHvacValidationReport() {
-        val report = HvacDiagnostics.report()
+    private fun addVolumeValidationActions() {
+        root.addView(smallBtn("音量事件验证（2分钟）") {
+            AlertDialog.Builder(activity)
+                .setTitle("开启2分钟音量事件验证")
+                .setMessage("请停车后使用原车音量面板逐路调节媒体、导航、电话和语音。切页不会结束验证。" +
+                    "期间 Dock 会尝试按事件更新音量，同时保留定时回读对照；不自动写音量、不改变日常设置。" +
+                    "操作完回来点「查看音量验证结果」。")
+                .setPositiveButton("开始验证") { _, _ ->
+                    toastOnce(if (VolumeEventValidation.start(this)) "已开始音量验证，请调节原车音量"
+                        else "音量广播注册失败，继续定时回读对照")
+                }
+                .setNegativeButton("取消", null)
+                .show()
+        })
+        root.addView(smallBtn("停止音量事件验证") {
+            toastOnce(if (VolumeEventValidation.stop()) "音量验证已停止，可查看报告" else "当前没有运行中的音量验证")
+        })
+        root.addView(smallBtn("查看音量验证结果") {
+            showValidationReport("音量验证报告", "VOLUME_TEST", VolumeEventValidation.report())
+        })
+    }
+
+    private fun showValidationReport(name: String, tag: String, report: String) {
         val content = TextView(this).apply {
             text = report
             textSize = 13f
@@ -450,13 +475,13 @@ internal class LogsSettingsPage(activity: MainActivity) :
             setPadding(dp(16), dp(12), dp(16), dp(12))
         }
         AlertDialog.Builder(activity)
-            .setTitle("车控验证报告（HVAC_TEST）")
+            .setTitle("$name（$tag）")
             .setView(ScrollView(this).apply { addView(content) })
             .setPositiveButton("关闭", null)
             .setNeutralButton("复制报告") { _, _ ->
                 val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                clipboard.setPrimaryClip(ClipData.newPlainText("HVAC_TEST", report))
-                toastOnce("已复制车控验证报告")
+                clipboard.setPrimaryClip(ClipData.newPlainText(tag, report))
+                toastOnce("已复制$name")
             }
             .show()
     }

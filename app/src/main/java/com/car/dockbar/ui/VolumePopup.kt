@@ -6,6 +6,7 @@ import android.graphics.Paint
 import android.graphics.RectF
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -16,6 +17,7 @@ import android.widget.ImageView
 import androidx.core.content.ContextCompat
 import com.car.dockbar.R
 import com.car.dockbar.media.CabinVolume
+import com.car.dockbar.media.VolumeEventValidation
 import com.car.dockbar.util.Logx
 import com.car.dockbar.util.Prefs
 
@@ -39,6 +41,12 @@ class VolumePopup(private val ctx: Context) {
     }
 
     private val bars = LinkedHashMap<CabinVolume.Channel, LevelBar>()
+    private val validationListener: (CabinVolume.Channel, CabinVolume.Level, Long) -> Unit = { channel, level, sampledAt ->
+        val bar = bars[channel]
+        if (bar != null && !bar.dragging && sampledAt >= bar.lastUpdateAt) {
+            bar.applyLevel(level, sampledAt)
+        }
+    }
 
     var onDismissed: (() -> Unit)? = null
 
@@ -63,6 +71,7 @@ class VolumePopup(private val ctx: Context) {
     fun hide() {
         main.removeCallbacks(dismissRunnable)
         main.removeCallbacks(refreshRunnable)
+        VolumeEventValidation.removeListener(validationListener)
         val box = content ?: return
         box.animate().alpha(0f).setDuration(180L).withEndAction {
             runCatching { wm?.removeViewImmediate(box) }
@@ -75,6 +84,7 @@ class VolumePopup(private val ctx: Context) {
     fun destroy() {
         main.removeCallbacks(dismissRunnable)
         main.removeCallbacks(refreshRunnable)
+        VolumeEventValidation.removeListener(validationListener)
         val box = content
         content = null
         if (box != null) runCatching { wm?.removeViewImmediate(box) }
@@ -107,10 +117,7 @@ class VolumePopup(private val ctx: Context) {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
         }
-        row.addView(column(CabinVolume.MEDIA), colParams())
-        row.addView(column(CabinVolume.NAVI), colParams())
-        row.addView(column(CabinVolume.PHONE), colParams())
-        row.addView(column(CabinVolume.VOICE), colParams())
+        CabinVolume.channels.forEach { row.addView(column(it), colParams()) }
         card.addView(row)
 
         val p = DockPopupChrome.anchoredParams(ctx, anchor, card)
@@ -123,6 +130,7 @@ class VolumePopup(private val ctx: Context) {
         main.postDelayed(refreshRunnable, 500L)
         resetTimer()
         Logx.d("音量面板：显示（媒体 group=0，导航 group=1，电话 group=2，语音 group=3）")
+        VolumeEventValidation.addListener(validationListener)
     }
 
     private fun column(channel: CabinVolume.Channel): LinearLayout {
@@ -147,6 +155,7 @@ class VolumePopup(private val ctx: Context) {
         val bar = LevelBar(ctx)
         bar.onSeek = { shown ->
             bar.value = CabinVolume.write(ctx, channel, shown)
+            bar.lastUpdateAt = SystemClock.elapsedRealtimeNanos()
             resetTimer()
         }
         bars[channel] = bar
@@ -187,9 +196,8 @@ class VolumePopup(private val ctx: Context) {
     private fun render() {
         for ((channel, bar) in bars) {
             if (bar.dragging) continue
-            val level = CabinVolume.read(ctx, channel)
-            bar.max = level.max
-            bar.value = level.value
+            val sampledAt = SystemClock.elapsedRealtimeNanos()
+            bar.applyLevel(CabinVolume.read(ctx, channel), sampledAt)
         }
     }
 
@@ -236,6 +244,13 @@ class VolumePopup(private val ctx: Context) {
     private inner class LevelBar(context: Context) : View(context) {
         var onSeek: ((Int) -> Unit)? = null
         var dragging = false
+        var lastUpdateAt = Long.MIN_VALUE
+
+        fun applyLevel(level: CabinVolume.Level, sampledAt: Long) {
+            lastUpdateAt = sampledAt
+            if (max != level.max) max = level.max
+            if (value != level.value) value = level.value
+        }
 
         init {
             isClickable = true
