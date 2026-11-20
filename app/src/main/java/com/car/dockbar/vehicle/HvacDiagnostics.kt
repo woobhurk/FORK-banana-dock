@@ -58,7 +58,7 @@ internal object HvacDiagnostics {
     private data class Session(
         val mode: HvacValidationMode, val start: Long, val channels: List<Channel>,
         val registrations: MutableList<String> = mutableListOf(), var end: Long? = null,
-        var reason: String = "进行中"
+        var reason: String = "进行中", var lastAcMaxWrite: String? = null
     )
     private var session: Session? = null
     private var completedReport: String? = null
@@ -145,6 +145,15 @@ internal object HvacDiagnostics {
         emit(line)
     }
 
+    fun acMaxWrite(detail: String, matchesEpoch: () -> Boolean) {
+        val line = "AC_MAX_WRITE $detail"
+        synchronized(lock) {
+            val current = session
+            if (current?.mode == HvacValidationMode.AC_MAX && matchesEpoch()) current.lastAcMaxWrite = line
+        }
+        emit(line)
+    }
+
     fun finish(reason: String) {
         val line = synchronized(lock) {
             val current = session ?: return
@@ -187,6 +196,7 @@ internal object HvacDiagnostics {
             appendLine("  EVENT收到=${ch.events} 有效且zone匹配=${ch.validEvents} 状态变化=${ch.changedEvents}；业务采样READ总数=${ch.reads} 有效=${ch.validReads}")
             if (ch.key == AC_MAX_VALIDATION_KEY) {
                 appendLine("  最近有效状态：读回=${acMaxText(ch.lastAcMaxRead)}；事件=${acMaxText(ch.lastAcMaxEvent)}")
+                appendLine("  写入记录：${current.lastAcMaxWrite ?: "未收到原厂 MAX A/C 试写请求"}")
             }
             appendLine("  最后观测=${ch.last}")
             appendLine("  最近实际调用=${HvacCommands.describeLastWrite(ch.fid, ch.zone, current.start)}")

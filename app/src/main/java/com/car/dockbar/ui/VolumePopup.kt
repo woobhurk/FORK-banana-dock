@@ -17,7 +17,7 @@ import android.widget.ImageView
 import androidx.core.content.ContextCompat
 import com.car.dockbar.R
 import com.car.dockbar.media.CabinVolume
-import com.car.dockbar.media.VolumeEventValidation
+import com.car.dockbar.media.VolumeEvents
 import com.car.dockbar.util.Logx
 import com.car.dockbar.util.Prefs
 
@@ -41,7 +41,7 @@ class VolumePopup(private val ctx: Context) {
     }
 
     private val bars = LinkedHashMap<CabinVolume.Channel, LevelBar>()
-    private val validationListener: (CabinVolume.Channel, CabinVolume.Level, Long) -> Unit = { channel, level, sampledAt ->
+    private val volumeListener: (CabinVolume.Channel, CabinVolume.Level, Long) -> Unit = { channel, level, sampledAt ->
         val bar = bars[channel]
         if (bar != null && !bar.dragging && sampledAt >= bar.lastUpdateAt) {
             bar.applyLevel(level, sampledAt)
@@ -71,7 +71,7 @@ class VolumePopup(private val ctx: Context) {
     fun hide() {
         main.removeCallbacks(dismissRunnable)
         main.removeCallbacks(refreshRunnable)
-        VolumeEventValidation.removeListener(validationListener)
+        VolumeEvents.removeListener(volumeListener)
         val box = content ?: return
         box.animate().alpha(0f).setDuration(180L).withEndAction {
             runCatching { wm?.removeViewImmediate(box) }
@@ -84,7 +84,7 @@ class VolumePopup(private val ctx: Context) {
     fun destroy() {
         main.removeCallbacks(dismissRunnable)
         main.removeCallbacks(refreshRunnable)
-        VolumeEventValidation.removeListener(validationListener)
+        VolumeEvents.removeListener(volumeListener)
         val box = content
         content = null
         if (box != null) runCatching { wm?.removeViewImmediate(box) }
@@ -130,7 +130,7 @@ class VolumePopup(private val ctx: Context) {
         main.postDelayed(refreshRunnable, 500L)
         resetTimer()
         Logx.d("音量面板：显示（媒体 group=0，导航 group=1，电话 group=2，语音 group=3）")
-        VolumeEventValidation.addListener(validationListener)
+        VolumeEvents.addListener(volumeListener)
     }
 
     private fun column(channel: CabinVolume.Channel): LinearLayout {

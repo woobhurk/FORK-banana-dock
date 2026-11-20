@@ -22,7 +22,6 @@ import com.car.dockbar.App
 import com.car.dockbar.R
 import com.car.dockbar.config.VehicleChannel
 import com.car.dockbar.config.VehicleChannels
-import com.car.dockbar.media.VolumeEventValidation
 import com.car.dockbar.util.CrashHandler
 import com.car.dockbar.util.LogUploader
 import com.car.dockbar.util.Logx
@@ -98,7 +97,6 @@ internal class LogsSettingsPage(activity: MainActivity) :
         addLogUploadSection()
         addHvacSubscriptionAction()
         addHvacValidationActions()
-        addVolumeValidationActions()
         addDiagnosticExportAction()
 
         Logx.addListener(logListener)
@@ -396,7 +394,9 @@ internal class LogsSettingsPage(activity: MainActivity) :
                     val warning = when (mode.seatWriteMode) {
                         null -> when {
                             mode == HvacValidationMode.AC_MAX ->
-                                "请停车操作。开始时只读和订阅，厂商回调可能导致闪退。先在原车空调界面开关急速降温，回来看报告；需要验证写入时，再点「急速降温测试写入」。"
+                                "请停车操作。开始时只读和订阅，厂商回调可能导致闪退。先在原车空调界面开关并确认读回。" +
+                                    "再保持原车 MAX A/C 关闭，验证窗口内长按 Dock 主驾温度并点击「MAX 试开」，或在本页点「急速降温测试写入」。" +
+                                    "未启动验证时，Dock 的 MAX 仍是原有的组合预设。"
                             mode.comfortReadOnly -> "只临时加入所选通道的订阅，不自动写入或更改日常配置。厂商回调可能导致闪退。请停车后在原车界面改变状态，并查看报告的有效 EVENT 是否增加。"
                             mode == HvacValidationMode.TEMPERATURE ->
                                 "温度模式会额外触发浮点 Customize/native 读取和事件，可能使进程直接闪退。"
@@ -420,17 +420,19 @@ internal class LogsSettingsPage(activity: MainActivity) :
         root.addView(smallBtn("急速降温测试写入") {
             val epoch = VehicleController.acMaxValidationEpoch()
             if (epoch == null) {
+                Logx.w("HVAC_TEST AC_MAX_WRITE stage=SKIPPED entry=SETTINGS 没有有效验证窗口，未调用厂商接口")
                 toastOnce("请先开始「急速降温：原厂 MAX A/C」验证")
                 return@smallBtn
             }
             fun submit(on: Boolean) {
-                val queued = VehicleController.writeAcMaxForValidation(this, epoch, on)
+                val queued = VehicleController.writeAcMaxForValidation(this, epoch, on, entry = "SETTINGS")
                 toastOnce(if (queued) "已排队，请观察原车界面并查看验证报告"
                     else "未提交：验证已结束或车控写入不可用，请查看日志")
             }
             AlertDialog.Builder(activity)
                 .setTitle("急速降温测试写入")
-                .setMessage("请停车操作。只向原厂 MAX A/C 写入开或关，不另外写风量和温度。需要启用车控写入。停止或到期不会撤销已发出的命令。")
+                .setMessage("请停车操作并启用车控写入。只向原厂 MAX A/C 写入开或关，不另外写风量和温度。" +
+                    "建议从相反状态开始，并核对原车界面和写入报告。停止或到期不会撤销已发出的命令。")
                 .setPositiveButton("测试开启") { _, _ -> submit(true) }
                 .setNeutralButton("测试关闭") { _, _ -> submit(false) }
                 .setNegativeButton("取消", null)
@@ -442,28 +444,6 @@ internal class LogsSettingsPage(activity: MainActivity) :
         })
         root.addView(smallBtn("查看车控验证结果") {
             showValidationReport("车控验证报告", "HVAC_TEST", HvacDiagnostics.report())
-        })
-    }
-
-    private fun addVolumeValidationActions() {
-        root.addView(smallBtn("音量事件验证（2分钟）") {
-            AlertDialog.Builder(activity)
-                .setTitle("开启2分钟音量事件验证")
-                .setMessage("请停车后使用原车音量面板逐路调节媒体、导航、电话和语音。切页不会结束验证。" +
-                    "期间 Dock 会尝试按事件更新音量，同时保留定时回读对照；不自动写音量、不改变日常设置。" +
-                    "操作完回来点「查看音量验证结果」。")
-                .setPositiveButton("开始验证") { _, _ ->
-                    toastOnce(if (VolumeEventValidation.start(this)) "已开始音量验证，请调节原车音量"
-                        else "音量广播注册失败，继续定时回读对照")
-                }
-                .setNegativeButton("取消", null)
-                .show()
-        })
-        root.addView(smallBtn("停止音量事件验证") {
-            toastOnce(if (VolumeEventValidation.stop()) "音量验证已停止，可查看报告" else "当前没有运行中的音量验证")
-        })
-        root.addView(smallBtn("查看音量验证结果") {
-            showValidationReport("音量验证报告", "VOLUME_TEST", VolumeEventValidation.report())
         })
     }
 

@@ -40,6 +40,7 @@ import com.car.dockbar.R
 import com.car.dockbar.config.VehicleChannels
 import com.car.dockbar.media.CabinVolume
 import com.car.dockbar.media.MediaBridge
+import com.car.dockbar.media.VolumeEvents
 import com.car.dockbar.model.DockEntries
 import com.car.dockbar.model.DockEntry
 import com.car.dockbar.ui.state.DockState
@@ -233,10 +234,11 @@ class DockOverlayService : Service() {
         mediaTaskGeneration = null
         nextMediaRefreshAt = SystemClock.uptimeMillis() + MEDIA_REFRESH_INTERVAL_MS
         workThread = HandlerThread("dock-vehicle").apply { start() }
-        work = Handler(workThread!!.looper)
+        work = Handler(workThread!!.looper).also { VolumeEvents.start(this, it) }
     }
 
     private fun stopWork() {
+        VolumeEvents.stop()
         workGeneration++
         mediaTaskGeneration = null
         work?.removeCallbacksAndMessages(null)

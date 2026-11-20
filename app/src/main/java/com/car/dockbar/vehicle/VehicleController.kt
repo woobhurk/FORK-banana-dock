@@ -502,11 +502,35 @@ object VehicleController {
     internal fun acMaxValidationEpoch(): Long? = validationEpoch.takeIf(::isAcMaxValidation)
 
     /** 只写原厂 MAX 开关；不修改温度、风量或 Dock 显示目标。 */
-    internal fun writeAcMaxForValidation(ctx: Context, epoch: Long, on: Boolean): Boolean {
-        if (!isAcMaxValidation(epoch)) return false
+    internal fun writeAcMaxForValidation(ctx: Context, epoch: Long, on: Boolean, entry: String): Boolean {
         val value = if (on) 1 else 0
-        return HvacCommands.submit(ctx, "ac_max_validation target=$value") {
-            VehicleBridge.writeInt(VehicleChannels.FUNC_AC_MAX, ZONE_GLOBAL, value) { isAcMaxValidation(epoch) }
+        fun record(stage: String, detail: String = "") {
+            HvacDiagnostics.acMaxWrite("stage=$stage entry=$entry epoch=$epoch target=$value $detail".trimEnd()) {
+                validationEpoch == epoch
+            }
+        }
+        record("REQUEST")
+        if (!isAcMaxValidation(epoch)) {
+            record("SKIPPED", "验证窗口已失效，未调用厂商接口")
+            return false
+        }
+        val connection = VehicleBridge.connectionGeneration
+        return HvacCommands.submit(ctx, "ac_max_validation entry=$entry target=$value", onSkipped = {
+            record("ABORT", "提交或执行未完成，原因见 HVAC_WRITE / HVAC_TRACE")
+        }) {
+            val accepted = VehicleBridge.writeInt(VehicleChannels.FUNC_AC_MAX, ZONE_GLOBAL, value) {
+                isAcMaxValidation(epoch)
+            }
+            if (HvacCommands.operationNativeWrites() == 0) {
+                record("SKIPPED", "未调用厂商接口，原因见 HVAC_WRITE / HVAC_TRACE")
+            } else {
+                record("RETURN", "accepted=$accepted；生效看事件、读回和原车状态")
+                onMain {
+                    if (isAcMaxValidation(epoch) && connection == VehicleBridge.connectionGeneration) {
+                        requestRefresh(ctx, CLIMATE_GROUP)
+                    }
+                }
+            }
         }
     }
 

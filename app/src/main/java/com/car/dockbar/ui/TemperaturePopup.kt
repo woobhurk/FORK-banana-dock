@@ -15,6 +15,7 @@ import android.view.WindowManager
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.Toast
 import androidx.core.content.ContextCompat
 import com.car.dockbar.R
 import com.car.dockbar.util.Logx
@@ -277,10 +278,22 @@ class TemperaturePopup(
                 VehicleController.toggleDefrostRear(ctx)
                 resetTimer()
             }
+            val acMaxEpoch = VehicleController.acMaxValidationEpoch()
             val fastCool = funcBtn(
-                R.drawable.ic_popup_cool, "极速降温", "MAX", iconScale = ICON_SCALE_FAST_COOL
+                R.drawable.ic_popup_cool,
+                if (acMaxEpoch == null) "极速降温" else "原厂急速降温试开",
+                if (acMaxEpoch == null) "MAX" else "MAX 试开",
+                iconScale = ICON_SCALE_FAST_COOL
             ) {
-                VehicleController.fastCool(ctx)
+                // 按打开弹窗时展示的动作提交；试写过期时不能退回组合预设。
+                if (acMaxEpoch == null) {
+                    VehicleController.fastCool(ctx)
+                } else {
+                    val queued = VehicleController.writeAcMaxForValidation(ctx, acMaxEpoch, on = true, entry = "DOCK")
+                    val message = if (queued) "原厂 MAX A/C 试开已排队，请看原车和验证报告"
+                    else "原厂 MAX A/C 未提交，请检查验证窗口和车控写入状态"
+                    Toast.makeText(ctx, message, Toast.LENGTH_SHORT).show()
+                }
                 resetTimer()
             }
             val fastHeat = funcBtn(

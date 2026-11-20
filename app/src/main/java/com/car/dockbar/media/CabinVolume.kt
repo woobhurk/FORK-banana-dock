@@ -46,15 +46,15 @@ object CabinVolume {
 
     data class Level(val value: Int, val max: Int)
 
-    /** 验证使用真实流索引：失败和越界值不记作观测。 */
-    internal fun readForValidation(ctx: Context, channel: Channel): Level? = runCatching {
+    /** 事件回读失败或越界时不更新显示，等待既有轮询。 */
+    internal fun readEventLevel(ctx: Context, channel: Channel): Level? = runCatching {
         val manager = audio(ctx)
         val max = manager.getStreamMaxVolume(channel.stream)
         val value = manager.getStreamVolume(channel.stream)
-        if (max > 0 && value in 0..max) Level(value, max) else null
+        if (max > 0 && value in 0..max) Level(value.coerceAtLeast(channel.minValue), max) else null
     }.getOrNull()
 
-    internal fun publishValidationMedia(level: Level, sampledAt: Long) {
+    internal fun publishMediaEvent(level: Level, sampledAt: Long) {
         recordMediaLevel(level, null, sampledAt)
     }
 
@@ -112,7 +112,7 @@ object CabinVolume {
             if (expectedGeneration != null && expectedGeneration != mediaWriteGeneration) {
                 return@synchronized emptyList<(Int) -> Unit>()
             }
-            // 验证回读在后台完成，不能盖过更新的日常采样或本地调节。
+            // 后台事件回读不能盖过更新的日常采样或本地调节。
             if (sampledAt < mediaObservationAt) return@synchronized emptyList<(Int) -> Unit>()
             mediaObservationAt = sampledAt
             val changed = cachedMediaLevel?.value != level.value
