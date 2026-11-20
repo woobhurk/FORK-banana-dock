@@ -58,6 +58,7 @@
     <queries>
         <package android:name="com.geely.hvac" />
         <package android:name="com.geely.dockbar" />
+        <package android:name="com.geely.service.oneosapi" />
         <package android:name="com.android.launcher3" />
         <intent>
             <action android:name="android.intent.action.MAIN" />

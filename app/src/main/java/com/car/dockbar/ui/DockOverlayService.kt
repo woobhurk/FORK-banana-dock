@@ -6,6 +6,7 @@ import com.car.dockbar.dock.DockSnapshot
 import com.car.dockbar.dock.DockSnapshots
 import com.car.dockbar.dock.MountedEntry
 import com.car.dockbar.dock.DockHost
+import com.car.dockbar.dock.OriginalDockRequest
 import com.car.dockbar.dock.levelIcon
 
 import android.app.Notification
@@ -35,6 +36,7 @@ import android.view.ViewConfiguration
 import android.view.WindowManager
 import android.widget.FrameLayout
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import com.car.dockbar.App
 import com.car.dockbar.R
 import com.car.dockbar.config.VehicleChannels
@@ -84,6 +86,36 @@ class DockOverlayService : Service() {
         const val ACTION_ENTRIES_CHANGED = "com.car.dockbar.action.ENTRIES_CHANGED"
         /** 「打开时隐藏 Dock 的应用名单」改动后发这个广播，服务立刻按当前前台应用重算 */
         const val ACTION_APPS_CHANGED = "com.car.dockbar.action.APPS_CHANGED"
+        private const val ACTION_SELECT_DOCK = "com.car.dockbar.action.SELECT_DOCK"
+        private const val EXTRA_USE_ORIGINAL_DOCK = "use_original_dock"
+
+        // 设置页与服务同进程：切换中的状态不依赖某个 Activity 的生命周期。
+        private val dockSelectionListeners = mutableSetOf<() -> Unit>()
+        internal var dockSelectionPending = false
+            private set
+        internal var dockSelectionMessage: String? = null
+            private set
+
+        internal fun addDockSelectionListener(listener: () -> Unit) { dockSelectionListeners += listener }
+        internal fun removeDockSelectionListener(listener: () -> Unit) { dockSelectionListeners -= listener }
+
+        internal fun requestDockSelection(context: Context, useOriginal: Boolean) {
+            if (dockSelectionPending) return
+            publishDockSelection("正在请求切换…", pending = true)
+            val intent = Intent(context, DockOverlayService::class.java)
+                .setAction(ACTION_SELECT_DOCK)
+                .putExtra(EXTRA_USE_ORIGINAL_DOCK, useOriginal)
+            runCatching { ContextCompat.startForegroundService(context, intent) }.onFailure {
+                Logx.e("OEM_DOCK：无法启动切换", it)
+                publishDockSelection("无法启动 Dock 切换，未更改设置")
+            }
+        }
+
+        private fun publishDockSelection(message: String, pending: Boolean = false) {
+            dockSelectionPending = pending
+            dockSelectionMessage = message
+            for (listener in dockSelectionListeners) listener()
+        }
 
         /** ★ v1.4.71：当前是否因「打开时隐藏 Dock 名单」而隐藏（主界面状态栏用） */
         @Volatile
@@ -172,6 +204,7 @@ class DockOverlayService : Service() {
 
     private var receiver: BroadcastReceiver? = null
     private var running = false
+    private var originalDockRequest: OriginalDockRequest? = null
 
     // --- 自动反色（真实背景采样） ---
     private var contrastThread: HandlerThread? = null
@@ -285,6 +318,10 @@ class DockOverlayService : Service() {
         MediaBridge.addListener(mediaListener)
         LyricOverlayService.addStateListener(lyricStateListener)
         CabinVolume.addMediaShownListener(mediaLevelListener)
+    }
+
+    private fun startDockIfNeeded() {
+        if (running) return
 
         if (!canDrawOverlay()) {
             lastError = "没有悬浮窗权限（Settings.canDrawOverlays=false）"
@@ -370,25 +407,71 @@ class DockOverlayService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_STOP -> {
-                Logx.d("收到关闭指令")
-                // 用户主动关闭 = 正常退出，打标记让下次启动不要把这次当成闪退
-                LogUploader.markCleanExit(this)
-                teardown()
-                stopSelf()
+                stopDock()
                 return START_NOT_STICKY
             }
-            ACTION_RELOAD, ACTION_ENTRIES_CHANGED -> {
-                main.post { reload() }
+            ACTION_SELECT_DOCK -> {
+                selectDock(intent.getBooleanExtra(EXTRA_USE_ORIGINAL_DOCK, true), userInitiated = true)
+                return START_STICKY
             }
         }
-        if (!running && canDrawOverlay()) {
-            buildDock()
-            startWork()
-            work?.post { initVehicleAndMedia() }
-            main.postDelayed(ticker, TICK_INTERVAL_MS)
-            running = true
+        if (originalDockRequest != null) return START_STICKY
+        if (!Prefs.overlayEnabled(this)) {
+            stopDock()
+            return START_NOT_STICKY
+        }
+        if (!running) {
+            startDockIfNeeded()
+            // 已保存 Banana 模式时，重启后仅在本栏可用时发送一次隐藏请求。
+            if (!Prefs.useOriginalDock(this) && canHideOriginalDock()) selectDock(useOriginal = false)
+        } else if (intent?.action == ACTION_RELOAD || intent?.action == ACTION_ENTRIES_CHANGED) {
+            reload()
         }
         return START_STICKY
+    }
+
+    private fun canHideOriginalDock() = alive && attached && !hiddenByApp && canDrawOverlay()
+
+    private fun selectDock(useOriginal: Boolean, userInitiated: Boolean = false) {
+        if (originalDockRequest != null) {
+            reportDockSelection(userInitiated, "已有 Dock 切换请求在处理，请稍后重试", ok = false)
+            return
+        }
+        val bananaWasEnabled = Prefs.overlayEnabled(this)
+        if (!useOriginal) {
+            startDockIfNeeded()
+            if (!canHideOriginalDock()) {
+                reportDockSelection(userInitiated, "Banana Dock 当前不可见，未请求隐藏原厂 Dock", ok = false)
+                if (!bananaWasEnabled) stopDock()
+                return
+            }
+        }
+        val request = OriginalDockRequest(this, useOriginal, ::canHideOriginalDock) { error ->
+            originalDockRequest = null
+            if (error == null) {
+                Prefs.saveDockSelection(this, useOriginal)
+                if (useOriginal) stopDock()
+                val action = if (useOriginal) "显示" else "隐藏"
+                reportDockSelection(userInitiated, "已保存选择，已请求${action}原厂 Dock；实际显示请以屏幕为准。", ok = true)
+            } else {
+                if (!bananaWasEnabled) stopDock()
+                reportDockSelection(userInitiated, "$error，未更改设置。", ok = false)
+            }
+        }
+        originalDockRequest = request
+        request.start()
+    }
+
+    private fun reportDockSelection(userInitiated: Boolean, message: String, ok: Boolean) {
+        if (ok) Logx.d("OEM_DOCK：$message") else Logx.w("OEM_DOCK：$message")
+        if (userInitiated) publishDockSelection(message)
+    }
+
+    private fun stopDock() {
+        // 用户主动关闭或切回原厂，不计为闪退。
+        LogUploader.markCleanExit(this)
+        teardown()
+        stopSelf()
     }
 
     override fun onBind(intent: Intent): IBinder? = null
@@ -406,6 +489,12 @@ class DockOverlayService : Service() {
     }
 
     private fun teardown() {
+        originalDockRequest?.let {
+            it.close()
+            originalDockRequest = null
+            if (dockSelectionPending) publishDockSelection("Dock 服务已停止，切换结果未确认")
+        }
+        val wasRunning = running
         running = false
         isRunning = false
         alive = false
@@ -417,13 +506,15 @@ class DockOverlayService : Service() {
         MediaBridge.removeListener(mediaListener)
         LyricOverlayService.removeStateListener(lyricStateListener)
         CabinVolume.removeMediaShownListener(mediaLevelListener)
-        MediaBridge.stop()
+        if (wasRunning) MediaBridge.stop()
         runCatching {
             if (receiver != null) {
                 unregisterReceiver(receiver)
                 receiver = null
             }
         }
+        detachGestureStrip()
+        root?.animate()?.cancel()
         root?.let { runCatching { wm.removeViewImmediate(it) } }
         viewAttached = false
         root = null
@@ -463,6 +554,7 @@ class DockOverlayService : Service() {
     // =====================================================================
 
     private fun reload() {
+        if (!alive || !Prefs.overlayEnabled(this)) return
         Logx.d("重载 Dock 配置")
         val hadRoot = root != null
         stateMachine?.requestHide(HideReason.MANUAL)
@@ -611,7 +703,7 @@ class DockOverlayService : Service() {
         // ★ v1.4.71：按「打开时隐藏 Dock 的应用名单」决定显隐（需无障碍服务已在跑）
         attachForegroundTracking()
         // ★ v1.4.73：若一启动就处于隐藏态（前台应用在隐藏名单里），先挂上手势条
-        main.postDelayed({ if (!attached) attachGestureStrip() }, 800)
+        main.postDelayed({ if (stateMachine === sm && !attached) attachGestureStrip() }, 800)
     }
 
     /** 一次操作结束（点击抬手）：从现在开始按设定时长计时 */

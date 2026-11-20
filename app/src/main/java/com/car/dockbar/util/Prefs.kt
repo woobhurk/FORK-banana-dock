@@ -16,6 +16,15 @@ object Prefs {
     fun overlayEnabled(ctx: Context) = sp(ctx).getBoolean("overlay_enabled", true)
     fun setOverlayEnabled(ctx: Context, v: Boolean) = sp(ctx).edit().putBoolean("overlay_enabled", v).apply()
 
+    /** 未选择过时保留原厂显隐与 Banana 的原有启停设置；此值不是原厂状态读回。 */
+    fun useOriginalDock(ctx: Context) = sp(ctx).getBoolean("use_original_dock", true)
+
+    /** 收到原厂回执后同时保存选择和 Banana Dock 的启停，避免重启时状态不一致。 */
+    fun saveDockSelection(ctx: Context, useOriginal: Boolean) = sp(ctx).edit()
+        .putBoolean("use_original_dock", useOriginal)
+        .putBoolean("overlay_enabled", !useOriginal)
+        .apply()
+
     /** Dock 固定贴屏幕底部。保留旧键兼容，但不再提供顶部/底部切换。 */
     fun dockAtBottom(ctx: Context) = true
     fun setDockAtBottom(ctx: Context, v: Boolean) = sp(ctx).edit().putBoolean("dock_at_bottom", true).apply()

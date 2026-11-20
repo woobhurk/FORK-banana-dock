@@ -21,11 +21,24 @@ class FloatingDockSettingsPage(activity: MainActivity) : SettingsPage(activity, 
     override val root: LinearLayout get() = findViewById(R.id.cardOverlay)
     override fun buildLayout() { FloatingDockSettingsLayout(activity).rebuild() }
     override fun onServiceStateChanged() { updateStatus() }
+    override fun onShown() { refreshDockSwitches() }
+    override fun onDestroy() {
+        DockOverlayService.removeDockSelectionListener(refreshDockUi)
+        super.onDestroy()
+    }
     private lateinit var tvStatus: TextView
     private lateinit var tvOverlayPerm: TextView
     private lateinit var tvNotifPerm: TextView
     private lateinit var tvNotifHint: TextView
     private lateinit var tvBackend: TextView
+    private lateinit var bananaDockSwitch: SwitchCompat
+    private lateinit var originalDockSwitch: SwitchCompat
+    private lateinit var originalDockResult: TextView
+    private var updatingDockSwitches = false
+    private val refreshDockUi: () -> Unit = {
+        refreshDockSwitches()
+        updateStatus()
+    }
     private var notifWasOk = false
     override fun create() {
         tvStatus = findViewById(R.id.tvStatus)
@@ -33,17 +46,30 @@ class FloatingDockSettingsPage(activity: MainActivity) : SettingsPage(activity, 
         tvNotifPerm = findViewById(R.id.tvNotifPerm)
         tvNotifHint = findViewById(R.id.tvNotifHint)
         tvBackend = findViewById(R.id.tvBackend)
-        findViewById<SwitchCompat>(R.id.swEnabled).isChecked = Prefs.overlayEnabled(this)
+        bananaDockSwitch = findViewById(R.id.swEnabled)
+        originalDockSwitch = findViewById(R.id.swUseOriginalDock)
+        originalDockResult = findViewById(R.id.tvOriginalDockResult)
+        refreshDockSwitches()
         findViewById<SwitchCompat>(R.id.swSimulate).isChecked = Prefs.simulate(this)
         findViewById<EditText>(R.id.etWidth).setText(Prefs.dockWidthPx(this).toString())
         findViewById<EditText>(R.id.etHeight).setText(Prefs.dockHeightPx(this).toString())
         findViewById<EditText>(R.id.etMargin).setText(Prefs.dockMarginPx(this).toString())
         findViewById<EditText>(R.id.etScreenH).setText(Prefs.screenHeightPx(this).toString())
 
-        findViewById<SwitchCompat>(R.id.swEnabled).setOnCheckedChangeListener { _, checked ->
-            Prefs.setOverlayEnabled(this, checked)
-            if (checked) startService() else stopServiceNow()
+        bananaDockSwitch.setOnCheckedChangeListener { _, checked ->
+            if (updatingDockSwitches) return@setOnCheckedChangeListener
+            if (!checked && !Prefs.useOriginalDock(this)) {
+                // 替换模式下关闭 Banana Dock 前先请求恢复原厂栏。
+                DockOverlayService.requestDockSelection(this, useOriginal = true)
+            } else {
+                Prefs.setOverlayEnabled(this, checked)
+                if (checked) startService() else stopServiceNow()
+            }
         }
+        originalDockSwitch.setOnCheckedChangeListener { _, checked ->
+            if (!updatingDockSwitches) DockOverlayService.requestDockSelection(this, checked)
+        }
+        DockOverlayService.addDockSelectionListener(refreshDockUi)
 
         findViewById<Button>(R.id.btnApplyWindow).setOnClickListener {
             saveWindow()
@@ -76,6 +102,7 @@ class FloatingDockSettingsPage(activity: MainActivity) : SettingsPage(activity, 
         updateStatus()
     }
     override fun onResume() {
+        refreshDockSwitches()
         ensureServiceStarted()
         val notifOk = MediaBridge.hasPermission(this)
         if (notifOk && !notifWasOk) {
@@ -86,6 +113,17 @@ class FloatingDockSettingsPage(activity: MainActivity) : SettingsPage(activity, 
         updateStatus()
         main.postDelayed({ updateStatus(); ensureServiceStarted() }, 1500)
     }
+
+    private fun refreshDockSwitches() {
+        updatingDockSwitches = true
+        bananaDockSwitch.isChecked = Prefs.overlayEnabled(this)
+        originalDockSwitch.isChecked = Prefs.useOriginalDock(this)
+        bananaDockSwitch.isEnabled = !DockOverlayService.dockSelectionPending
+        originalDockSwitch.isEnabled = !DockOverlayService.dockSelectionPending
+        DockOverlayService.dockSelectionMessage?.let { originalDockResult.text = it }
+        updatingDockSwitches = false
+    }
+
     private fun saveWindow() {
         val w = findViewById<EditText>(R.id.etWidth).text.toString().trim().toIntOrNull() ?: 1920
         val h = findViewById<EditText>(R.id.etHeight).text.toString().trim().toIntOrNull() ?: 40
