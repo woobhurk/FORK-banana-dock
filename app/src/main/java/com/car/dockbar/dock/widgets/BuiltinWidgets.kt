@@ -25,7 +25,7 @@ import com.car.dockbar.ui.DockValueView
 import com.car.dockbar.ui.VolumeDockButton
 import com.car.dockbar.ui.FanDockButton
 import com.car.dockbar.util.Prefs
-import com.car.dockbar.vehicle.VehicleController.ValidationPower
+import com.car.dockbar.vehicle.VehicleController.PowerState
 
 private fun spec(
     builtin: Builtin,
@@ -337,14 +337,13 @@ private fun paintIcon(view: DockIconView, kind: BindKind, snapshot: DockSnapshot
             if (snapshot.recircInside) R.drawable.ic_ac_cycle_inner else R.drawable.ic_ac_cycle_outer
         )
         BindKind.AIR -> {
-            val power = snapshot.validationPower
-            val stopped = power == ValidationPower.OFF || (power == null && !snapshot.fanAuto && snapshot.fanLevel <= 0)
+            val power = snapshot.powerState
+            val stopped = power == PowerState.OFF
             view.setIcon(if (stopped) R.drawable.ic_blowing_stopped else airDirectionIcon(snapshot.airDirection))
             view.contentDescription = when (power) {
-                ValidationPower.ON -> "空调电源已开，短按关闭，长按调风向"
-                ValidationPower.OFF -> "空调电源已关，短按开启，长按调风向"
-                ValidationPower.UNKNOWN -> "空调电源状态未知，长按调风向"
-                null -> if (stopped) "空调风向，风量 0 档" else "空调风向"
+                PowerState.ON -> "空调电源已开，短按关闭，长按调风向"
+                PowerState.OFF -> "空调电源已关，短按开启，长按调风向"
+                PowerState.UNKNOWN -> "空调电源状态未知，短按不猜状态，长按调风向"
             }
         }
         BindKind.DEFROST_FRONT -> view.setActive(snapshot.defrostFront)

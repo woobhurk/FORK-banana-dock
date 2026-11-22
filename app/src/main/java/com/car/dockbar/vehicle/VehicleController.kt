@@ -359,20 +359,104 @@ object VehicleController {
         }
     }
 
-    // 临时验证会话不持久化；重启后仅恢复用户原有基础/温度监听。
+    // 临时验证会话不持久化；原厂电源状态同时服务日常风向手势和验证报告。
     @Volatile private var validationMode: HvacValidationMode? = null
     @Volatile private var validationEpoch = 0L
     @Volatile private var validationDeadlineAt = 0L
 
-    enum class ValidationPower { UNKNOWN, OFF, ON }
+    enum class PowerState { UNKNOWN, OFF, ON }
     internal enum class PowerTapResult { INACTIVE, UNAVAILABLE, UNKNOWN, WAITING, QUEUED }
 
-    // 只在本次验证使用真实状态，绝不把试写目标合并进车辆观测或常态配置。
+    // 只用同一连接和代际内的真实 0/1 观测，绝不把试写目标合并进车辆观测。
     private data class PowerObservation(val raw: Int, val epoch: Long, val connection: Long)
     @Volatile private var powerObservation: PowerObservation? = null
     private var powerWriteBasis: PowerObservation? = null
     private var powerWriteNeedsObservation = false
-    private var publishedValidationPower: ValidationPower? = null
+    private var publishedPowerState = PowerState.UNKNOWN
+
+    private fun isPowerOperationValid(ctx: Context, epoch: Long): Boolean =
+        epoch == validationEpoch && Prefs.vehicleApiEnabled(ctx) && !Prefs.simulate(ctx) &&
+            (validationMode == null || activeValidationMode() != null)
+
+    internal fun powerState(): PowerState = when (currentPowerObservation()?.raw) {
+        0 -> PowerState.OFF
+        1 -> PowerState.ON
+        else -> PowerState.UNKNOWN
+    }
+
+    private fun currentPowerObservation(): PowerObservation? = powerObservation?.takeIf {
+        it.epoch == validationEpoch && it.connection == VehicleBridge.connectionGeneration && VehicleBridge.isReady
+    }
+
+    private fun clearPowerObservation() {
+        powerObservation = null
+        clearPowerWrite()
+    }
+
+    private fun clearPowerWrite() {
+        powerWriteBasis = null
+        powerWriteNeedsObservation = false
+    }
+
+    private fun observePower(raw: Int, epoch: Long, connection: Long): Boolean {
+        if (powerWriteNeedsObservation) clearPowerWrite()
+        val previous = powerObservation
+        if (previous?.raw == raw && previous.epoch == epoch && previous.connection == connection) return false
+        powerObservation = PowerObservation(raw, epoch, connection)
+        return true
+    }
+    /** 风向短按只切换原厂总电源；未知状态不猜，不补写风量、风向、A/C 或 AUTO。 */
+    internal fun togglePower(ctx: Context): PowerTapResult {
+        if (Prefs.simulate(ctx)) return PowerTapResult.INACTIVE
+        val epoch = validationEpoch
+        fun record(detail: String) {
+            if (validationMode == HvacValidationMode.POWER) {
+                HvacDiagnostics.switchWrite(HvacValidationMode.POWER, "$detail entry=DOCK epoch=$epoch") {
+                    epoch == validationEpoch
+                }
+            }
+        }
+        if (!isPowerOperationValid(ctx, epoch) || !HvacCommands.canSubmit(ctx, "togglePower")) {
+            record("stage=SKIPPED reason=验证已结束或车控写入门禁拒绝")
+            return PowerTapResult.UNAVAILABLE
+        }
+        val observed = currentPowerObservation()
+        if (observed == null) {
+            record("stage=SKIPPED reason=电源状态未知")
+            return PowerTapResult.UNKNOWN
+        }
+        if (powerWriteBasis?.let { it.connection == observed.connection && it.epoch == epoch } == true) {
+            record("stage=SKIPPED reason=前次写入仍待确认")
+            return PowerTapResult.WAITING
+        }
+        val target = HvacChannels.powerToggleTarget(observed.raw) ?: run {
+            record("stage=SKIPPED reason=电源状态不是合法裸值")
+            return PowerTapResult.UNKNOWN
+        }
+        powerWriteBasis = observed
+        powerWriteNeedsObservation = false
+        record("stage=REQUEST target=$target")
+        val queued = HvacCommands.submit(ctx, "hvac_power entry=DOCK target=$target", onSkipped = {
+            record("stage=ABORT target=$target reason=未完成，见车控日志")
+            onMain { if (powerWriteBasis === observed) clearPowerWrite() }
+        }) {
+            val accepted = VehicleBridge.writeInt(VehicleChannels.FUNC_POWER, ZONE_GLOBAL, target) {
+                isPowerOperationValid(ctx, epoch) && currentPowerObservation() === observed
+            }
+            val sent = HvacCommands.operationNativeWrites() != 0
+            if (sent) record("stage=RETURN target=$target accepted=$accepted")
+            else record("stage=SKIPPED target=$target reason=会话或观测已变化，或写入门禁拒绝")
+            onMain {
+                if (powerWriteBasis !== observed) return@onMain
+                if (sent && isPowerOperationValid(ctx, epoch) && observed.connection == VehicleBridge.connectionGeneration) {
+                    // 回调可能先于厂商返回；若没有更新的状态，等下一次有效观测再接受短按。
+                    if (powerObservation === observed) powerWriteNeedsObservation = true else clearPowerWrite()
+                    requestRefresh(ctx, CLIMATE_GROUP)
+                } else clearPowerWrite()
+            }
+        }
+        return if (queued) PowerTapResult.QUEUED else PowerTapResult.UNAVAILABLE
+    }
 
     @Volatile private var watcherConfiguration = 0L
     @Volatile private var watcherConnection = -1L
@@ -392,7 +476,7 @@ object VehicleController {
                 stopHvacValidation("验证窗口到期或车控已关闭")
                 return
             }
-            if (mode == HvacValidationMode.POWER && validationPower() != publishedValidationPower) publishDisplay()
+            if (mode == HvacValidationMode.POWER && powerState() != publishedPowerState) publishDisplay()
             // 舒适订阅验证只驱动舒适组，避免额外启动传感器组及其自动座椅逻辑。
             poll(c, validationGroups(mode))
             main.postDelayed(this, 250L)
@@ -425,7 +509,7 @@ object VehicleController {
                 return@onMain
             }
             if (powerModeChanged) {
-                clearValidationPower()
+                clearPowerObservation()
                 publishDisplay()
             }
             main.postDelayed(validationTimeout, 120_000L)
@@ -476,7 +560,7 @@ object VehicleController {
             main.removeCallbacks(validationPoll)
             HvacDiagnostics.finish(reason)
             if (wasPower) {
-                clearValidationPower()
+                clearPowerObservation()
                 publishDisplay()
             }
             val c = appCtx ?: return@onMain
@@ -499,8 +583,9 @@ object VehicleController {
         }
         if (Prefs.vehicleTempWatcherEnabled(c)) addAll(listOf("temp_driver", "temp_passenger"))
         addAll(Prefs.hvacEventKeys(c))
-        // 双温同步是温度弹窗的真实状态，始终订阅，不受日常通道选择影响。
+        // 双温同步和原厂电源是 Dock 实际显示/手势的基础状态，不受日常通道选择影响。
         add("temp_dual")
+        add(POWER_VALIDATION_KEY)
         activeValidationMode()?.let { addAll(it.keys) }
     }.distinct()
 
@@ -508,7 +593,7 @@ object VehicleController {
         onMain {
             appCtx = ctx.applicationContext
             validationEpoch++
-            if (validationMode == HvacValidationMode.POWER) clearValidationPower()
+            clearPowerObservation()
             if (!Prefs.vehicleApiEnabled(ctx) || Prefs.simulate(ctx)) hvacState.clearTargets()
             publishDisplay()
             val c = ctx.applicationContext
@@ -525,88 +610,6 @@ object VehicleController {
             Prefs.vehicleApiEnabled(c) && !Prefs.simulate(c) }
     }
 
-    private fun isPowerValidation(epoch: Long): Boolean =
-        validationMode == HvacValidationMode.POWER && epoch == validationEpoch && activeValidationMode() != null
-
-    /** null 表示常态；验证开始、重连或无有效读数时不能把未知当关闭。 */
-    internal fun validationPower(): ValidationPower? {
-        if (!isPowerValidation(validationEpoch)) return null
-        return when (currentPowerObservation()?.raw) {
-            0 -> ValidationPower.OFF
-            1 -> ValidationPower.ON
-            else -> ValidationPower.UNKNOWN
-        }
-    }
-
-    private fun currentPowerObservation(): PowerObservation? = powerObservation?.takeIf {
-        it.epoch == validationEpoch && it.connection == VehicleBridge.connectionGeneration && VehicleBridge.isReady
-    }
-
-    private fun clearValidationPower() {
-        powerObservation = null
-        clearPowerWrite()
-    }
-
-    private fun clearPowerWrite() {
-        powerWriteBasis = null
-        powerWriteNeedsObservation = false
-    }
-
-    private fun observeValidationPower(raw: Int, epoch: Long, connection: Long): Boolean {
-        if (powerWriteNeedsObservation) clearPowerWrite()
-        val previous = powerObservation
-        if (previous?.raw == raw && previous.epoch == epoch && previous.connection == connection) return false
-        powerObservation = PowerObservation(raw, epoch, connection)
-        return true
-    }
-
-    /** 仅主线程的风向短按调用；一次只切换电源，不补写风量、风向、A/C 或 AUTO。 */
-    internal fun togglePowerForValidation(ctx: Context): PowerTapResult {
-        if (validationMode != HvacValidationMode.POWER) return PowerTapResult.INACTIVE
-        val epoch = validationEpoch
-        fun record(detail: String) {
-            HvacDiagnostics.switchWrite(HvacValidationMode.POWER, "$detail entry=DOCK epoch=$epoch") {
-                epoch == validationEpoch
-            }
-        }
-        if (!isPowerValidation(epoch)) {
-            record("stage=SKIPPED reason=验证已结束或车控API关闭")
-            return PowerTapResult.UNAVAILABLE
-        }
-        val observed = currentPowerObservation()
-        if (observed == null) {
-            record("stage=SKIPPED reason=电源状态未知")
-            return PowerTapResult.UNKNOWN
-        }
-        if (powerWriteBasis?.let { it.connection == observed.connection && it.epoch == epoch } == true) {
-            record("stage=SKIPPED reason=前次试写仍待确认")
-            return PowerTapResult.WAITING
-        }
-        val target = 1 - observed.raw
-        powerWriteBasis = observed
-        powerWriteNeedsObservation = false
-        record("stage=REQUEST target=$target")
-        val queued = HvacCommands.submit(ctx, "hvac_power_validation entry=DOCK target=$target", onSkipped = {
-            record("stage=ABORT target=$target reason=未完成，见车控日志")
-            onMain { if (powerWriteBasis === observed) clearPowerWrite() }
-        }) {
-            val accepted = VehicleBridge.writeInt(VehicleChannels.FUNC_POWER, ZONE_GLOBAL, target) {
-                isPowerValidation(epoch) && currentPowerObservation() === observed
-            }
-            val sent = HvacCommands.operationNativeWrites() != 0
-            if (sent) record("stage=RETURN target=$target accepted=$accepted")
-            else record("stage=SKIPPED target=$target reason=会话或观测已变化，或写入门禁拒绝")
-            onMain {
-                if (powerWriteBasis !== observed) return@onMain
-                if (sent && isPowerValidation(epoch) && observed.connection == VehicleBridge.connectionGeneration) {
-                    // 回调可能先于厂商返回；若没有更新的状态，等下一次有效观测再接受短按。
-                    if (powerObservation === observed) powerWriteNeedsObservation = true else clearPowerWrite()
-                    requestRefresh(ctx, CLIMATE_GROUP)
-                } else clearPowerWrite()
-            }
-        }
-        return if (queued) PowerTapResult.QUEUED else PowerTapResult.UNAVAILABLE
-    }
 
     private fun isAcMaxValidation(epoch: Long): Boolean =
         activeValidationMode() == HvacValidationMode.AC_MAX && validationEpoch == epoch
@@ -655,8 +658,8 @@ object VehicleController {
         val connection = VehicleBridge.connectionGeneration
         // 配置目录仅在订阅重配时生成，不在每次轮询或回调重建。
         val pollingKeys = refreshKeys.flatMapTo(mutableSetOf()) { it.asList() }
+        pollingKeys.add(POWER_VALIDATION_KEY)
         if (AC_MAX_VALIDATION_KEY in requested) pollingKeys.add(AC_MAX_VALIDATION_KEY)
-        if (POWER_VALIDATION_KEY in requested) pollingKeys.add(POWER_VALIDATION_KEY)
         val evidenceKeys = (VehicleChannels.ALL.map { it.key } + pollingKeys).distinct()
         val functions = linkedSetOf<Int>()
         val evidenceConfigs = evidenceKeys.map { key ->
@@ -699,13 +702,12 @@ object VehicleController {
                     val accepted = float != null || (raw != null && validReading(c, key, raw))
                     HvacChannelEvidence.event(connection, configuration, key, fid, zone, value as? Number, accepted, receivedAt)
                     if (key == AC_MAX_VALIDATION_KEY || key == POWER_VALIDATION_KEY) {
-                        if (key == POWER_VALIDATION_KEY && !isPowerValidation(epoch)) return@runCatching
                         if (accepted && raw != null) {
                             HvacCommands.observe(fid, zone, raw, "EVENT", receivedAt, connection)
                             if (key == POWER_VALIDATION_KEY) {
                                 // 同组较早的轮询不能覆盖新收到的电源事件，即使事件值相同。
                                 invalidateGroups(CLIMATE_GROUP, 0)
-                                if (observeValidationPower(raw, epoch, connection)) publishDisplay()
+                                if (observePower(raw, epoch, connection)) publishDisplay()
                             }
                         }
                         HvacDiagnostics.event(key, raw ?: value, accepted, false, zone,
@@ -782,7 +784,7 @@ object VehicleController {
         val temperatures: FloatArray? = null,
         val validationEpoch: Long = 0L,
         val unavailableComfort: Int? = null,
-        val validationPowerRaw: Int? = null,
+        val powerRaw: Int? = null,
     )
 
     private val EMPTY_READING = GroupReading(IntArray(0), 0)
@@ -937,17 +939,19 @@ object VehicleController {
             HvacValidationMode.POWER -> POWER_VALIDATION_KEY
             else -> null
         }
-        var validationPowerRaw: Int? = null
-        if (switchKey != null && epoch == validationEpoch && connection == VehicleBridge.connectionGeneration) {
-            val key = switchKey
+        val powerReadKey = switchKey ?: POWER_VALIDATION_KEY.takeIf { group == VehicleRefreshGroup.CLIMATE }
+        var powerRaw: Int? = null
+        if (powerReadKey != null && epoch == validationEpoch && connection == VehicleBridge.connectionGeneration) {
+            val key = powerReadKey
             val fid = VehicleChannels.observationFuncOf(c, key)
             val zone = VehicleChannels.observationZoneOf(c, key)
             val observedAt = SystemClock.elapsedRealtime()
             val raw = readEvidenceInt(c, key, fid, zone, zone, epoch, connection, evidenceSubscription)
-            if (epoch == validationEpoch && connection == VehicleBridge.connectionGeneration && activeValidationMode() == switchMode) {
+            if (epoch == validationEpoch && connection == VehicleBridge.connectionGeneration &&
+                (switchMode == null || activeValidationMode() == switchMode)) {
                 val valid = raw != null && validReading(c, key, raw)
                 HvacDiagnostics.read(key, raw, valid, "INT_READ zone=$zone", observedAt)
-                if (key == POWER_VALIDATION_KEY && valid) validationPowerRaw = raw
+                if (key == POWER_VALIDATION_KEY && valid) powerRaw = raw
             }
         }
         val normalKeys = Prefs.hvacEventKeys(c)
@@ -1003,7 +1007,7 @@ object VehicleController {
         if (group == VehicleRefreshGroup.CLIMATE && evidenceOn()) evidencePoll(c)
         val unavailable = if (group == VehicleRefreshGroup.COMFORT) readUnavailableComfort(c, forceProbe, epoch, connection) else null
         return GroupReading(values, present, temperatures = temperatures, validationEpoch = epoch,
-            unavailableComfort = unavailable, validationPowerRaw = validationPowerRaw)
+            unavailableComfort = unavailable, powerRaw = powerRaw)
     }
 
     private fun readUnavailableComfort(c: Context, forceProbe: Boolean, epoch: Long, connection: Long): Int? {
@@ -1076,9 +1080,9 @@ object VehicleController {
                 if (ambientTempC != it) { ambientTempC = it; sensorsChanged = true }
             }
         }
-        val power = reading.validationPowerRaw
-        val powerChanged = power != null && isPowerValidation(reading.validationEpoch) && connected && !simulated &&
-            observeValidationPower(power, reading.validationEpoch, connection)
+        val power = reading.powerRaw
+        val powerChanged = power != null && reading.validationEpoch == validationEpoch && connected && !simulated &&
+            observePower(power, reading.validationEpoch, connection)
         update(forceNotify = sensorsChanged || powerChanged, invalidateReads = false, observedProperties = readingProperties(c, group, reading)) { current ->
             var next = current
             if (connected && !simulated) {
@@ -2129,9 +2133,9 @@ object VehicleController {
         }
         val previous = state
         state = next
-        val power = validationPower()
-        val powerChanged = power != publishedValidationPower
-        publishedValidationPower = power
+        val power = powerState()
+        val powerChanged = power != publishedPowerState
+        publishedPowerState = power
         main.removeCallbacks(targetExpiry)
         val deadline = hvacState.nextDeadlineMs
         if (deadline != Long.MAX_VALUE) main.postDelayed(targetExpiry, (deadline - SystemClock.elapsedRealtime()).coerceAtLeast(1L))

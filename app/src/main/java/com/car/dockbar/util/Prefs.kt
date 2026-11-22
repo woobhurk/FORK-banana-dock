@@ -229,8 +229,8 @@ object Prefs {
 
     // ---------------- 车控诊断开关（排查闪退用） ----------------
     /**
-     * 历史CX11部分固件出现过原生回调崩溃；当前本车的按需风量、AC、循环、风向和温度回调已短时验证。
-     * 未配置时默认订阅风量、AC、循环、风向及座椅舒适状态；保留崩溃熔断和轮询兜底。
+     * 历史CX11部分固件出现过原生回调崩溃；当前本车的按需风量、AC、循环、风向、座椅、除霜和方向盘状态回调已短时验证。
+     * 未配置时默认订阅除主副驾温度外的照片所示原厂通道；保留崩溃熔断和轮询兜底。
      */
     fun vehicleWatcherEnabled(ctx: Context) = sp(ctx).getBoolean("vehicle_watcher_enabled", false)
     fun setVehicleWatcherEnabled(ctx: Context, v: Boolean) =
@@ -259,8 +259,9 @@ object Prefs {
 
     private val DEFAULT_HVAC_EVENT_KEYS = setOf(
         "fan_manual", "fan_auto", "ac", "recirc", "air_direction",
-        "seat_vent_passenger", "defrost_front", "defrost_rear"
+        "seat_vent_passenger", "defrost_front", "defrost_rear", "steering_heat"
     ) + SEAT_CLIMATE_EVENT_KEYS
+
 
     /** 升级时只补入旧版还没有的座椅选项，已全关或因崩溃清空的配置继续保留。 */
     internal fun migrateHvacSeatEventDefaults(ctx: Context) {
@@ -283,6 +284,8 @@ object Prefs {
         sp(ctx).edit().putStringSet(HVAC_EVENT_KEYS_PREF, keys.filterTo(mutableSetOf()) {
             it in HVAC_EVENT_KEYS
         }).apply()
+    /** 用户在设置页明确恢复照片对应的默认选择；不自动覆盖显式空集合。 */
+    fun resetHvacEventKeys(ctx: Context) = setHvacEventKeys(ctx, DEFAULT_HVAC_EVENT_KEYS)
 
     /** 真实崩溃或早期连续异常才关闭新增通道；稳定后无证据退出保留用户配置。 */
     internal fun suspendHvacEventsAfterCrash(ctx: Context, hasEvidence: Boolean, earlyStreak: Int): Boolean {

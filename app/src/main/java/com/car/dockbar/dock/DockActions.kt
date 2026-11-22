@@ -79,13 +79,13 @@ object DockActions {
     }
 
     private fun toggleAirflow(ctx: Context, airEntry: Boolean) {
-        val result = if (airEntry) VehicleController.togglePowerForValidation(ctx) else PowerTapResult.INACTIVE
+        val result = if (airEntry) VehicleController.togglePower(ctx) else PowerTapResult.INACTIVE
         val message = when (result) {
             PowerTapResult.INACTIVE -> { VehicleController.toggleAirflow(ctx); return }
             PowerTapResult.QUEUED -> return
             PowerTapResult.UNKNOWN -> "尚未读到原厂空调电源状态，未切换"
             PowerTapResult.WAITING -> "等待上次电源操作读回，未重复写入"
-            PowerTapResult.UNAVAILABLE -> "空调电源试写未提交，请查看验证报告"
+            PowerTapResult.UNAVAILABLE -> "原厂空调电源切换未提交，请查看车控日志"
         }
         Toast.makeText(ctx.applicationContext, message, Toast.LENGTH_SHORT).show()
     }

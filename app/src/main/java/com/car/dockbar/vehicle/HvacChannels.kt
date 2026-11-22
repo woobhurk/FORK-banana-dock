@@ -37,6 +37,13 @@ internal object HvacChannels {
         else -> null
     }
 
+    /** 只允许已确认的原厂电源状态参与翻转，未知值禁止生成写入目标。 */
+    fun powerToggleTarget(raw: Int): Int? = when (raw) {
+        0 -> 1
+        1 -> 0
+        else -> null
+    }
+
     /** 浮点温度只接受有限且位于可观测安全区间的值。 */
     fun normalizeTemperature(value: Float): Float? =
         value.takeIf { it.isFinite() && it in 10f..40f }

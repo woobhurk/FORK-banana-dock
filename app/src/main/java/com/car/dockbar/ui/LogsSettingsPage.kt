@@ -327,7 +327,7 @@ internal class LogsSettingsPage(activity: MainActivity) :
         root.addView(smallBtn("日常车控状态同步") {
             AlertDialog.Builder(activity)
                 .setTitle("日常车控状态同步")
-                .setMessage("选中的通道尝试接收原车状态变化，定时读取继续兜底。副驾通风、前后挡除霜和方向盘加热默认不勾选，建议先做两分钟验证。\n" +
+                .setMessage("选中的通道尝试接收原车状态变化，定时读取继续兜底。默认勾选除主副驾温度外的原厂通道；当前已保存选择优先，可用“恢复默认”重新套用。\n" +
                     "⚠ 厂商回调及温度浮点读取可能导致进程闪退，请停车后配置；支持情况因车机而异。\n" +
                     "保存仅调整订阅与读取，不自动写入车控或补权，也不改变车控写入开关。临时验证结束不会清除此配置。")
                 .setPositiveButton("选择通道") { _, _ ->
@@ -372,6 +372,11 @@ internal class LogsSettingsPage(activity: MainActivity) :
                             toastOnce(if (keys.isEmpty()) "日常可选订阅已关闭，原有基线监听保留"
                                 else "日常车控状态同步已保存并请求应用")
                         }
+                        .setNeutralButton("恢复默认") { _, _ ->
+                            Prefs.resetHvacEventKeys(this)
+                            VehicleController.reloadHvacSubscriptions(this)
+                            toastOnce("已恢复默认：除主副驾温度外的原厂通道已勾选")
+                        }
                         .setNegativeButton("取消", null)
                         .show()
                 }
@@ -399,7 +404,7 @@ internal class LogsSettingsPage(activity: MainActivity) :
                                     "未启动验证时，Dock 的 MAX 仍是原有的组合预设。"
                             mode == HvacValidationMode.POWER ->
                                 "请停车操作。开始时只读和订阅，厂商回调可能导致闪退。先在原车空调界面开关电源，确认 Dock 风向图标随状态变化；" +
-                                    "再在验证窗口内短按风向，核对原车电源是否切换。状态未知不写入，停止或到期后短按恢复停风／恢复。"
+                                    "再在验证窗口内短按风向，核对原车电源是否切换。状态未知不写入，停止或到期后验证订阅恢复基线，日常短按仍使用原厂总开关。"
                             mode.comfortReadOnly -> "只临时加入所选通道的订阅，不自动写入或更改日常配置。厂商回调可能导致闪退。请停车后在原车界面改变状态，并查看报告的有效 EVENT 是否增加。"
                             mode == HvacValidationMode.TEMPERATURE ->
                                 "温度模式会额外触发浮点 Customize/native 读取和事件，可能使进程直接闪退。"
