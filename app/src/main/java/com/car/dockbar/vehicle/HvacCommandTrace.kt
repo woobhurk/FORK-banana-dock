@@ -118,10 +118,12 @@ internal object HvacCommandTrace {
         operation: HvacOperationTicket?
     ): HvacWriteTicket {
         // 每次真实写入只解析一次配置；观测热路径只使用这里冻结的编码规则。
-        var key: String? = null
-        if (functionId == VehicleChannels.FUNC_AC_MAX && zone == VehicleChannels.ZONE_GLOBAL) {
-            key = VehicleChannels.AC_MAX_VALIDATION_KEY
-        } else if (ctx != null) {
+        var key = if (zone == VehicleChannels.ZONE_GLOBAL) when (functionId) {
+            VehicleChannels.FUNC_AC_MAX -> VehicleChannels.AC_MAX_VALIDATION_KEY
+            VehicleChannels.FUNC_POWER -> VehicleChannels.POWER_VALIDATION_KEY
+            else -> null
+        } else null
+        if (key == null && ctx != null) {
             for (channel in VehicleChannels.ALL) {
                 if (VehicleChannels.funcOf(ctx, channel.key) == functionId &&
                     VehicleChannels.zoneOf(ctx, channel.key) == zone) {
@@ -272,7 +274,7 @@ internal object HvacCommandTrace {
         if (key == "auto_master" || key == "temp_dual") {
             return (raw and 0xff) in 0..1 && (expected and 0xff) in 0..1
         }
-        if (key == VehicleChannels.AC_MAX_VALIDATION_KEY) {
+        if (key == VehicleChannels.AC_MAX_VALIDATION_KEY || key == VehicleChannels.POWER_VALIDATION_KEY) {
             return HvacChannels.validRaw(key, raw) && HvacChannels.validRaw(key, expected)
         }
         return HvacChannels.validRaw(key, raw, write.tempBase, write.tempStep, write.tempIndexBase) &&

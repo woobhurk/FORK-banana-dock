@@ -81,16 +81,16 @@ class DockCatalogTest {
             "seat" to "root:showPopup:seat",
             "volume" to "root:showPopup:volume",
             "lyric" to "root:toggleLyric/long:openThisApp",
-            "air" to "root:showPopup:airDirection/long:openAirPanel",
+            "air" to "root:toggleAirflow/long:showPopup:airDirection",
             "recirc" to "root:toggleRecirc",
             "defrost_front" to "root:toggleDefrostFront",
             "defrost_rear" to "root:toggleDefrostRear",
-            "vent" to "root:levelBump:vent:down/long:showPopup:seatClimate",
+            "vent" to "root:toggleSeatVent/long:showPopup:seatClimate",
             "seat_heat" to "root:levelBump:seatHeat:down/long:levelBump:seatHeat:up",
             "steering_heat" to "root:levelBump:steeringHeat:down/long:levelBump:steeringHeat:up",
             "temp_driver_combo" to "minus:tempStep:true:-1|plus:tempStep:true:1|value:toggleAcFromDock/long:showPopup:temperatureDriver",
             "temp_passenger_combo" to "minus:tempStep:false:-1|plus:tempStep:false:1|value:toggleAcFromDock/long:showPopup:temperaturePassenger",
-            "fan_combo" to "minus:fanStep:-1|plus:fanStep:1|value:toggleFanAuto/long:fanOff",
+            "fan_combo" to "minus:fanStep:-1|plus:fanStep:1|value:toggleFanAuto/long:openAirPanel",
             "temp_down_driver" to "root:tempStep:true:-1",
             "temp_up_driver" to "root:tempStep:true:1",
             "temp_down_passenger" to "root:tempStep:false:-1",
@@ -136,10 +136,12 @@ class DockCatalogTest {
         is DockAction.FanStep -> "fanStep:${action.delta}"
         DockAction.ToggleFanAuto -> "toggleFanAuto"
         DockAction.FanOff -> "fanOff"
+        DockAction.ToggleAirflow -> "toggleAirflow"
         DockAction.ToggleRecirc -> "toggleRecirc"
         DockAction.ToggleDefrostFront -> "toggleDefrostFront"
         DockAction.ToggleDefrostRear -> "toggleDefrostRear"
         is DockAction.LevelBump -> "levelBump:${action.channel}:${action.direction}"
+        DockAction.ToggleSeatVent -> "toggleSeatVent"
         DockAction.OpenAirPanel -> "openAirPanel"
         DockAction.ToggleLyric -> "toggleLyric"
         DockAction.OpenPlayer -> "openPlayer"

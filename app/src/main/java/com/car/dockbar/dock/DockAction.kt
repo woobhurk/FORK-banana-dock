@@ -19,10 +19,12 @@ sealed class DockAction {
     data class FanStep(val delta: Int) : DockAction()
     data object ToggleFanAuto : DockAction()
     data object FanOff : DockAction()
+    data object ToggleAirflow : DockAction()
     data object ToggleRecirc : DockAction()
     data object ToggleDefrostFront : DockAction()
     data object ToggleDefrostRear : DockAction()
     data class LevelBump(val channel: String, val direction: String) : DockAction()
+    data object ToggleSeatVent : DockAction()
     data object OpenAirPanel : DockAction()
     data object ToggleLyric : DockAction()
     data object OpenPlayer : DockAction()
@@ -48,12 +50,14 @@ object DockActionCodec {
         is DockAction.FanStep -> simple("fanStep").put("delta", action.delta)
         DockAction.ToggleFanAuto -> simple("toggleFanAuto")
         DockAction.FanOff -> simple("fanOff")
+        DockAction.ToggleAirflow -> simple("toggleAirflow")
         DockAction.ToggleRecirc -> simple("toggleRecirc")
         DockAction.ToggleDefrostFront -> simple("toggleDefrostFront")
         DockAction.ToggleDefrostRear -> simple("toggleDefrostRear")
         is DockAction.LevelBump -> simple("levelBump")
             .put("channel", action.channel)
             .put("direction", action.direction)
+        DockAction.ToggleSeatVent -> simple("toggleSeatVent")
         DockAction.OpenAirPanel -> simple("openAirPanel")
         DockAction.ToggleLyric -> simple("toggleLyric")
         DockAction.OpenPlayer -> simple("openPlayer")
@@ -84,6 +88,7 @@ object DockActionCodec {
             "fanStep" -> int(obj, "delta")?.let { DockAction.FanStep(it) }
             "toggleFanAuto" -> DockAction.ToggleFanAuto
             "fanOff" -> DockAction.FanOff
+            "toggleAirflow" -> DockAction.ToggleAirflow
             "toggleRecirc" -> DockAction.ToggleRecirc
             "toggleDefrostFront" -> DockAction.ToggleDefrostFront
             "toggleDefrostRear" -> DockAction.ToggleDefrostRear
@@ -92,6 +97,7 @@ object DockActionCodec {
                 val direction = text(obj, "direction") ?: return null
                 DockAction.LevelBump(channel, direction)
             }
+            "toggleSeatVent" -> DockAction.ToggleSeatVent
             "openAirPanel" -> DockAction.OpenAirPanel
             "toggleLyric" -> DockAction.ToggleLyric
             "openPlayer" -> DockAction.OpenPlayer

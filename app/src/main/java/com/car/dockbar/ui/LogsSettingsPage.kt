@@ -397,6 +397,9 @@ internal class LogsSettingsPage(activity: MainActivity) :
                                 "请停车操作。开始时只读和订阅，厂商回调可能导致闪退。先在原车空调界面开关并确认读回。" +
                                     "再保持原车 MAX A/C 关闭，验证窗口内长按 Dock 主驾温度并点击「MAX 试开」，或在本页点「急速降温测试写入」。" +
                                     "未启动验证时，Dock 的 MAX 仍是原有的组合预设。"
+                            mode == HvacValidationMode.POWER ->
+                                "请停车操作。开始时只读和订阅，厂商回调可能导致闪退。先在原车空调界面开关电源，确认 Dock 风向图标随状态变化；" +
+                                    "再在验证窗口内短按风向，核对原车电源是否切换。状态未知不写入，停止或到期后短按恢复停风／恢复。"
                             mode.comfortReadOnly -> "只临时加入所选通道的订阅，不自动写入或更改日常配置。厂商回调可能导致闪退。请停车后在原车界面改变状态，并查看报告的有效 EVENT 是否增加。"
                             mode == HvacValidationMode.TEMPERATURE ->
                                 "温度模式会额外触发浮点 Customize/native 读取和事件，可能使进程直接闪退。"

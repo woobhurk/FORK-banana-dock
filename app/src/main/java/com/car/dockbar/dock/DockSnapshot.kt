@@ -31,6 +31,7 @@ data class DockSnapshot(
     val mediaPlaying: Boolean,
     val driverVentVisible: Boolean = true,
     val steeringHeatVisible: Boolean = true,
+    val validationPower: VehicleController.ValidationPower? = null,
 )
 
 object DockSnapshots {
@@ -60,6 +61,7 @@ object DockSnapshots {
             mediaPlaying = media.isPlaying,
             driverVentVisible = preview || state.seatVentVisible(driver = true),
             steeringHeatVisible = preview || state.steeringHeatVisible,
+            validationPower = VehicleController.validationPower(),
         )
     }
 }

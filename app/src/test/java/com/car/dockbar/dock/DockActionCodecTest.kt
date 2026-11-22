@@ -13,6 +13,8 @@ class DockActionCodecTest {
             DockAction.OpenRecents,
             DockAction.ToggleFanAuto,
             DockAction.FanOff,
+            DockAction.ToggleAirflow,
+            DockAction.ToggleSeatVent,
             DockAction.ToggleLyric,
             DockAction.OpenPlayer,
             DockAction.PlayPause,

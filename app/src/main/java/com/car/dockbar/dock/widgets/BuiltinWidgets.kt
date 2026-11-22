@@ -23,7 +23,9 @@ import com.car.dockbar.ui.DockIconView
 import com.car.dockbar.ui.DockMusicView
 import com.car.dockbar.ui.DockValueView
 import com.car.dockbar.ui.VolumeDockButton
+import com.car.dockbar.ui.FanDockButton
 import com.car.dockbar.util.Prefs
+import com.car.dockbar.vehicle.VehicleController.ValidationPower
 
 private fun spec(
     builtin: Builtin,
@@ -71,6 +73,7 @@ private fun iconFor(action: String): Int = when (action) {
     "settings" -> R.drawable.ic_dock_car
     "app_drawer" -> R.drawable.ic_dock_apps
     "air" -> R.drawable.ic_blowing_facefoot
+    "fan_combo" -> R.drawable.ic_dock_fan
     "vent" -> R.drawable.ic_seat_feng_03
     "seat" -> R.drawable.ic_seat_open
     "seat_heat" -> R.drawable.ic_seat_hot_03
@@ -138,7 +141,10 @@ private fun comboWidget(
         fixedWidthPx = fixedWidthPx, arrowPx = arrowPx, arrowHitPx = arrowHitPx,
     )
     override fun bind(mounted: MountedEntry, snapshot: DockSnapshot) {
-        mounted.valueView?.let { paintValue(it, spec.bindKind, snapshot) }
+        when (val value = mounted.hits[HitTargets.VALUE]) {
+            is FanDockButton -> value.render(snapshot.fanLevel, snapshot.fanAuto, snapshot.darkIcons)
+            is DockValueView -> paintValue(value, spec.bindKind, snapshot)
+        }
     }
     override fun defaultGestures() = linkedMapOf(
         HitTargets.MINUS to tap(minus),
@@ -146,14 +152,16 @@ private fun comboWidget(
         HitTargets.VALUE to tapLong(valueTap, valueLong),
     )
     override fun create(ctx: Context, entry: DockEntry, iconPx: Int): MountedEntry {
-        val text = Prefs.textScale(ctx)
+        val value = if (bindKind == BindKind.FAN) FanDockButton(ctx, iconPx) else {
+            val text = Prefs.textScale(ctx)
+            DockValueView(ctx, 25f * text, 16f * text, 12f * text)
+        }
         val arrow = if (spec.arrowPx > 0) spec.arrowPx else iconPx
         val box = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
         val minusView = DockIconView(ctx, R.drawable.ic_chevron_left, arrow)
-        val value = DockValueView(ctx, 25f * text, 16f * text, 12f * text)
         val plusView = DockIconView(ctx, R.drawable.ic_chevron_right, arrow)
         if (spec.arrowHitPx > 0) {
             // 风速：箭头列按点击宽度固定，数值列吃掉剩余空间，避免三等分把两侧撑空。
@@ -175,7 +183,7 @@ private fun comboWidget(
                 HitTargets.VALUE to value,
                 HitTargets.PLUS to plusView,
             ),
-            value,
+            value as? DockValueView,
         )
     }
 }
@@ -297,7 +305,7 @@ internal object BuiltinWidgets {
         comboWidget(
             Builtin.FAN_COMBO,
             DockAction.FanStep(-1), DockAction.FanStep(1),
-            DockAction.ToggleFanAuto, DockAction.FanOff,
+            DockAction.ToggleFanAuto, DockAction.OpenAirPanel,
             BindKind.FAN,
             fixedWidthPx = DockMetrics.FAN_COMBO_FIXED_WIDTH_PX,
             arrowPx = DockMetrics.FAN_COMBO_ARROW_PX,
@@ -306,8 +314,8 @@ internal object BuiltinWidgets {
         iconWidget(Builtin.TEMP_DOWN_DRIVER, root(tap(DockAction.TempStep(true, -1)))),
         valueWidget(Builtin.TEMP_DRIVER, root(tapLong(DockAction.ToggleHvacWindow, DockAction.ToggleAc)), BindKind.TEMP_DRIVER),
         iconWidget(Builtin.TEMP_UP_DRIVER, root(tap(DockAction.TempStep(true, 1)))),
-        iconWidget(Builtin.AIR, root(tapLong(DockAction.ShowPopup("airDirection"), DockAction.OpenAirPanel)), BindKind.AIR),
-        iconWidget(Builtin.VENT, root(tapLong(DockAction.LevelBump("vent", "down"), DockAction.ShowPopup("seatClimate"))), BindKind.VENT, preserveColors = true),
+        iconWidget(Builtin.AIR, root(tapLong(DockAction.ToggleAirflow, DockAction.ShowPopup("airDirection"))), BindKind.AIR),
+        iconWidget(Builtin.VENT, root(tapLong(DockAction.ToggleSeatVent, DockAction.ShowPopup("seatClimate"))), BindKind.VENT, preserveColors = true),
         iconWidget(Builtin.SEAT_HEAT, root(tapLong(DockAction.LevelBump("seatHeat", "down"), DockAction.LevelBump("seatHeat", "up"))), BindKind.SEAT_HEAT, preserveColors = true),
         iconWidget(Builtin.FAN_DOWN, root(tap(DockAction.FanStep(-1)))),
         valueWidget(Builtin.FAN, root(tapLong(DockAction.ToggleHvacWindow, DockAction.FanOff)), BindKind.FAN),
@@ -328,7 +336,17 @@ private fun paintIcon(view: DockIconView, kind: BindKind, snapshot: DockSnapshot
         BindKind.RECIRC -> view.setIcon(
             if (snapshot.recircInside) R.drawable.ic_ac_cycle_inner else R.drawable.ic_ac_cycle_outer
         )
-        BindKind.AIR -> view.setIcon(airDirectionIcon(snapshot.airDirection))
+        BindKind.AIR -> {
+            val power = snapshot.validationPower
+            val stopped = power == ValidationPower.OFF || (power == null && !snapshot.fanAuto && snapshot.fanLevel <= 0)
+            view.setIcon(if (stopped) R.drawable.ic_blowing_stopped else airDirectionIcon(snapshot.airDirection))
+            view.contentDescription = when (power) {
+                ValidationPower.ON -> "空调电源已开，短按关闭，长按调风向"
+                ValidationPower.OFF -> "空调电源已关，短按开启，长按调风向"
+                ValidationPower.UNKNOWN -> "空调电源状态未知，长按调风向"
+                null -> if (stopped) "空调风向，风量 0 档" else "空调风向"
+            }
+        }
         BindKind.DEFROST_FRONT -> view.setActive(snapshot.defrostFront)
         BindKind.DEFROST_REAR -> view.setActive(snapshot.defrostRear)
         BindKind.LYRIC -> view.setActive(snapshot.lyricOn)

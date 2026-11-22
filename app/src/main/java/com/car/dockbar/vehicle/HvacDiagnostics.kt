@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.SystemClock
 import com.car.dockbar.config.VehicleChannels
 import com.car.dockbar.config.VehicleChannels.AC_MAX_VALIDATION_KEY
+import com.car.dockbar.config.VehicleChannels.POWER_VALIDATION_KEY
 import com.car.dockbar.util.Logx
 
 internal enum class SeatWriteValidationMode(val label: String) {
@@ -22,6 +23,7 @@ internal enum class HvacValidationMode(
     CLIMATE("常用空调：风量 + A/C / 循环 / 风向 / 双温", FAN.keys + listOf("ac", "recirc", "air_direction", "temp_dual")),
     TEMPERATURE("含温度：额外调用浮点 Customize/native", CLIMATE.keys + listOf("temp_driver", "temp_passenger")),
     AC_MAX("急速降温：原厂 MAX A/C", listOf(AC_MAX_VALIDATION_KEY)),
+    POWER("空调电源：原厂总开关（风向短按）", listOf(POWER_VALIDATION_KEY)),
     SEAT_ECARX_DIRECT(
         "座椅：${SeatWriteValidationMode.ECARX_DIRECT.label}",
         listOf("seat_vent", "seat_heat", "seat_vent_passenger", "seat_heat_passenger"),
@@ -53,12 +55,12 @@ internal object HvacDiagnostics {
         var reads: Int = 0, var validReads: Int = 0,
         var last: String = "未观测", var capability: String = "未查询",
         var lastReadLog: String? = null, var lastReadLogAt: Long = 0,
-        var lastAcMaxRead: Int? = null, var lastAcMaxEvent: Int? = null
+        var lastSwitchRead: Int? = null, var lastSwitchEvent: Int? = null
     )
     private data class Session(
         val mode: HvacValidationMode, val start: Long, val channels: List<Channel>,
         val registrations: MutableList<String> = mutableListOf(), var end: Long? = null,
-        var reason: String = "进行中", var lastAcMaxWrite: String? = null
+        var reason: String = "进行中", var lastSwitchWrite: String? = null
     )
     private var session: Session? = null
     private var completedReport: String? = null
@@ -103,7 +105,7 @@ internal object HvacDiagnostics {
             val ch = current.channels.find { it.key == key } ?: return
             ch.reads++
             if (valid) ch.validReads++
-            if (key == AC_MAX_VALIDATION_KEY && valid) ch.lastAcMaxRead = raw as? Int
+            if (valid && isSwitch(key)) ch.lastSwitchRead = raw as? Int
             // source 由读取端提供实际命中的 zone；缺失时不能冒充配置位置或匹配命令。
             val actualZone = source.substringAfter("zone=", "").substringBefore(' ').toIntOrNull()
             val detail = "READ ${identity(ch)} actualZone=${actualZone ?: "UNKNOWN"} raw=$raw valid=$valid source=$source observedAtMs=$observedAtMs"
@@ -129,9 +131,9 @@ internal object HvacDiagnostics {
             val ch = current.channels.find { it.key == key } ?: return
             ch.events++
             val applicable = valid && zone == ch.zone
-            val stateChanged = if (key == AC_MAX_VALIDATION_KEY) {
-                val previous = ch.lastAcMaxEvent ?: ch.lastAcMaxRead
-                if (applicable) ch.lastAcMaxEvent = raw as? Int
+            val stateChanged = if (isSwitch(key)) {
+                val previous = ch.lastSwitchEvent ?: ch.lastSwitchRead
+                if (applicable) ch.lastSwitchEvent = raw as? Int
                 applicable && previous != null && previous != raw
             } else changed
             if (applicable) {
@@ -145,11 +147,11 @@ internal object HvacDiagnostics {
         emit(line)
     }
 
-    fun acMaxWrite(detail: String, matchesEpoch: () -> Boolean) {
-        val line = "AC_MAX_WRITE $detail"
+    fun switchWrite(mode: HvacValidationMode, detail: String, matchesEpoch: () -> Boolean) {
+        val line = "${mode.name}_WRITE $detail"
         synchronized(lock) {
             val current = session
-            if (current?.mode == HvacValidationMode.AC_MAX && matchesEpoch()) current.lastAcMaxWrite = line
+            if (current?.mode == mode && matchesEpoch()) current.lastSwitchWrite = line
         }
         emit(line)
     }
@@ -194,9 +196,10 @@ internal object HvacDiagnostics {
             appendLine(identity(ch))
             appendLine("  能力=${ch.capability}")
             appendLine("  EVENT收到=${ch.events} 有效且zone匹配=${ch.validEvents} 状态变化=${ch.changedEvents}；业务采样READ总数=${ch.reads} 有效=${ch.validReads}")
-            if (ch.key == AC_MAX_VALIDATION_KEY) {
-                appendLine("  最近有效状态：读回=${acMaxText(ch.lastAcMaxRead)}；事件=${acMaxText(ch.lastAcMaxEvent)}")
-                appendLine("  写入记录：${current.lastAcMaxWrite ?: "未收到原厂 MAX A/C 试写请求"}")
+            if (isSwitch(ch.key)) {
+                appendLine("  最近有效状态：读回=${switchText(ch.lastSwitchRead)}；事件=${switchText(ch.lastSwitchEvent)}")
+                val name = if (ch.key == POWER_VALIDATION_KEY) "空调电源" else "原厂 MAX A/C"
+                appendLine("  写入记录：${current.lastSwitchWrite ?: "未收到${name}试写请求"}")
             }
             appendLine("  最后观测=${ch.last}")
             appendLine("  最近实际调用=${HvacCommands.describeLastWrite(ch.fid, ch.zone, current.start)}")
@@ -208,7 +211,9 @@ internal object HvacDiagnostics {
         append("命令接受、注册接受、观测匹配均不证明真车物理效果，请人工观察；温度 Customize/native 接口可能导致进程闪退。")
     }
 
-    private fun acMaxText(value: Int?): String = when (value) {
+    private fun isSwitch(key: String): Boolean = key == AC_MAX_VALIDATION_KEY || key == POWER_VALIDATION_KEY
+
+    private fun switchText(value: Int?): String = when (value) {
         0 -> "关闭(0)"
         1 -> "开启(1)"
         else -> "未知"

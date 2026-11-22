@@ -57,7 +57,7 @@ object DockMetrics {
     const val FAN_COMBO_ARROW_PX = 40
     /** 风速箭头点击列：图标两侧各留 4px，避免贴边。 */
     const val FAN_COMBO_ARROW_HIT_PX = FAN_COMBO_ARROW_PX + 8
-    /** 风速数值列。默认字号下能放下「AUTO」，短档位居中后仍和箭头分开。 */
+    /** 风速图标及角标的触控列宽。 */
     const val FAN_COMBO_VALUE_PX = 80
     /** 风速组合总宽 = 两侧点击列 + 数值列。 */
     const val FAN_COMBO_FIXED_WIDTH_PX = FAN_COMBO_ARROW_HIT_PX * 2 + FAN_COMBO_VALUE_PX
