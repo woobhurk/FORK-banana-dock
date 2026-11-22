@@ -91,6 +91,7 @@ class DockOverlayService : Service() {
 
         // 设置页与服务同进程：切换中的状态不依赖某个 Activity 的生命周期。
         private val dockSelectionListeners = mutableSetOf<() -> Unit>()
+        @Volatile
         internal var dockSelectionPending = false
             private set
         internal var dockSelectionMessage: String? = null
@@ -125,6 +126,7 @@ class DockOverlayService : Service() {
         private const val CHANNEL_ID = "dock_overlay"
         private const val TICK_INTERVAL_MS = 250L
         private const val MEDIA_REFRESH_INTERVAL_MS = 2500L
+        private const val HOME_DOCK_SETTLE_MS = 350L
         /** 反色采样间隔：每秒截取 dock 条带算亮度，屏幕内容变了最多 1 秒内换色 */
         private const val CONTRAST_INTERVAL_MS = 1000L
 
@@ -205,6 +207,9 @@ class DockOverlayService : Service() {
     private var receiver: BroadcastReceiver? = null
     private var running = false
     private var originalDockRequest: OriginalDockRequest? = null
+    private var homeRehideRequest: OriginalDockRequest? = null
+    private var queuedDockSelection: Boolean? = null
+    private val rehideOriginalDockOnHome = Runnable { rehideOriginalDock() }
 
     // --- 自动反色（真实背景采样） ---
     private var contrastThread: HandlerThread? = null
@@ -411,7 +416,11 @@ class DockOverlayService : Service() {
                 return START_NOT_STICKY
             }
             ACTION_SELECT_DOCK -> {
-                selectDock(intent.getBooleanExtra(EXTRA_USE_ORIGINAL_DOCK, true), userInitiated = true)
+                main.removeCallbacks(rehideOriginalDockOnHome)
+                val useOriginal = intent.getBooleanExtra(EXTRA_USE_ORIGINAL_DOCK, true)
+                // 补发已开始时保持 Binder 请求有序，不让旧的隐藏盖过手动恢复。
+                if (homeRehideRequest != null) queuedDockSelection = useOriginal
+                else selectDock(useOriginal, userInitiated = true)
                 return START_STICKY
             }
         }
@@ -431,6 +440,36 @@ class DockOverlayService : Service() {
     }
 
     private fun canHideOriginalDock() = alive && attached && !hiddenByApp && canDrawOverlay()
+
+    private fun canRehideOriginalDock() = !dockSelectionPending && Prefs.overlayEnabled(this) &&
+        !Prefs.useOriginalDock(this) && canHideOriginalDock()
+
+    private fun scheduleHomeRehide() {
+        main.removeCallbacks(rehideOriginalDockOnHome)
+        if (canRehideOriginalDock()) main.postDelayed(rehideOriginalDockOnHome, HOME_DOCK_SETTLE_MS)
+    }
+
+    private fun rehideOriginalDock() {
+        if (originalDockRequest != null || homeRehideRequest != null || !canRehideOriginalDock()) return
+        val foreground = ForegroundAppService.instance ?: return
+        val home = foreground.activeApplicationPackage() ?: return
+        if (!isSystemHome(home) || Prefs.isDockHideApp(this, home)) return
+        // 延迟一次让 Launcher 先恢复自己的 Dock。连接完成后再次确认，避免离开桌面后误隐藏。
+        val request = OriginalDockRequest(this, visible = false, canHide = {
+            canRehideOriginalDock() && ForegroundAppService.instance === foreground &&
+                foreground.activeApplicationPackage() == home && !Prefs.isDockHideApp(this, home)
+        }) { error ->
+            homeRehideRequest = null
+            if (error == null) Logx.d("OEM_DOCK：回桌面补发隐藏，已收到回执，实际显示以屏幕为准")
+            else Logx.w("OEM_DOCK：回桌面补发未确认：$error")
+            queuedDockSelection?.let { useOriginal ->
+                queuedDockSelection = null
+                selectDock(useOriginal, userInitiated = true)
+            }
+        }
+        homeRehideRequest = request
+        request.start()
+    }
 
     private fun selectDock(useOriginal: Boolean, userInitiated: Boolean = false) {
         if (originalDockRequest != null) {
@@ -489,11 +528,14 @@ class DockOverlayService : Service() {
     }
 
     private fun teardown() {
-        originalDockRequest?.let {
-            it.close()
-            originalDockRequest = null
-            if (dockSelectionPending) publishDockSelection("Dock 服务已停止，切换结果未确认")
-        }
+        main.removeCallbacks(rehideOriginalDockOnHome)
+        val cancelledSelection = originalDockRequest != null || queuedDockSelection != null
+        homeRehideRequest?.close()
+        homeRehideRequest = null
+        queuedDockSelection = null
+        originalDockRequest?.close()
+        originalDockRequest = null
+        if (cancelledSelection && dockSelectionPending) publishDockSelection("Dock 服务已停止，切换结果未确认")
         val wasRunning = running
         running = false
         isRunning = false
@@ -538,6 +580,7 @@ class DockOverlayService : Service() {
         stateMachine?.dispose()
         stateMachine = null
         ForegroundTracker.listener = null
+        ForegroundTracker.windowStateListener = null
     }
 
     private fun clearBindings() {
@@ -732,13 +775,22 @@ class DockOverlayService : Service() {
             h
         }
         hiddenByApp = hide
+        if (hide) main.removeCallbacks(rehideOriginalDockOnHome)
         stateMachine?.applyHiddenByApp(hide)
         syncSolidWithForeground()
     }
 
     /** 开始监听前台应用变化（由 ForegroundAppService 无障碍服务写入） */
     private fun attachForegroundTracking() {
-        ForegroundTracker.listener = { _ -> applyKeepShownForForeground() }
+        ForegroundTracker.listener = { pkg ->
+            applyKeepShownForForeground()
+            if (isSystemHome(pkg)) scheduleHomeRehide()
+            else main.removeCallbacks(rehideOriginalDockOnHome)
+        }
+        // 已在桌面时再按 Home，前台包名可能不变，只用桌面自身的窗口事件补充触发。
+        ForegroundTracker.windowStateListener = { pkg ->
+            if (isSystemHome(pkg)) scheduleHomeRehide()
+        }
         applyKeepShownForForeground()
     }
 
@@ -753,10 +805,11 @@ class DockOverlayService : Service() {
         return homePkg
     }
 
-    private fun onSystemHome(): Boolean {
-        val pkg = ForegroundTracker.currentPackage ?: return false
-        if (pkg == "com.android.launcher3") return true
-        return pkg == systemHomePackage()
+    private fun onSystemHome() = isSystemHome(ForegroundTracker.currentPackage)
+
+    private fun isSystemHome(pkg: String?): Boolean {
+        if (pkg == null) return false
+        return pkg == "com.android.launcher3" || pkg == systemHomePackage()
     }
 
     /**

@@ -45,6 +45,7 @@ class ForegroundAppService : AccessibilityService() {
     }
 
     override fun onDestroy() {
+        main.removeCallbacks(commitPending)
         if (instance === this) instance = null
         super.onDestroy()
     }
@@ -67,7 +68,10 @@ class ForegroundAppService : AccessibilityService() {
         val e = event ?: return
         if (e.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
         val pkg = e.packageName?.toString()
-        if (!pkg.isNullOrBlank() && pkg != packageName) pendingPkg = pkg
+        if (!pkg.isNullOrBlank() && pkg != packageName) {
+            pendingPkg = pkg
+            ForegroundTracker.windowStateListener?.invoke(pkg)
+        }
         main.removeCallbacks(commitPending)
         main.postDelayed(commitPending, 250)
     }
@@ -82,17 +86,21 @@ class ForegroundAppService : AccessibilityService() {
         ForegroundTracker.update(pkg)
     }
 
-    private fun foregroundFromWindows(): String? {
+    /** 确认当前应用时也要看自身设置页，不能用黑名单检测的事件回退值。 */
+    internal fun activeApplicationPackage(): String? = foregroundFromWindows(requireActive = true)
+
+    private fun foregroundFromWindows(requireActive: Boolean = false): String? {
         val list = runCatching { windows }.getOrNull() ?: return null
         var bestPkg: String? = null
         var bestScore = Int.MIN_VALUE
         for (w in list) {
             try {
                 if (w.type != AccessibilityWindowInfo.TYPE_APPLICATION) continue
+                if (requireActive && !w.isActive && !w.isFocused) continue
                 val root = w.root ?: continue
                 val pkg = root.packageName?.toString()
                 root.recycle()
-                if (pkg.isNullOrBlank() || pkg == packageName) continue
+                if (pkg.isNullOrBlank() || (!requireActive && pkg == packageName)) continue
                 var score = w.layer
                 if (w.isActive) score += 10_000
                 if (w.isFocused) score += 20_000

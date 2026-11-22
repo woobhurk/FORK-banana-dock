@@ -85,8 +85,8 @@ internal class OriginalDockRequest(
         if (closed) return "原厂 Dock 请求已取消"
         val dock = manager.callInt("com.geely.lib.oneosapi.IServiceManager", 2, 21) { readStrongBinder() }
             ?: return "oneOS 未提供原厂 Dock 服务（21）"
-        // 连接期间本应用窗口可能已收起或撤销权限，不能再隐藏原厂栏。
-        if (closed || (!visible && !canHide())) return "Banana Dock 当前不可见，未请求隐藏原厂 Dock"
+        // 连接期间本应用窗口可能已收起；检查期间也可能收到取消。
+        if (closed || (!visible && (!canHide() || closed))) return "未满足隐藏条件，未请求隐藏原厂 Dock"
         // 用普通 showDock，让厂商保留 360 全景等场景下的显隐判断。
         dock.callInt("com.geely.lib.oneosapi.systemui.IDockBarService", 1, if (visible) 1 else 3) { Unit }
             ?: return "原厂 Dock 请求未返回有效回执"

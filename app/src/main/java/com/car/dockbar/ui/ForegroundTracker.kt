@@ -17,6 +17,9 @@ object ForegroundTracker {
     /** 前台应用变化回调（在主线程调用） */
     var listener: ((String?) -> Unit)? = null
 
+    /** 无障碍窗口事件的来源包；同包名事件也送达，不改变上面的前台去重。 */
+    internal var windowStateListener: ((String) -> Unit)? = null
+
     fun update(pkg: String?) {
         if (pkg.isNullOrBlank() || pkg == currentPackage) return
         currentPackage = pkg
