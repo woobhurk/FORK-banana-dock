@@ -51,7 +51,8 @@
 | 动作分发 | `dock/DockActions.kt` |
 | 悬浮 Dock 服务和窗口 | `ui/DockOverlayService.kt`、`ui/DockLayout.kt` |
 | 显示/隐藏状态机 | `ui/state/DockStateMachine.kt` |
-| 离屏编辑预览、300ms 长按与排序 | `ui/DockEditorPreviewView.kt`、`ui/DockEditorLongPress.kt`、`model/DockEditorOrder.kt` |
+| Dock 图标长按延迟与拖动触发 | `util/Prefs.kt`、`dock/GestureInput.kt`、`ui/DockDragLongPress.kt` |
+| 离屏编辑预览与排序 | `ui/DockEditorPreviewView.kt`、`model/DockEditorOrder.kt` |
 | 歌词服务和歌词数据源 | `ui/LyricOverlayService.kt`、`media/LyricMonitor.kt`、`media/LyricDownloader.kt` |
 | 媒体会话和通知补充信息 | `media/MediaBridge.kt`、`media/DockNotificationListener.kt` |
 | 车控通道配置 | `config/VehicleChannels.kt` |
@@ -137,7 +138,8 @@
 - Dock 主栏和图标管理预览共用圆角矢量；座椅通风保留三片风叶，座椅和方向盘加热按档位点亮热纹，空调风向保留 `OFF` 和各组合。风向和座椅弹窗复用对应图标，温度弹窗独立使用紧凑的前后挡图标。第三方应用继续使用包管理器返回的原图标。
 - 座椅通风和加热在 Dock、图标管理预览和两个座椅弹窗共用 0 档的「座椅＋短横」图标。Dock 和编辑预览的座椅轮廓使用不降透明度的白／黑前景，1–3 档仍用原有彩色风叶或热纹区分；弹窗的选中反馈不变。
 - 内外循环图标的车轮均向车底突出；外循环用从前挡外弯入车内的箭头，内循环保留车内回转箭头。
-- 编辑长按固定 300ms（`DockEditorLongPress.TIMEOUT_MS`）；拖入预览添加、预览内拖动插入排序、拖出松手移除，取消拖动不保存。
+- 「Dock 图标管理 → 交互与反馈 → 长按延迟」默认 350 ms，可按 50 ms 步进在 200–1000 ms 之间调整。主栏图标动作、图标编辑拖动、快捷应用弹窗与设置页中的槽位换位共用此延迟；调整后从下一次按下起生效，无需重启 Dock。原厂 Dock 和 Android 系统控件的长按、显示动画及弹窗收起计时不受影响。
+- 编辑时，长按后拖入预览添加、预览内拖动插入排序、拖出松手移除，取消拖动不保存。
 - 预览为离屏绘制，不把触摸转发给真实控件，因此编辑时不会写车控、播放媒体或启动应用。
 - 音乐卡、温度组合和风速组合按完整条目移动。
 - 第三方应用走独立入口，系统/个人分类和搜索；删除入口不卸载应用。

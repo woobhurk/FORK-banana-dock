@@ -4,6 +4,7 @@ import android.view.MotionEvent
 import android.view.SoundEffectConstants
 import android.view.View
 import android.view.ViewConfiguration
+import com.car.dockbar.util.Prefs
 import kotlin.math.hypot
 
 object GestureInput {
@@ -17,7 +18,6 @@ object GestureInput {
         view.setOnLongClickListener(null)
         view.isLongClickable = false
         val slop = ViewConfiguration.get(view.context).scaledTouchSlop.toFloat()
-        val longPressMs = ViewConfiguration.getLongPressTimeout().toLong()
         var tracking = false
         var longFired = false
         var pressed = false
@@ -57,7 +57,9 @@ object GestureInput {
                     downY = event.y
                     setPressed(true, event.x, event.y)
                     resolver.onDown(event.x, event.y)
-                    view.postDelayed(longRunnable, longPressMs)
+                    if (binding.longPress != null) {
+                        view.postDelayed(longRunnable, Prefs.dockLongPressDelayMs(view.context))
+                    }
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {

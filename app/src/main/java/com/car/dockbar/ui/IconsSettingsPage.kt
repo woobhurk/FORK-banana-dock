@@ -101,6 +101,18 @@ class IconsSettingsPage(activity: MainActivity) : SettingsPage(activity, MainAct
         root.addView(quickAppsGrid)
         refreshAppDrawerSelectionLabel()
 
+        val minDelay = Prefs.DOCK_LONG_PRESS_MIN_MS
+        val delayStep = 50L
+        addSeekRow(
+            root, "长按延迟",
+            ((Prefs.dockLongPressDelayMs(this) - minDelay) / delayStep).toInt(),
+            ((Prefs.DOCK_LONG_PRESS_MAX_MS - minDelay) / delayStep).toInt(),
+            { "${minDelay + it * delayStep} ms" },
+            reloadDock = false,
+            onChange = { Prefs.setDockLongPressDelayMs(this, minDelay + it * delayStep) },
+            separateValue = true
+        ).id = R.id.settingsLongPressDelayRow
+
         // --- 淡入淡出（时长滑块用于调节显示/隐藏动画快慢）---
         // 0.1 秒粒度（10ms 步进太细不好调）
         // ── [S02] 淡入淡出时长 ───────────────────────
@@ -248,17 +260,8 @@ class IconsSettingsPage(activity: MainActivity) : SettingsPage(activity, MainAct
                     setOnClickListener {
                         if (app == null) chooseAppDrawerApps() else chooseAppDrawerApps(slot)
                     }
-                    if (app != null) setOnLongClickListener {
-                        if (dragFrom >= 0) return@setOnLongClickListener true
-                        dragFrom = slot
-                        dragTo = slot
-                        parent?.requestDisallowInterceptTouchEvent(true)
-                        performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-                        highlightDrag()
-                        true
-                    }
-                    setOnTouchListener { _, event ->
-                        if (dragFrom != slot) return@setOnTouchListener false
+                    if (app != null) DockDragLongPress.attach(this, onDragTouch = drag@{ event ->
+                        if (dragFrom != slot) return@drag
                         when (event.actionMasked) {
                             MotionEvent.ACTION_MOVE -> {
                                 val location = IntArray(2)
@@ -271,11 +274,17 @@ class IconsSettingsPage(activity: MainActivity) : SettingsPage(activity, MainAct
                                     dragTo = target
                                     highlightDrag()
                                 }
-                                true
                             }
-                            MotionEvent.ACTION_UP -> { finishDrag(true); true }
-                            MotionEvent.ACTION_CANCEL -> { finishDrag(false); true }
-                            else -> false
+                            MotionEvent.ACTION_UP -> finishDrag(true)
+                            MotionEvent.ACTION_CANCEL -> finishDrag(false)
+                        }
+                    }) { _, _ ->
+                        if (dragFrom < 0) {
+                            dragFrom = slot
+                            dragTo = slot
+                            parent?.requestDisallowInterceptTouchEvent(true)
+                            performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                            highlightDrag()
                         }
                     }
                 }

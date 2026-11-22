@@ -4,6 +4,8 @@ import android.content.Context
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
+import android.view.HapticFeedbackConstants
+import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.ImageView
@@ -151,32 +153,26 @@ class AppDrawerPopup(
      *   拖到空位上就是单纯搬过去（空位那个槽变成空的）。
      */
     private fun setupSlotDrag(v: View, index: Int) {
-        v.setOnLongClickListener {
-            if (dragFrom != -1) return@setOnLongClickListener true
-            dragFrom = index
-            dragTo = index
-            v.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
-            highlightDrag()
-            Logx.d("快捷应用：长按槽位 $index（${slotApps[index]?.label}），进入拖动")
-            true
-        }
-        v.setOnTouchListener { view, ev ->
-            when (ev.actionMasked) {
-                android.view.MotionEvent.ACTION_MOVE -> {
-                    if (dragFrom != index) return@setOnTouchListener false
-                    val hit = slotAt(ev.rawX, ev.rawY)
-                    if (hit != -1 && hit != dragTo) {
-                        dragTo = hit
-                        highlightDrag()
+        DockDragLongPress.attach(v, onDragTouch = { ev ->
+            if (dragFrom == index) {
+                when (ev.actionMasked) {
+                    MotionEvent.ACTION_MOVE -> {
+                        val hit = slotAt(ev.rawX, ev.rawY)
+                        if (hit != -1 && hit != dragTo) {
+                            dragTo = hit
+                            highlightDrag()
+                        }
                     }
-                    true
+                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> finishDrag()
                 }
-                android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
-                    if (dragFrom != index) return@setOnTouchListener false
-                    finishDrag()
-                    true
-                }
-                else -> false
+            }
+        }) { _, _ ->
+            if (dragFrom == -1) {
+                dragFrom = index
+                dragTo = index
+                v.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                highlightDrag()
+                Logx.d("快捷应用：长按槽位 $index（${slotApps[index]?.label}），进入拖动")
             }
         }
     }

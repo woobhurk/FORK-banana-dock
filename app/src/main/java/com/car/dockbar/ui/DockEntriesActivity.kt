@@ -235,7 +235,7 @@ class DockEntriesActivity : AppCompatActivity() {
                 contentDescription = "可添加：${entry.label}，长按拖入 Dock"
                 setOnClickListener { toast("请长按图标拖入下方 Dock 预览") }
             }
-            DockEditorLongPress.attach(tile) { _, _ ->
+            DockDragLongPress.attach(tile) { _, _ ->
                 startDrag(tile, DockEditorDrag(entry, false), View.DragShadowBuilder(tile))
             }
             val icon = ImageView(this).apply { scaleType = ImageView.ScaleType.FIT_CENTER }
@@ -285,7 +285,7 @@ class DockEntriesActivity : AppCompatActivity() {
         view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
         view.parent?.requestDisallowInterceptTouchEvent(true)
         updateDragHint(item, false)
-        Logx.d("Dock 编辑：固定长按 ${DockEditorLongPress.TIMEOUT_MS}ms，${item.entry.label}")
+        Logx.d("Dock 编辑：长按开始拖动，${item.entry.label}")
         val started = view.startDragAndDrop(ClipData.newPlainText("dock-entry", item.entry.id), shadow, item, 0)
         if (!started) {
             drag = null

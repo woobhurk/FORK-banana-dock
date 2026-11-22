@@ -419,6 +419,17 @@ object Prefs {
     fun entriesJson(ctx: Context) = sp(ctx).getString("dock_entries_json", "") ?: ""
     fun setEntriesJson(ctx: Context, v: String) = sp(ctx).edit().putString("dock_entries_json", v).apply()
 
+    const val DOCK_LONG_PRESS_MIN_MS = 200L
+    const val DOCK_LONG_PRESS_MAX_MS = 1000L
+
+    fun dockLongPressDelayMs(ctx: Context) =
+        sp(ctx).getLong("dock_long_press_delay_ms", 350L)
+            .coerceIn(DOCK_LONG_PRESS_MIN_MS, DOCK_LONG_PRESS_MAX_MS)
+
+    fun setDockLongPressDelayMs(ctx: Context, v: Long) = sp(ctx).edit()
+        .putLong("dock_long_press_delay_ms", v.coerceIn(DOCK_LONG_PRESS_MIN_MS, DOCK_LONG_PRESS_MAX_MS))
+        .apply()
+
     /** 车机设置右侧应用面板的快捷应用 JSON 数组 */
     fun appDrawerAppsJson(ctx: Context) = sp(ctx).getString("app_drawer_apps_json", "") ?: ""
     fun setAppDrawerAppsJson(ctx: Context, v: String) =

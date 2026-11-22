@@ -51,7 +51,7 @@ internal class DockEditorPreviewView(context: Context) : View(context) {
         isClickable = true
         isFocusable = true
         contentDescription = "Dock 编辑预览：长按排序，拖出松手移除"
-        DockEditorLongPress.attach(this) { x, y ->
+        DockDragLongPress.attach(this) { x, y ->
             val index = itemAt(x, y)
             if (index >= 0) {
                 parent?.requestDisallowInterceptTouchEvent(true)

@@ -22,10 +22,11 @@ internal class IconsSettingsLayout(activity: Activity) : SettingsPageLayout(acti
         val manageApps = activity.findViewById<Button>(R.id.settingsManageQuickApps)
         val grid = activity.findViewById<View>(R.id.settingsQuickAppsGrid)
         val fade = activity.findViewById<View>(R.id.settingsFadeDurationRow)
+        val longPress = activity.findViewById<View>(R.id.settingsLongPressDelayRow)
         val auto = activity.findViewById<View>(R.id.settingsAutoFanRow)
         val targets = activity.findViewById<EditText>(R.id.etSettingsPkg).parent as View
         take(targets)
-        listOf(manage, summary, manageApps, grid, fade, auto).forEach { take(it) }
+        listOf(manage, summary, manageApps, grid, fade, longPress, auto).forEach { take(it) }
         page.removeAllViews()
         page.background = null
         page.setPadding(0, 0, 0, 0)
@@ -72,9 +73,11 @@ internal class IconsSettingsLayout(activity: Activity) : SettingsPageLayout(acti
         add(apps, grid, 12)
         apps.addView(text("快捷应用显示在 Dock 的应用面板中", 13f, true), params(18))
 
-        val feedback = card(right, "交互与反馈", "控制显示动画")
+        val feedback = card(right, "交互与反馈", "控制长按触发时间和显示动画")
         feedback.setPadding(dp(26), dp(24), dp(26), dp(22))
         (feedback.getChildAt(1).layoutParams as LinearLayout.LayoutParams).topMargin = dp(8)
+        longPress.setPadding(0, dp(6), 0, dp(6))
+        add(feedback, longPress, 6)
         fade.setPadding(0, dp(6), 0, dp(6))
         add(feedback, fade, 6)
 

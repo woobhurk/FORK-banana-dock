@@ -3,12 +3,15 @@ package com.car.dockbar.ui
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
+import com.car.dockbar.util.Prefs
 
-/** Editor-only fixed long press. Does not change system settings or live Dock gestures. */
-internal object DockEditorLongPress {
-    const val TIMEOUT_MS = 300L
-
-    fun attach(view: View, action: (Float, Float) -> Unit) {
+/** 使用 Dock 长按延迟启动拖动；短按仍由 View 处理。 */
+internal object DockDragLongPress {
+    fun attach(
+        view: View,
+        onDragTouch: ((MotionEvent) -> Unit)? = null,
+        action: (Float, Float) -> Unit,
+    ) {
         val slop = ViewConfiguration.get(view.context).scaledTouchSlop.toFloat()
         var x = 0f
         var y = 0f
@@ -31,23 +34,28 @@ internal object DockEditorLongPress {
                     y = event.y
                     tracking = true
                     fired = false
-                    view.postDelayed(trigger, TIMEOUT_MS)
+                    view.postDelayed(trigger, Prefs.dockLongPressDelayMs(view.context))
                     false
                 }
                 MotionEvent.ACTION_MOVE -> {
-                    if (!fired && (kotlin.math.abs(event.x - x) > slop ||
-                        kotlin.math.abs(event.y - y) > slop)) {
+                    if (fired) {
+                        onDragTouch?.invoke(event)
+                    } else if (kotlin.math.abs(event.x - x) > slop ||
+                        kotlin.math.abs(event.y - y) > slop) {
                         tracking = false
                         view.removeCallbacks(trigger)
                     }
                     fired
                 }
-                MotionEvent.ACTION_UP -> {
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     tracking = false
                     view.removeCallbacks(trigger)
-                    fired
+                    val dragged = fired
+                    fired = false
+                    if (dragged) onDragTouch?.invoke(event)
+                    dragged && event.actionMasked == MotionEvent.ACTION_UP
                 }
-                MotionEvent.ACTION_CANCEL, MotionEvent.ACTION_POINTER_DOWN -> {
+                MotionEvent.ACTION_POINTER_DOWN -> {
                     tracking = false
                     view.removeCallbacks(trigger)
                     false
@@ -59,6 +67,7 @@ internal object DockEditorLongPress {
             override fun onViewAttachedToWindow(v: View) = Unit
             override fun onViewDetachedFromWindow(v: View) {
                 tracking = false
+                fired = false
                 v.removeCallbacks(trigger)
             }
         })
