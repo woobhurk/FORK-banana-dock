@@ -30,8 +30,11 @@ object StartupPermissions {
         "android.car.permission.CAR_EXTERIOR_ENVIRONMENT"
     )
 
+    internal enum class CheckState { NOT_CHECKED, CORE_READY, CORE_MISSING, FAILED }
+    internal data class CheckResult(val state: CheckState, val report: String)
+
     @Volatile
-    var lastReport: String = "尚未检查核心权限"
+    internal var lastCheck = CheckResult(CheckState.NOT_CHECKED, "尚未检查核心权限")
         private set
 
     fun start(ctx: Context) {
@@ -44,26 +47,27 @@ object StartupPermissions {
             }.start()
         } catch (e: Exception) {
             busy.set(false)
-            lastReport = "启动权限检查失败：${e.javaClass.simpleName}: ${e.message}"
-            Logx.e(lastReport, e)
+            val report = "启动权限检查失败：${e.javaClass.simpleName}: ${e.message}"
+            lastCheck = CheckResult(CheckState.FAILED, report)
+            Logx.e(report, e)
         }
     }
 
     /** 手动检查与启动共用同一补权流程，在后台调用。 */
     fun grantMissing(ctx: Context): String {
-        if (!busy.compareAndSet(false, true)) return "权限检查正在执行，本次未重复执行。\n$lastReport"
+        if (!busy.compareAndSet(false, true)) return "权限检查正在执行，本次未重复执行。\n${lastCheck.report}"
         return execute(ctx.applicationContext)
     }
 
     private fun execute(ctx: Context): String {
         return try {
             Check(ctx).run().also {
-                lastReport = it
-                Logx.d(it)
-            }
+                lastCheck = it
+                Logx.d(it.report)
+            }.report
         } catch (e: Exception) {
             "权限检查异常：${e.javaClass.simpleName}: ${e.message}".also {
-                lastReport = it
+                lastCheck = CheckResult(CheckState.FAILED, it)
                 Logx.e(it, e)
             }
         } finally {
@@ -83,6 +87,7 @@ object StartupPermissions {
         private var searched = false
         private var attempted = false
         private var permissionsChanged = false
+        private var coreReady = true
 
         private fun lyricWanted() = (Prefs.lyricEnabled(ctx) || Prefs.lyricBoot(ctx)) && Prefs.safeLevel(ctx) < 2
         private fun windowWanted() = Prefs.overlayEnabled(ctx) || lyricWanted()
@@ -90,24 +95,24 @@ object StartupPermissions {
         private fun granted(permission: String) = ctx.checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED
         private fun remaining() = TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime()).coerceAtLeast(0)
 
-        fun run(): String {
+        fun run(): CheckResult {
             report.append("应用用户：").append(user).append('\n')
-            ensure("悬浮窗", { Settings.canDrawOverlays(ctx) }) {
+            ensureCore("悬浮窗", { Settings.canDrawOverlays(ctx) }) {
                 command("悬浮窗", "appops set --user $user $pkg SYSTEM_ALERT_WINDOW allow")
             }
-            ensure("WRITE_SECURE_SETTINGS（无障碍维护）", {
+            ensureCore("WRITE_SECURE_SETTINGS（无障碍维护）", {
                 granted(Manifest.permission.WRITE_SECURE_SETTINGS)
             }) {
                 command("WRITE_SECURE_SETTINGS", "pm grant --user $user $pkg android.permission.WRITE_SECURE_SETTINGS")
             }
-            ensure("通知使用权", { MediaBridge.hasPermission(ctx) }) {
+            ensureCore("通知使用权", { MediaBridge.hasPermission(ctx) }) {
                 command("通知使用权", "cmd notification allow_listener ${quote(listener.flattenToString())} $user")
             }
-            ensure("前台检测无障碍", ::accessibilityEnabled) {
+            ensureCore("前台检测无障碍", ::accessibilityEnabled) {
                 grantAccessibility()
             }
             if (Build.VERSION.SDK_INT >= 33) {
-                ensure("通知发送", { granted(Manifest.permission.POST_NOTIFICATIONS) }) {
+                ensureCore("通知发送", { granted(Manifest.permission.POST_NOTIFICATIONS) }) {
                     command("通知发送", "pm grant --user $user $pkg android.permission.POST_NOTIFICATIONS")
                 }
             }
@@ -117,7 +122,8 @@ object StartupPermissions {
             connectionReport()
             if (remaining() == 0L) report.append("检查已到 45 秒期限；未确认的项目不代表成功。\n")
             report.append("仅尝试本包声明的核心与车控权限；未请求 root、存储、日志、安装来源或电池白名单；未写入车控通道，未修改用户功能开关和熔断。")
-            return report.toString()
+            val state = if (coreReady) CheckState.CORE_READY else CheckState.CORE_MISSING
+            return CheckResult(state, report.toString())
         }
 
         private fun ensureVehiclePermissions() {
@@ -167,10 +173,17 @@ object StartupPermissions {
             null
         }
 
-        private fun ensure(label: String, state: () -> Boolean, grant: () -> Unit) {
+        private fun ensureCore(label: String, state: () -> Boolean, grant: () -> Unit) {
+            if (!ensure(label, state, grant)) coreReady = false
+        }
+
+        private fun ensure(label: String, state: () -> Boolean, grant: () -> Unit): Boolean =
             when (read(label, state)) {
-                null -> return
-                true -> report.append(label).append("：已满足，无需写入。\n")
+                null -> false
+                true -> {
+                    report.append(label).append("：已满足，无需写入。\n")
+                    true
+                }
                 false -> {
                     if (mayGrant()) grant()
                     val finalState = read(label, state)
@@ -181,9 +194,9 @@ object StartupPermissions {
                             false -> "仍缺失，未确认生效。\n"
                             null -> "失败，未确认生效。\n"
                         })
+                    finalState == true
                 }
             }
-        }
 
         private fun mayGrant(): Boolean = remaining() > 0L
 

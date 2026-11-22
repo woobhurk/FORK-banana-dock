@@ -53,7 +53,6 @@
         <include layout="@layout/settings_page_overlay" />
         <include layout="@layout/settings_page_appearance" />
         <include layout="@layout/settings_icon_targets" />
-        <include layout="@layout/settings_vehicle_channels" />
         <include layout="@layout/settings_page_logs" />
         <include layout="@layout/settings_legacy_links" />
         <include layout="@layout/settings_page_resident" />

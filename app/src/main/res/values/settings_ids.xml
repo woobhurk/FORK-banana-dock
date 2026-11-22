@@ -23,11 +23,4 @@
     <item name="settingsLongPressDelayRow" type="id" />
     <item name="settingsMusicScrollHoldRow" type="id" />
     <item name="settingsAutoFanRow" type="id" />
-    <item name="settingsLogUploadTitle" type="id" />
-    <item name="settingsLogUploadHint" type="id" />
-    <item name="settingsLogUploadAddress" type="id" />
-    <item name="settingsLogUploadSwitch" type="id" />
-    <item name="settingsLogState" type="id" />
-    <item name="settingsLogTransferActions" type="id" />
-    <item name="settingsLogDiagnosticActions" type="id" />
 </resources>

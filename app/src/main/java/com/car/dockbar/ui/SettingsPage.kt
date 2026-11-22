@@ -48,26 +48,13 @@ abstract class SettingsPage(protected val activity: MainActivity, val key: Strin
 
     protected fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
 
-    protected fun hex(v: Int): String = String.format("0x%08X", v)
-
-    protected fun parseNum(s: String): Int {
-        val t = s.trim()
-        return try {
-            when {
-                t.isEmpty() -> 0
-                t.startsWith("0x", true) -> t.substring(2).toLong(16).toInt()
-                else -> t.toLong().toInt()
-            }
-        } catch (_: Throwable) { 0 }
-    }
-
     protected fun addSwitchRow(
         parent: LinearLayout,
         label: String,
         checked: Boolean,
         reloadDock: Boolean = true,
         onChange: (Boolean) -> Unit
-    ) {
+    ): SwitchCompat {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -87,6 +74,7 @@ abstract class SettingsPage(protected val activity: MainActivity, val key: Strin
         parent.addView(row, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
         ))
+        return sw
     }
 
     protected fun addSeekRow(

@@ -6,7 +6,6 @@
     <string name="title_overlay">悬浮 Dock 栏</string>
     <string name="title_appearance">外观</string>
     <string name="title_entries">跳转入口</string>
-    <string name="title_channels">车控通道</string>
     <string name="title_log">运行日志</string>
 
     <string name="btn_start">开启 Dock 悬浮栏</string>
@@ -16,8 +15,6 @@
     <string name="btn_apply_entries">保存入口配置</string>
     <string name="btn_apply_temp">保存温度换算</string>
     <string name="btn_clear_log">清空日志</string>
-    <string name="btn_read_all">读取全部通道</string>
-    <string name="btn_reset_channels">恢复默认通道</string>
 
     <!-- 前台应用检测（无障碍） -->
     <string name="accessibility_foreground_desc">仅用于识别当前最前面的应用，以决定是否按黑名单隐藏 Dock 栏。只看窗口属于哪个应用，不记录窗口里的文字。Dock 隐藏时，底部透明区域上的单击会交回下面的应用。</string>

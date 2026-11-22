@@ -65,6 +65,7 @@ internal object HvacDiagnostics {
     private var session: Session? = null
     private var completedReport: String? = null
     val active: Boolean get() = synchronized(lock) { session != null }
+    val hasReport: Boolean get() = synchronized(lock) { session != null || completedReport != null }
 
     fun begin(ctx: Context, mode: HvacValidationMode) {
         // 通道配置读取在锁外完成，不保留 Context。

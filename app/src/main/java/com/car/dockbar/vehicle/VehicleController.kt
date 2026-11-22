@@ -610,13 +610,14 @@ object VehicleController {
         }
     }
 
-    private fun activeValidationMode(): HvacValidationMode? {
+    internal fun activeValidationMode(): HvacValidationMode? {
         val c = appCtx ?: return null
         return validationMode?.takeIf { SystemClock.elapsedRealtime() < validationDeadlineAt &&
             Prefs.vehicleApiEnabled(c) && !Prefs.simulate(c) }
     }
 
-
+    internal fun validationRemainingMs(): Long =
+        (validationDeadlineAt - SystemClock.elapsedRealtime()).coerceAtLeast(0L)
     private fun isAcMaxValidation(epoch: Long): Boolean =
         activeValidationMode() == HvacValidationMode.AC_MAX && validationEpoch == epoch
 

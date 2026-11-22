@@ -13,7 +13,6 @@ import com.car.dockbar.media.MediaBridge
 import com.car.dockbar.util.IntentLauncher
 import com.car.dockbar.util.Logx
 import com.car.dockbar.util.Prefs
-import com.car.dockbar.vehicle.VehicleBridge
 import com.car.dockbar.vehicle.VehicleController
 import android.provider.Settings
 
@@ -30,7 +29,6 @@ class FloatingDockSettingsPage(activity: MainActivity) : SettingsPage(activity, 
     private lateinit var tvOverlayPerm: TextView
     private lateinit var tvNotifPerm: TextView
     private lateinit var tvNotifHint: TextView
-    private lateinit var tvBackend: TextView
     private lateinit var bananaDockSwitch: SwitchCompat
     private lateinit var originalDockSwitch: SwitchCompat
     private lateinit var originalDockResult: TextView
@@ -45,7 +43,6 @@ class FloatingDockSettingsPage(activity: MainActivity) : SettingsPage(activity, 
         tvOverlayPerm = findViewById(R.id.tvOverlayPerm)
         tvNotifPerm = findViewById(R.id.tvNotifPerm)
         tvNotifHint = findViewById(R.id.tvNotifHint)
-        tvBackend = findViewById(R.id.tvBackend)
         bananaDockSwitch = findViewById(R.id.swEnabled)
         originalDockSwitch = findViewById(R.id.swUseOriginalDock)
         originalDockResult = findViewById(R.id.tvOriginalDockResult)
@@ -180,16 +177,9 @@ class FloatingDockSettingsPage(activity: MainActivity) : SettingsPage(activity, 
                 append("\n").append(DockOverlayService.lastError)
             }
         }
-        tvBackend.text = "后端：${VehicleBridge.backend.label}" +
-                "　温度通道：${VehicleBridge.floatChannelName}" +
-                if (Prefs.simulate(this)) "（模拟模式已开启，忽略真实通道）" else ""
     }
     private fun permColor(ok: Boolean): Int =
         if (ok) 0xFF3DDC97.toInt() else ContextCompat.getColor(this, R.color.warn)
-
-    // =====================================================================
-    // 车控通道表
-    // =====================================================================
 
     private fun openAccessibilitySettings() {
         runCatching {
