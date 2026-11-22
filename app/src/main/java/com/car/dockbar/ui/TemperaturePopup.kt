@@ -118,6 +118,7 @@ class TemperaturePopup(
     // 右栏 主驾
     private var btnDefrostFront: DockPopupIconButton? = null
     private var btnDefrostRear: DockPopupIconButton? = null
+    private var acMaxButton: Pair<Long, DockPopupIconButton>? = null
     private var btnSteerHeat: DockPopupIconButton? = null
 
     // 右栏 副驾
@@ -296,6 +297,7 @@ class TemperaturePopup(
                 }
                 resetTimer()
             }
+            acMaxButton = acMaxEpoch?.let { it to fastCool }
             val fastHeat = funcBtn(
                 R.drawable.ic_popup_heat, "极速升温", "MAX", iconScale = ICON_SCALE_FAST_HEAT
             ) {
@@ -454,6 +456,17 @@ class TemperaturePopup(
                 it.contentDescription = "后挡加热${if (st.defrostRear) "开启" else "关闭"}"
                 it.setActive(st.defrostRear)
             }
+            acMaxButton?.let { (epoch, button) ->
+                val on = VehicleController.acMaxOn(epoch)
+                button.setActive(on == true)
+                button.setCaption(if (on == null) "MAX 未知" else "MAX 试开")
+                val status = when (on) {
+                    true -> "已开启"
+                    false -> "已关闭"
+                    null -> "未知"
+                }
+                button.contentDescription = "原厂急速降温试开，当前状态：$status"
+            }
             btnSteerHeat?.let {
                 it.visibility = if (st.steeringHeatVisible) View.VISIBLE else View.GONE
                 it.setIcon(STEERING_HEAT_ICONS[st.steeringHeat.coerceIn(0, STEERING_HEAT_ICONS.lastIndex)])
@@ -599,6 +612,7 @@ class TemperaturePopup(
         // ★ 立即置空：快速连点时 isShowing 能马上反映「已关」，toggle 语义才正确
         content = null
         params = null
+        acMaxButton = null
         VehicleController.removeListener(listener)
         box.animate().alpha(0f).setDuration(180L).withEndAction {
             runCatching { wm?.removeViewImmediate(box) }

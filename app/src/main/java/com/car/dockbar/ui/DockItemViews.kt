@@ -4,9 +4,13 @@ import android.animation.Animator
 import android.animation.AnimatorListenerAdapter
 import android.animation.ValueAnimator
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapShader
 import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.Path
+import android.graphics.Matrix
+import android.graphics.Paint
+import android.graphics.Shader
 import android.graphics.drawable.GradientDrawable
 import android.util.TypedValue
 import android.view.Gravity
@@ -338,7 +342,6 @@ class DockMusicView @JvmOverloads constructor(
     private val iconScale: Float = 1f
 ) : LinearLayout(context) {
 
-    val album = ImageView(context)
     val noteOverlay = ImageView(context)
     val tvTitle: TextView = OverflowTextView(context)
     val tvArtist: TextView = OverflowTextView(context)
@@ -354,6 +357,23 @@ class DockMusicView @JvmOverloads constructor(
 
     // 专辑图：原 0.80× 缩到 0.7×（即 0.56× 栏高），左移腾出空间给歌曲信息
     private val albumSize = (barHeightPx * 0.80f * 0.7f).toInt().coerceAtLeast(8)
+    private val albumRadius = albumSize * 0.16f
+    private val albumPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+    private val albumMatrix = Matrix()
+    private val albumPlaceholder = (context.getDrawable(R.drawable.bg_album)!!.mutate() as GradientDrawable).apply {
+        cornerRadius = albumRadius
+    }
+    private var albumArt: Bitmap? = null
+    private val albumFrame = object : FrameLayout(context) {
+        override fun onDraw(canvas: Canvas) {
+            if (albumArt == null) return
+            // 直接绘制带抗锯齿的圆弧，不使用 clipPath 裁切封面。
+            canvas.drawRoundRect(0f, 0f, width.toFloat(), height.toFloat(), albumRadius, albumRadius, albumPaint)
+        }
+    }.apply {
+        background = albumPlaceholder
+        setWillNotDraw(false)
+    }
 
     init {
         orientation = HORIZONTAL
@@ -364,27 +384,6 @@ class DockMusicView @JvmOverloads constructor(
         setPadding((4 * textScale).toInt(), 0, (10 * textScale).toInt(), 0)
 
         // 封面（占位是紫粉渐变 + 音符）
-        val albumFrame = object : FrameLayout(context) {
-            private val clip = Path()
-
-            override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
-                super.onSizeChanged(w, h, oldw, oldh)
-                val radius = (background as GradientDrawable).cornerRadius
-                clip.rewind()
-                clip.addRoundRect(0f, 0f, w.toFloat(), h.toFloat(), radius, radius, Path.Direction.CW)
-            }
-
-            override fun dispatchDraw(canvas: Canvas) {
-                val saved = canvas.save()
-                canvas.clipPath(clip)
-                super.dispatchDraw(canvas)
-                canvas.restoreToCount(saved)
-            }
-        }.apply { setBackgroundResource(R.drawable.bg_album) }
-        albumFrame.addView(
-            album, FrameLayout.LayoutParams(albumSize, albumSize, Gravity.CENTER)
-                .apply { album.scaleType = ImageView.ScaleType.CENTER_CROP }
-        )
         albumFrame.addView(
             noteOverlay, FrameLayout.LayoutParams(
                 (albumSize * 0.55f).toInt(),
@@ -489,8 +488,7 @@ class DockMusicView @JvmOverloads constructor(
     }
 
     fun renderEmpty() {
-        album.visibility = View.GONE
-        noteOverlay.visibility = View.VISIBLE
+        renderArtwork(null)
         // 其它 Dock 状态变化也会重绑音乐卡。文字没变时不要 setText，否则滚动会被拉回开头。
         setTextIfChanged(tvTitle, "暂无播放")
         setTextIfChanged(tvArtist, "点此打开播放器")
@@ -533,24 +531,32 @@ class DockMusicView @JvmOverloads constructor(
     fun render(
         title: String,
         artist: String,
-        art: android.graphics.Bitmap?,
+        art: Bitmap?,
         playing: Boolean
     ) {
-        if (art != null) {
-            album.setImageBitmap(art)
-            album.visibility = View.VISIBLE
-            noteOverlay.visibility = View.GONE
-        } else {
-            album.setImageDrawable(null)
-            album.visibility = View.GONE
-            noteOverlay.visibility = View.VISIBLE
-        }
+        renderArtwork(art)
         setTextIfChanged(tvTitle, title.ifBlank { "未知曲目" })
         setTextIfChanged(tvArtist, artist.ifBlank { "—" })
         btnPlay.visibility = View.VISIBLE
         btnNext.visibility = View.VISIBLE
         btnPlay.setIcon(if (playing) R.drawable.ic_pause else R.drawable.ic_play)
         btnPlay.contentDescription = if (playing) "暂停" else "播放"
+    }
+
+    private fun renderArtwork(art: Bitmap?) {
+        if (albumArt === art) return
+        albumArt = art
+        albumPaint.shader = art?.let { bitmap ->
+            // 封面框的宽高固定为 albumSize；按短边缩放，保留原有居中裁切。
+            val size = albumSize.toFloat()
+            val scale = size / minOf(bitmap.width, bitmap.height)
+            albumMatrix.setScale(scale, scale)
+            albumMatrix.postTranslate((size - bitmap.width * scale) / 2f, (size - bitmap.height * scale) / 2f)
+            BitmapShader(bitmap, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP).apply { setLocalMatrix(albumMatrix) }
+        }
+        albumFrame.background = if (art == null) albumPlaceholder else null
+        noteOverlay.visibility = if (art == null) View.VISIBLE else View.GONE
+        albumFrame.invalidate()
     }
 
     private fun setTextIfChanged(view: TextView, value: String) {
