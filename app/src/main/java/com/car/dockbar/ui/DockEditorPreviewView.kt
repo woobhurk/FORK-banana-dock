@@ -4,14 +4,11 @@ import com.car.dockbar.dock.DockCatalog
 import com.car.dockbar.dock.DockSnapshots
 import com.car.dockbar.dock.DockMetrics
 import com.car.dockbar.dock.SilentDockHost
-import com.car.dockbar.dock.airDirectionIcon
-import com.car.dockbar.dock.levelIcon
 
 import android.content.ClipData
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
-import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Point
 import android.graphics.Rect
@@ -21,14 +18,10 @@ import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
-import com.car.dockbar.R
-import com.car.dockbar.media.MediaBridge
 import com.car.dockbar.media.CabinVolume
 import com.car.dockbar.model.Builtin
 import com.car.dockbar.model.DockEntry
-import com.car.dockbar.util.Logx
 import com.car.dockbar.util.Prefs
-import com.car.dockbar.vehicle.VehicleController
 import kotlin.math.roundToInt
 
 internal data class DockEditorDrag(val entry: DockEntry, val fromPreview: Boolean)
@@ -46,6 +39,9 @@ internal class DockEditorPreviewView(context: Context) : View(context) {
     private var gap: Int? = null
     private val density = resources.displayMetrics.density
     private var candidateFocus: Rect? = null
+    var lightBackdrop: Boolean = !Prefs.isNightMode(context)
+    private val backdropColor: Int
+        get() = if (lightBackdrop) 0xFFCED1D6.toInt() else 0xFF171C25.toInt()
 
     init {
         isClickable = true
@@ -67,31 +63,19 @@ internal class DockEditorPreviewView(context: Context) : View(context) {
         val ctx = context.applicationContext
         val width = nativeWidth ?: (Prefs.dockWidthPx(ctx).takeIf { it > 0 }?.coerceIn(320, 4096) ?: 1920)
         val height = Prefs.dockHeightPx(ctx).coerceIn(40, 512)
-        val layout = DockLayout(ctx).apply {
-            cornerRadius = Prefs.cornerRadiusPx(ctx).toFloat()
-            showSeparators = Prefs.showSeparators(ctx)
-            when (Prefs.bgMode(ctx)) {
-                BgMode.SOLID -> bgColor = Prefs.solidBgColor(ctx)
-                BgMode.TRANSPARENT -> bgColor = Color.TRANSPARENT
-                BgMode.GRADIENT -> { bgColor = Color.TRANSPARENT; bgColors = Prefs.currentGradientColors(ctx) }
-                BgMode.BLUR -> {
-                    bgColor = Color.TRANSPARENT
-                    background = GrayOverlayDrawable(Prefs.overlayGrayLevel(ctx),
-                        Prefs.overlayTransparency(ctx), cornerRadius)
-                }
-            }
-        }
-        // 每次显式渲染刷新一次媒体真实读值，整批条目复用同一快照。
-        val darkIcons = Color.red(DockIconView.fgColor) < 128
+        val layout = DockLayout(ctx).apply { applyAppearance() }
+        val palette = layout.previewPalette(backdropColor)
+        // 每次显式渲染刷新一次媒体读值，整批条目复用同一快照。
         CabinVolume.read(ctx, CabinVolume.MEDIA)
-        val snapshot = DockSnapshots.capture(ctx, darkIcons, preview = true)
+        val snapshot = DockSnapshots.capture(ctx, palette.darkIcons, preview = true)
+        val iconPx = DockMetrics.iconSizePx(ctx)
         items.forEach { entry ->
-            val iconPx = (65 * Prefs.iconScale(ctx)).toInt().coerceAtLeast(12)
             val mounted = DockCatalog.mount(ctx, entry, SilentDockHost, attachGestures = false, iconPx)
             mounted.widget.bind(mounted, snapshot)
             layout.addItem(mounted.view, mounted.span, mounted.separator, mounted.fixedWidthPx,
                 mounted.flexMinPx, mounted.flexMaxPx)
         }
+        layout.applyPalette(palette)
         layout.measure(MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY),
             MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY))
         layout.layout(0, 0, width, height)
@@ -105,8 +89,7 @@ internal class DockEditorPreviewView(context: Context) : View(context) {
         }
         val next = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(next)
-        if (nativeWidth != null) canvas.drawColor(
-            if (Color.red(DockIconView.fgColor) < 128) 0xFFCED1D6.toInt() else 0xFF171C25.toInt())
+        if (nativeWidth != null) canvas.drawColor(backdropColor)
         layout.draw(canvas)
         // Old bitmaps are released by GC rather than recycled while RenderThread may still use them.
         bitmap = next
@@ -121,7 +104,7 @@ internal class DockEditorPreviewView(context: Context) : View(context) {
             Builtin.FAN_COMBO -> DockMetrics.FAN_COMBO_FIXED_WIDTH_PX
             else -> DockMetrics.fixedWidthFor(entry.span)
         }
-        val sample = DockEditorPreviewView(context)
+        val sample = DockEditorPreviewView(context).apply { lightBackdrop = this@DockEditorPreviewView.lightBackdrop }
         sample.render(listOf(entry), nativeWidth)
         val image = requireNotNull(sample.bitmap)
         val crop = sample.candidateFocus
@@ -149,7 +132,7 @@ internal class DockEditorPreviewView(context: Context) : View(context) {
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         val image = bitmap ?: return
-        paint.color = if (Color.red(DockIconView.fgColor) < 128) 0xFFCED1D6.toInt() else 0xFF171C25.toInt()
+        paint.color = backdropColor
         canvas.drawRoundRect(target, 10 * density, 10 * density, paint)
         canvas.drawBitmap(image, null, target, paint)
         if (entries.isEmpty()) {

@@ -139,9 +139,26 @@ class DockEntriesActivity : AppCompatActivity() {
         })
 
         val edit = card(page)
-        edit.addView(label("Dock 预览", 21f, bold = true))
-        edit.addView(label("长按图标拖动排序；拖出预览并松手移除，内置控件会回到上方", 13f, true), lp(12))
         preview = DockEditorPreviewView(this)
+        val previewHeader = row().apply { gravity = Gravity.CENTER_VERTICAL }
+        previewHeader.addView(label("Dock 预览", 21f, bold = true), LinearLayout.LayoutParams(
+            0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        fun backdropLabel() = "模拟前台：${if (preview.lightBackdrop) "亮底" else "暗底"}"
+        val backdrop = Button(this).apply {
+            text = backdropLabel()
+            textSize = 15f * 1.3f
+            typeface = AppFont.bold(this@DockEntriesActivity)
+            background = ContextCompat.getDrawable(this@DockEntriesActivity, R.drawable.bg_field)
+            setTextColor(color(R.color.settings_text))
+            setOnClickListener {
+                preview.lightBackdrop = !preview.lightBackdrop
+                text = backdropLabel()
+                render()
+            }
+        }
+        previewHeader.addView(backdrop, LinearLayout.LayoutParams(dp(164), dp(44)))
+        edit.addView(previewHeader, lp())
+        edit.addView(label("长按图标拖动排序；拖出预览并松手移除，内置控件会回到上方", 13f, true), lp(12))
         edit.addView(preview, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(154)).apply {
             topMargin = dp(18)
         })

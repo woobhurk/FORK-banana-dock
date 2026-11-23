@@ -46,7 +46,7 @@ class DockStatusLabel(private val ctx: Context) {
         main.post {
             if (content == null) build()
             textView?.text = text
-            textView?.setTextColor(if (active) DockIconView.accentColor else DockIconView.fgColorDim)
+            textView?.setTextColor(if (active) DockPopupStyle.selectedText(DockPopupStyle.accent(ctx)) else DockPopupStyle.secondary)
             textView?.alpha = if (active) 1f else 0.8f
             content?.alpha = 1f
             // 每次刷新都重置倒计时

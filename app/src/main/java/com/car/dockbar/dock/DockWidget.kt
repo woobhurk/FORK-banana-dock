@@ -5,6 +5,7 @@ import android.view.View
 import com.car.dockbar.model.DockEntry
 import com.car.dockbar.ui.DockIconView
 import com.car.dockbar.ui.DockValueView
+import com.car.dockbar.util.Prefs
 
 enum class BindKind {
     NONE, TEMP_DRIVER, TEMP_PASSENGER, FAN, MUSIC, LYRIC, RECIRC, VENT, SEAT_HEAT,
@@ -65,6 +66,8 @@ object DockMetrics {
     const val SPAN3_FIXED_PX = 290
     const val MUSIC_MIN_WIDTH_PX = 295
     const val MUSIC_MAX_WIDTH_PX = 500
+
+    internal fun iconSizePx(context: Context) = (65 * Prefs.iconScale(context)).toInt().coerceAtLeast(12)
 
     fun fixedWidthFor(span: Int): Int = when (span) {
         1 -> SLOT_FIXED_PX

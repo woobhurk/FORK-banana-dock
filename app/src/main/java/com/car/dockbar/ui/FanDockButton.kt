@@ -33,10 +33,11 @@ internal class FanDockButton(context: Context, private val iconPx: Int) : View(c
         val stopped = !auto && level <= 0
         this.auto = auto
         shownLevel = if (auto && level !in 1..5) "–" else level.coerceIn(0, 9).toString()
-        fan.setTint(if (stopped) DockIconView.offColor else DockIconView.fgColor)
+        val foreground = DockBarPalette.foreground(darkIcons)
+        fan.setTint(if (stopped) DockBarPalette.offColor(darkIcons) else foreground)
         // 深浅底使用评审稿的两种蓝色，保持小字在两种背景上的对比度。
         autoMark.setTint(if (darkIcons) 0xFF125BA8.toInt() else 0xFF79B8FF.toInt())
-        number.color = DockIconView.fgColor
+        number.color = foreground
         contentDescription = when {
             stopped -> "风量关闭，0 档"
             auto && level !in 1..5 -> "自动风量，档位未知"

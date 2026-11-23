@@ -57,7 +57,7 @@ internal class IconsSettingsLayout(activity: Activity) : SettingsPageLayout(acti
         manage.setTextColor(color(R.color.settings_on_accent))
         add(entries, manage, 20)
 
-        val apps = card(left, "快捷应用", "长按拖动换位，点击右上角 × 清除应用")
+        val apps = card(left, "快捷应用", "点击空位添加，长按拖动换位，点击 × 清除应用")
         val appsHeader = row().apply { gravity = Gravity.CENTER_VERTICAL }
         summary.setPadding(0, 0, 0, 0)
         summary.textSize = 14f

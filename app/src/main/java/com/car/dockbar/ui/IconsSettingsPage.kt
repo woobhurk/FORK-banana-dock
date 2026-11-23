@@ -217,13 +217,7 @@ class IconsSettingsPage(activity: MainActivity) : SettingsPage(activity, MainAct
         var dragTo = -1
         fun highlightDrag() {
             slotViews.forEachIndexed { index, view ->
-                view.alpha = when {
-                    dragFrom < 0 -> 1f
-                    index == dragFrom -> .9f
-                    index == dragTo -> 1f
-                    else -> .5f
-                }
-                view.elevation = if (index == dragFrom) dp(8).toFloat() else 0f
+                AppDrawerSlotStyle.updateDrag(view, index, dragFrom, dragTo)
             }
         }
         fun finishDrag(commit: Boolean) {
@@ -254,6 +248,8 @@ class IconsSettingsPage(activity: MainActivity) : SettingsPage(activity, MainAct
                 val app = apps.getOrNull(slot)
                 val tile = FrameLayout(this).apply {
                     background = ContextCompat.getDrawable(this@IconsSettingsPage, R.drawable.bg_field)
+                    AppDrawerSlotStyle.applyDragOutline(this,
+                        ContextCompat.getColor(this@IconsSettingsPage, R.color.settings_accent))
                     isClickable = true
                     isFocusable = true
                     contentDescription = if (app == null) "管理快捷应用 ${slot + 1}" else "替换快捷应用 ${app.label}"
@@ -296,31 +292,22 @@ class IconsSettingsPage(activity: MainActivity) : SettingsPage(activity, MainAct
                 }
                 tile.addView(body, FrameLayout.LayoutParams(
                     FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+                val secondary = ContextCompat.getColor(this, R.color.settings_secondary)
+                val iconSize = dp(42)
                 val icon = ImageView(this).apply {
                     scaleType = ImageView.ScaleType.FIT_CENTER
-                    if (app != null) {
+                    if (app == null) {
+                        AppDrawerSlotStyle.emptyIcon(this, iconSize, secondary)
+                    } else {
                         setImageResource(R.drawable.ic_car)
                         loadAppIconAsync(app.packageName, this)
-                    } else {
-                        setImageDrawable(GradientDrawable().apply { setColor(Color.TRANSPARENT) })
                     }
                 }
-                if (app != null) body.addView(icon, LinearLayout.LayoutParams(dp(42), dp(42)))
-                else body.addView(TextView(this).apply {
-                    text = "+"
-                    textSize = 32f
-                    gravity = Gravity.CENTER
-                    setTextColor(ContextCompat.getColor(this@IconsSettingsPage, R.color.settings_secondary))
-                }, LinearLayout.LayoutParams(dp(42), dp(42)))
-                body.addView(TextView(this).apply {
-                    text = app?.label ?: "管理应用"
-                    textSize = 14f
-                    gravity = Gravity.CENTER
-                    maxLines = 1
-                    ellipsize = android.text.TextUtils.TruncateAt.END
-                    setTextColor(ContextCompat.getColor(this@IconsSettingsPage,
-                        if (app == null) R.color.settings_secondary else R.color.settings_text))
-                }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
+                body.addView(icon, LinearLayout.LayoutParams(iconSize, iconSize))
+                val label = TextView(this)
+                AppDrawerSlotStyle.label(label, app?.label ?: "空位",
+                    if (app == null) secondary else ContextCompat.getColor(this, R.color.settings_text))
+                body.addView(label, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(7) })
                 if (app != null) tile.addView(TextView(this).apply {
                     text = "×"

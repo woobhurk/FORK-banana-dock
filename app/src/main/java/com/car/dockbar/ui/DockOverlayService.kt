@@ -2,6 +2,7 @@ package com.car.dockbar.ui
 
 import com.car.dockbar.dock.airDirectionIcon
 import com.car.dockbar.dock.DockCatalog
+import com.car.dockbar.dock.DockMetrics
 import com.car.dockbar.dock.DockSnapshot
 import com.car.dockbar.dock.DockSnapshots
 import com.car.dockbar.dock.MountedEntry
@@ -524,7 +525,7 @@ class DockOverlayService : Service() {
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         // 日夜模式切换 → 换底色 / 渐变（对齐吉利 setDockBg 的日夜切换）
-        runCatching { root?.let { applyBackground(it) } }
+        runCatching { root?.applyAppearance(onSystemHome = onSystemHome()) }
     }
 
     private fun teardown() {
@@ -629,26 +630,19 @@ class DockOverlayService : Service() {
         statusLabel = null
         val ctx = this
 
-        val iconScale = Prefs.iconScale(ctx)
-
         // 自动反色：先按壁纸给初始调色板（首帧用），随后由真实背景采样校正
-        applyContrast(ctx)
+        darkText = !initialLightBackground(ctx)
 
         val layout = DockLayout(ctx).apply {
-            cornerRadius = Prefs.cornerRadiusPx(ctx).toFloat()
-            showSeparators = Prefs.showSeparators(ctx)
-            separatorColor = if (darkText) 0x33FFFFFF else 0x33000000
-            DockIconView.accentColor = Prefs.accentColor(ctx)
             onPressChanged = { down ->
                 if (down) stateMachine?.pauseAutoHide() else stateMachine?.onUserIdle()
             }
         }
-        // 背景：渐变优先；未启用渐变则用纯色（可跟随日夜模式）
-        applyBackground(layout)
+        layout.applyAppearance(onSystemHome = onSystemHome())
 
         // 按用户配置的条目动态构建（支持自定义应用增删、排序）
         val host = ServiceDockHost()
-        val iconPx = (65 * iconScale).toInt().coerceAtLeast(12)
+        val iconPx = DockMetrics.iconSizePx(ctx)
         val entries: List<DockEntry> = DockEntries.load(ctx)
         for (e in entries) {
             val mounted = DockCatalog.mount(ctx, e, host, attachGestures = true, iconPx = iconPx)
@@ -658,6 +652,7 @@ class DockOverlayService : Service() {
             )
             mountedEntries += mounted
         }
+        layout.applyPalette(DockBarPalette(darkIcons = !darkText, accent = Prefs.accentColor(ctx)))
         Logx.d("Dock 条目数：${entries.size}（含自定义应用）")
 
         // --- 窗口参数：窗体级透明（PixelFormat.TRANSLUCENT = 每像素 Alpha） ---
@@ -825,8 +820,8 @@ class DockOverlayService : Service() {
         if (solidHomeClear == clear) return
         solidHomeClear = clear
         val layout = root ?: return
-        applyBackground(layout)
-        applyContrast(this)
+        layout.applyAppearance(onSystemHome = clear)
+        setPalette(!initialLightBackground(this))
         Logx.d(if (clear) "纯色：系统桌面前台 → 底色透明" else "纯色：离开桌面 → 恢复纯色")
     }
 
@@ -1252,55 +1247,6 @@ class DockOverlayService : Service() {
     // 背景（日夜模式 + 渐变）
     // =====================================================================
 
-    /**
-     * 把背景配置应用到 [DockLayout]：
-     *  - 启用了渐变 → 设置三色渐变 + 方向，同时把纯色字段设成渐变平均色
-     *    （供反色采样 / 兜底判断使用，视觉上以渐变为准）
-     *  - 未启用渐变 → 纯色，跟随系统日夜模式切换颜色/不透明度
-     *    （对齐吉利 [BaseDockLayout.setDockBg] 的日夜切换）
-     */
-    /**
-     * 底色本身完全透明，外观完全由渐变呈现。
-     * 已取消独立的「不透明度 / 透明度」调节（窗口整体不透明度、底色不透明度）：
-     * dock 窗口不再有任何纯色半透明填充，只靠 [DockLayout] 的渐变着色器出图。
-     * 渐变关闭时窗口即全透明（与「仅渐变」设定一致）。
-     */
-    private fun applyBackground(layout: DockLayout) {
-        // ★ v3.13.16：**背景形态四选一互斥**（纯色 / 透明 / 渐变 / 毛玻璃）
-        when (Prefs.bgMode(this)) {
-            BgMode.SOLID -> {
-                BehindBlur.clear(layout)
-                layout.bgColors = null
-                layout.bgColor = if (onSystemHome()) 0 else Prefs.solidBgColor(this)
-                layout.blurBitmap = null
-            }
-            BgMode.TRANSPARENT -> {
-                BehindBlur.clear(layout)
-                layout.bgColors = null
-                layout.bgColor = 0
-                layout.blurBitmap = null
-            }
-            BgMode.GRADIENT -> {
-                BehindBlur.clear(layout)
-                layout.bgColors = Prefs.currentGradientColors(this)
-                layout.gradientAngle = 0
-                layout.bgColor = 0
-                layout.blurBitmap = null
-            }
-            BgMode.BLUR -> {
-                BehindBlur.clear(layout)
-                layout.bgColors = null
-                layout.bgColor = 0
-                layout.blurBitmap = null
-                // Transparent base + gray layer + independent compositing transparency.
-                // No white overlay, capture, textures or actual backdrop blur.
-                layout.background = GrayOverlayDrawable(
-                    Prefs.overlayGrayLevel(this), Prefs.overlayTransparency(this),
-                    Prefs.cornerRadiusPx(this).toFloat())
-            }
-        }
-    }
-
     /** 取一组颜色的平均值（RGB 平均 + alpha 平均），把渐变近似成纯色用于亮度判断 */
     private fun averageColor(colors: IntArray): Int {
         var a = 0; var r = 0; var g = 0; var b = 0
@@ -1386,20 +1332,11 @@ class DockOverlayService : Service() {
         return 0.2126f * r + 0.7152f * g + 0.0722f * b
     }
 
-    /** 根据 dock 实际背景色设置前景调色板（黑/白 + 各级半透明） */
-    private fun applyPaletteColors(darkText: Boolean) {
-        DockIconView.fgColor = if (darkText) Color.WHITE else Color.BLACK
-        DockIconView.fgColorDim = if (darkText) 0xB3FFFFFF.toInt() else 0xB3000000.toInt()
-        DockIconView.offColor = if (darkText) 0x99FFFFFF.toInt() else 0x99000000.toInt()
-        DockIconView.dimColor = if (darkText) 0x45FFFFFF else 0x45000000
-    }
-
     /** 统一换色入口：只在实际背景跨越阈值时才动视图，避免临界背景来回闪 */
     private fun setPalette(darkText: Boolean) {
         if (darkText == this.darkText) return
         this.darkText = darkText
-        applyPaletteColors(darkText)
-        root?.applyPalette(light = !darkText)
+        root?.applyPalette(DockBarPalette(darkIcons = !darkText, accent = Prefs.accentColor(this)))
         // 真实车控数据可能带来异常值，渲染层必须兜底，绝不能让前台服务闪退
         runCatching { bindVehicle() }
         runCatching { bindMedia(MediaBridge.info) }
@@ -1475,7 +1412,7 @@ class DockOverlayService : Service() {
     }
 
     /** 兜底：按系统墙纸亮度给初始调色板（首帧 / 截屏不可用时用） */
-    private fun applyContrast(ctx: Context) {
+    private fun initialLightBackground(ctx: Context): Boolean {
         // ★ v3.4.2：日夜跟随开启时直接用系统深浅色，跟底色选择保持同一个信号
         val light = if (Prefs.bgFollowNight(ctx)) {
             !Prefs.isNightMode(ctx)
@@ -1485,9 +1422,9 @@ class DockOverlayService : Service() {
             val a = Color.alpha(bg) / 255f
             luminance(blend(bg, wall, a)) > 0.5f
         }
-        darkText = !light
-        applyPaletteColors(darkText)
+        // 不把离屏预览写进运行中的主栏调色板。
         Logx.d("反色：${if (Prefs.bgFollowNight(ctx)) "跟随系统" else "按墙纸"} → ${if (light) "黑字" else "白字"}（等待真实背景采样校正）")
+        return light
     }
 
     // =====================================================================

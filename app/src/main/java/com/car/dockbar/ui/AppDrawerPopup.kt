@@ -1,8 +1,6 @@
 package com.car.dockbar.ui
 
 import android.content.Context
-import android.graphics.Color
-import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
 import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
@@ -18,7 +16,7 @@ import com.car.dockbar.util.IntentLauncher
 import com.car.dockbar.util.Logx
 
 /**
- * 半透明 2×3 应用快捷面板，作为独立 overlay 显示在 Dock 上方。
+ * 2×3 应用快捷面板，作为独立浮窗贴近 Dock 显示。
  *
  * 遵循 [DockPopupChrome] 统一规范：
  *  1. 位置贴着触发它的「快捷应用」Dock 图标（[show] 传入锚点 View）；
@@ -51,7 +49,6 @@ class AppDrawerPopup(
      * @param anchor 触发面板的 Dock 图标，用于把面板贴在它附近；为空时退回 Dock 上方居中
      */
     fun show(anchor: View? = null) {
-        computeScale(context, 230)
         // ★★ v1.4.67：抑制「同一手势的收尾」——
         //   弹窗带 FLAG_NOT_TOUCH_MODAL：点 Dock 图标时 down 让弹窗收到 ACTION_OUTSIDE
         //   而关闭，up 却照样落到图标上再触发一次 show() → 弹窗关了又立刻弹回来。
@@ -60,14 +57,12 @@ class AppDrawerPopup(
             dismiss()
             return
         }
+        val placement = DockPopupChrome.placement(context, anchor)
+        scale = placement.scale(2.5f, widthDp = 186, heightDp = 230)
         val view = buildContent()
         // 点面板外面立即关闭（规范第 2 条）
         view.setOnTouchListener { _, ev -> DockPopupChrome.onOutsideTouch(ev) { dismiss() } }
-        // ★ 放大 2.5 倍后可能超屏宽：收敛到屏幕内（留边距）
-        val screenW = context.resources.displayMetrics.widthPixels
-        val wantW = dp(510)
-        val finalW = minOf(wantW, screenW - dp(12))
-        val params = DockPopupChrome.anchoredParams(context, anchor, view, finalW)
+        val params = placement.params(view, minOf(dp(510), placement.availableWidth))
         runCatching {
             windowManager.addView(view, params)
             content = view
@@ -90,27 +85,7 @@ class AppDrawerPopup(
     }
 
     private fun buildContent(): LinearLayout {
-        val panel = LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(12), dp(8), dp(12), dp(10))
-            background = GradientDrawable().apply {
-                setColor(0xD91B2029.toInt())
-                cornerRadius = dp(16).toFloat()
-                setStroke(dp(1), 0x55FFFFFF)
-            }
-            elevation = dp(16).toFloat()
-        }
-
-        // 标题行（规范第 3 条：不放 × 关闭按钮）
-        panel.addView(TextView(context).apply {
-            text = "快捷应用"
-            textSize = sp(15f)
-            setTextColor(Color.WHITE)
-            typeface = AppFont.bold(context)
-            gravity = Gravity.CENTER_VERTICAL
-        }, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, dp(34)
-        ))
+        val panel = DockPopupStyle.card(context, scale, "快捷应用")
 
         val selected = AppDrawerApps.loadSlots(context)
         for (i in 0 until AppDrawerApps.MAX_APPS) slotApps[i] = selected.getOrNull(i)
@@ -189,16 +164,11 @@ class AppDrawerPopup(
         return -1
     }
 
-    /** 拖动中：被拖的槽浮起，落点槽全亮，其余淡显 */
+    /** 拖动时区分起点和落点，空槽也可高亮。 */
     private fun highlightDrag() {
         for (i in 0 until AppDrawerApps.MAX_APPS) {
             val v = slotViews[i] ?: continue
-            v.alpha = when (i) {
-                dragFrom -> 0.9f
-                dragTo -> 1f
-                else -> 0.5f
-            }
-            v.elevation = if (i == dragFrom) dp(8).toFloat() else 0f
+            AppDrawerSlotStyle.updateDrag(v, i, dragFrom, dragTo)
         }
     }
 
@@ -231,27 +201,20 @@ class AppDrawerPopup(
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
             setPadding(dp(3), dp(4), dp(3), dp(3))
-            background = context.getDrawable(R.drawable.bg_item_press)
+            background = DockPopupStyle.controlBackground(context, scale, selectionAccent = null)
+            AppDrawerSlotStyle.applyDragOutline(this, DockPopupStyle.accent(context), scale)
         }
         val icon = ImageView(context).apply {
             scaleType = ImageView.ScaleType.FIT_CENTER
         }
-        val title = TextView(context).apply {
-            textSize = sp(11f)
-            setTextColor(0xF2FFFFFF.toInt())
-            gravity = Gravity.CENTER
-            maxLines = 1
-            ellipsize = android.text.TextUtils.TruncateAt.END
-        }
+        val title = TextView(context)
+        AppDrawerSlotStyle.label(title, app?.label ?: "空位",
+            if (app == null) DockPopupStyle.secondary else DockPopupStyle.text, scale)
         if (app == null) {
-            icon.setImageResource(R.drawable.ic_apps)
-            icon.alpha = 0.30f
-            title.text = "空位"
-            title.alpha = 0.55f
+            AppDrawerSlotStyle.emptyIcon(icon, dp(38), DockPopupStyle.secondary)
         } else {
             runCatching { icon.setImageDrawable(context.packageManager.getApplicationIcon(app.packageName)) }
                 .onFailure { icon.setImageResource(R.drawable.ic_car) }
-            title.text = app.label
             cell.setOnClickListener {
                 // ★ 拖动刚结束的那一次 UP 已被 onTouch 消费，不会走到这里
                 dismiss()
@@ -273,22 +236,7 @@ class AppDrawerPopup(
         return cell
     }
 
-    // ★ v1.4.48：弹窗整体放大（用户要求 2.5 倍）——但车机屏（1920×1080）高度有限，
-    //   固定 2.5 倍会超出屏幕（日志实锤）。改为自适应：min(2.5, 可用高 / 内容自然高)
-    private var SCALE = 2.5f
+    private var scale = 2.5f
 
-    /** 按屏幕可用高度收敛放大倍数（[naturalHdp] = 未放大时的内容总高估算，dp） */
-    private fun computeScale(context: Context, naturalHdp: Int) {
-        val dm = context.resources.displayMetrics
-        val dockPx = com.car.dockbar.util.Prefs.dockHeightPx(context) +
-                com.car.dockbar.util.Prefs.dockMarginPx(context)
-        val avail = (dm.heightPixels - dockPx - 40 * dm.density).coerceAtLeast(dm.heightPixels / 2f)
-        val naturalPx = naturalHdp * dm.density
-        SCALE = minOf(2.5f, avail / naturalPx).coerceAtLeast(1f)
-    }
-
-    private fun dp(value: Int): Int =
-        (value * SCALE * context.resources.displayMetrics.density).toInt().coerceAtLeast(1)
-
-    private fun sp(v: Float): Float = v * SCALE
+    private fun dp(value: Int): Int = DockPopupStyle.dp(context, scale, value).coerceAtLeast(1)
 }

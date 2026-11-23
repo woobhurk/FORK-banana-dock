@@ -60,70 +60,62 @@ object DockPopupChrome {
         lastOutsideDismissAt = SystemClock.elapsedRealtime()
     }
 
-    /**
-     * 生成「贴近锚点图标」的窗口参数（含统一的 flags / format）。
-     *
-     * @param anchor  触发弹窗的 Dock 图标 View；拿不到或尚未布局时退回旧行为（Dock 上方居中）
-     * @param content 弹窗内容 View，仅用于预估 wrap_content 的自然宽度做水平收敛
-     * @param widthPx 弹窗宽度，默认 WRAP_CONTENT
-     */
-    fun anchoredParams(
-        context: Context,
-        anchor: View?,
-        content: View?,
-        widthPx: Int = WindowManager.LayoutParams.WRAP_CONTENT
-    ): WindowManager.LayoutParams {
-        val p = WindowManager.LayoutParams(
-            widthPx,
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                    WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
-            PixelFormat.TRANSLUCENT
-        )
+    /** 同一次打开共享锚点与可用区域，避免窗口靠边规则和内容缩放各算一套。 */
+    internal fun placement(context: Context, anchor: View?): Placement {
         val dm = context.resources.displayMetrics
-        val screenW = dm.widthPixels
-        val gap = dp(context, 10)
+        val bottom = Prefs.dockAtBottom(context)
+        val gravity = if (bottom) Gravity.BOTTOM else Gravity.TOP
         val edge = dp(context, 8)
-
         if (anchor == null || anchor.width == 0 || anchor.height == 0) {
-            // 兜底：保持旧行为（Dock 内侧居中）
-            p.gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-            p.x = 0
-            p.y = Prefs.dockHeightPx(context) + Prefs.dockMarginPx(context) + dp(context, 24)
-            return p
+            val offset = Prefs.dockHeightPx(context) + Prefs.dockMarginPx(context) + dp(context, 24)
+            return Placement(context, gravity or Gravity.CENTER_HORIZONTAL, offset, null, edge)
         }
-
         val loc = IntArray(2)
         anchor.getLocationOnScreen(loc)
-        val anchorCenterX = loc[0] + anchor.width / 2
+        val gap = dp(context, 10)
+        val offset = if (bottom) dm.heightPixels - loc[1] + gap else loc[1] + anchor.height + gap
+        return Placement(context, gravity or Gravity.START, offset.coerceAtLeast(0), loc[0] + anchor.width / 2, edge)
+    }
 
-        if (Prefs.dockAtBottom(context)) {
-            // BOTTOM 重力的 y 自屏幕底边向上算：弹窗底边落在图标顶边上方 gap 处，
-            // 不依赖弹窗自身高度（WRAP_CONTENT 时高度事前不可知）。
-            p.gravity = Gravity.BOTTOM or Gravity.START
-            p.y = (dm.heightPixels - loc[1] + gap).coerceAtLeast(0)
-        } else {
-            // Dock 在顶部：弹窗改到图标下方
-            p.gravity = Gravity.TOP or Gravity.START
-            p.y = (loc[1] + anchor.height + gap).coerceAtLeast(0)
-        }
+    internal class Placement(
+        context: Context,
+        private val gravity: Int,
+        private val offset: Int,
+        private val anchorCenterX: Int?,
+        private val edge: Int
+    ) {
+        private val metrics = context.resources.displayMetrics
+        private val screenWidth = metrics.widthPixels
+        val availableWidth = (screenWidth - 2 * edge).coerceAtLeast(1)
+        private val availableHeight = (metrics.heightPixels - offset - edge).coerceAtLeast(1)
 
-        val w = when (widthPx) {
-            WindowManager.LayoutParams.MATCH_PARENT -> screenW
-            WindowManager.LayoutParams.WRAP_CONTENT -> naturalWidth(content)
-            else -> widthPx
+        fun scale(maximum: Float, widthDp: Int, heightDp: Int): Float = minOf(
+            maximum,
+            availableWidth / (widthDp * metrics.density),
+            availableHeight / (heightDp * metrics.density)
+        )
+
+        fun params(content: View, widthPx: Int = WindowManager.LayoutParams.WRAP_CONTENT): WindowManager.LayoutParams {
+            val w = if (widthPx == WindowManager.LayoutParams.WRAP_CONTENT) naturalWidth(content) else widthPx
+            val width = if (w > availableWidth) availableWidth else widthPx
+            val p = WindowManager.LayoutParams(
+                width,
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                    WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
+                PixelFormat.TRANSLUCENT
+            )
+            p.gravity = gravity
+            p.y = offset
+            if (anchorCenterX != null) {
+                val fitWidth = w.coerceIn(0, availableWidth)
+                p.x = (anchorCenterX - fitWidth / 2)
+                    .coerceIn(edge, (screenWidth - fitWidth - edge).coerceAtLeast(edge))
+            }
+            return p
         }
-        p.x = if (w > 0) {
-            // 以图标中心对准弹窗中心，再收敛回屏幕内
-            (anchorCenterX - w / 2)
-                .coerceIn(edge, (screenW - w - edge).coerceAtLeast(edge))
-        } else {
-            // 宽度预估失败：贴图标左侧摆放
-            (loc[0] - edge).coerceAtLeast(edge)
-        }
-        return p
     }
 
     /** 预估 wrap_content 弹窗的自然宽度（拿不到返回 0，调用方退回贴图标左侧） */

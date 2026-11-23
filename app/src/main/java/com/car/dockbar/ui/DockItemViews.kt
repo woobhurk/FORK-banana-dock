@@ -38,26 +38,7 @@ class DockIconView @JvmOverloads constructor(
     private val inactiveAlpha: Float = 1f
 ) : FrameLayout(context) {
 
-    companion object {
-        /** 前景色（文字 / 图标基色），反色时切到黑色 */
-        var fgColor: Int = Color.WHITE
-        /** 次级前景（歌手等），反色时切到黑色半透明 */
-        var fgColorDim: Int = 0xB3FFFFFF.toInt()
-        /** OFF / 无数据 灰显色，反色时切到黑色半透明 */
-        var offColor: Int = 0x99FFFFFF.toInt()
-        /** 自绘图标里"未激活"的灰显色 */
-        var dimColor: Int = 0x45FFFFFF
-        var accentColor: Int = 0xFF4EA1FF.toInt()
-
-        // ── ★ v3.3：弹窗专用前景色 ──────────────────────────────
-        // 所有弹窗（风向 / 温度滚轮 / 空调控制 / 座椅）的底色恒为深色 bg_card，
-        // **不随 Dock 栏的反色变化**。之前它们直接用 fgColor，
-        // 白天模式（亮背景）时 fgColor 变黑 → 黑字掉在深色弹窗上看不见。
-        // 这三个是固定值，写死白色系，不参与 setPalette()。
-        var popupFg: Int = Color.WHITE
-        var popupFgDim: Int = 0xB3FFFFFF.toInt()
-        var popupOff: Int = 0x99FFFFFF.toInt()
-    }
+    private var palette = DockBarPalette.DEFAULT
 
     val image = ImageView(context)
     private var active = false
@@ -112,7 +93,10 @@ class DockIconView @JvmOverloads constructor(
     }
 
     /** 反色切换后重新上色（非自绘图标按当前前景色 / 强调色重新着色） */
-    fun refreshTint() = applyTint()
+    internal fun applyPalette(palette: DockBarPalette) {
+        this.palette = palette
+        applyTint()
+    }
 
     private fun applyTint() {
         if (custom) return
@@ -120,7 +104,7 @@ class DockIconView @JvmOverloads constructor(
         if (preserveColors) {
             image.clearColorFilter()
         } else {
-            image.setColorFilter(if (active) accentColor else fgColor)
+            image.setColorFilter(if (active) palette.accent else palette.text)
         }
     }
 }
@@ -136,7 +120,7 @@ class VolumeDockButton(context: Context, iconPx: Int) : FrameLayout(context) {
     )
     private val level = TextView(context).apply {
         setTextSize(TypedValue.COMPLEX_UNIT_PX, iconPx * 0.2f * 2f)
-        setTextColor(DockIconView.fgColor)
+        setTextColor(DockBarPalette.DEFAULT.text)
         typeface = AppFont.bold(context)
         includeFontPadding = false
         gravity = Gravity.CENTER
@@ -167,7 +151,11 @@ class VolumeDockButton(context: Context, iconPx: Int) : FrameLayout(context) {
         shownLevel = n
         val text = n.toString()
         if (level.text.toString() != text) level.text = text
-        level.setTextColor(DockIconView.fgColor)
+    }
+
+    internal fun applyPalette(palette: DockBarPalette) {
+        icon.applyPalette(palette)
+        level.setTextColor(palette.text)
     }
 }
 
@@ -188,6 +176,7 @@ class DockValueView @JvmOverloads constructor(
     private val tvMain = TextView(context)
     private val tvSub = TextView(context)
     private val tvUnit = TextView(context)
+    private var palette = DockBarPalette.DEFAULT
 
     /** 上次渲染的灰显 / 强调色状态，换色时按它重刷颜色 */
     private var lastMuted = false
@@ -204,7 +193,6 @@ class DockValueView @JvmOverloads constructor(
         listOf(tvMain to mainPx, tvSub to subPx, tvUnit to unitPx).forEach { (tv, size) ->
             tv.includeFontPadding = false
             tv.setTextSize(TypedValue.COMPLEX_UNIT_PX, size)
-            tv.setTextColor(DockIconView.fgColor)
             tv.typeface = AppFont.bold(context)
             tv.gravity = Gravity.CENTER
             addView(tv, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT))
@@ -224,29 +212,12 @@ class DockValueView @JvmOverloads constructor(
         tvMain.text = main
         setPart(tvSub, sub)
         setPart(tvUnit, unit)
-        val mutedColor = if (muted) DockIconView.offColor else DockIconView.fgColor
-        tvSub.setTextColor(mutedColor)
-        tvSub.alpha = if (muted) 0.45f else 1f
-        tvUnit.setTextColor(
-            when {
-                muted -> DockIconView.offColor
-                unitAccent -> DockIconView.accentColor
-                else -> DockIconView.fgColor
-            }
-        )
-        tvUnit.alpha = when {
-            muted -> 0.45f
-            unitAccent -> 1f
-            else -> 0.85f
-        }
-        // 关闭状态整体灰显，包括温度的小数和单位。
-        tvMain.alpha = if (muted) 0.45f else 1f
-        tvMain.setTextColor(mutedColor)
+        refreshColors()
     }
 
     /** 反色切换后按当前内容重刷文字颜色，不改内容 */
-    fun refreshColors() {
-        val mutedColor = if (lastMuted) DockIconView.offColor else DockIconView.fgColor
+    private fun refreshColors() {
+        val mutedColor = if (lastMuted) palette.off else palette.text
         val mutedAlpha = if (lastMuted) 0.45f else 1f
         tvMain.setTextColor(mutedColor)
         tvMain.alpha = mutedAlpha
@@ -254,9 +225,9 @@ class DockValueView @JvmOverloads constructor(
         tvSub.alpha = mutedAlpha
         tvUnit.setTextColor(
             when {
-                lastMuted -> DockIconView.offColor
-                lastUnitAccent -> DockIconView.accentColor
-                else -> DockIconView.fgColor
+                lastMuted -> palette.off
+                lastUnitAccent -> palette.accent
+                else -> palette.text
             }
         )
         tvUnit.alpha = when {
@@ -264,6 +235,11 @@ class DockValueView @JvmOverloads constructor(
             lastUnitAccent -> 1f
             else -> 0.85f
         }
+    }
+
+    internal fun applyPalette(palette: DockBarPalette) {
+        this.palette = palette
+        refreshColors()
     }
 
     private fun setPart(tv: TextView, text: String?) {
@@ -392,7 +368,6 @@ class DockMusicView @JvmOverloads constructor(
             )
         )
         noteOverlay.setImageResource(R.drawable.ic_music_note)
-        noteOverlay.setColorFilter(DockIconView.fgColor)
         addView(albumFrame, LayoutParams(albumSize, albumSize).apply {
             marginEnd = (9 * iconScale).toInt()
         })
@@ -404,13 +379,11 @@ class DockMusicView @JvmOverloads constructor(
 
         tvTitle.includeFontPadding = false
         tvTitle.setTextSize(TypedValue.COMPLEX_UNIT_PX, 14f * textScale)
-        tvTitle.setTextColor(DockIconView.fgColor)
         tvTitle.typeface = AppFont.bold(context)
         tvTitle.text = ""
 
         tvArtist.includeFontPadding = false
         tvArtist.setTextSize(TypedValue.COMPLEX_UNIT_PX, 11f * textScale)
-        tvArtist.setTextColor(DockIconView.fgColorDim)
         tvArtist.text = ""
 
         textCol.addView(tvTitle, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
@@ -427,6 +400,7 @@ class DockMusicView @JvmOverloads constructor(
         })
         addView(btnNext, LayoutParams(0, LayoutParams.MATCH_PARENT))
 
+        applyPalette(DockBarPalette.DEFAULT)
         renderEmpty()
     }
 
@@ -520,12 +494,12 @@ class DockMusicView @JvmOverloads constructor(
     }
 
     /** 反色切换后重刷歌名 / 歌手 / 音符占位 / 媒体按钮颜色，不改内容 */
-    fun refreshColors() {
-        tvTitle.setTextColor(DockIconView.fgColor)
-        tvArtist.setTextColor(DockIconView.fgColorDim)
-        noteOverlay.setColorFilter(DockIconView.fgColor)
-        btnPlay.refreshTint()
-        btnNext.refreshTint()
+    internal fun applyPalette(palette: DockBarPalette) {
+        tvTitle.setTextColor(palette.text)
+        tvArtist.setTextColor(palette.secondary)
+        noteOverlay.setColorFilter(palette.text)
+        btnPlay.applyPalette(palette)
+        btnNext.applyPalette(palette)
     }
 
     fun render(

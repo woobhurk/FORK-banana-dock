@@ -11,7 +11,23 @@ import android.util.AttributeSet
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
+import androidx.core.graphics.ColorUtils
+import com.car.dockbar.util.Prefs
 import kotlin.math.roundToInt
+
+/** 主栏前景色按容器分配；离屏预览反色不会更改运行中 Dock 的颜色。 */
+internal class DockBarPalette(val darkIcons: Boolean, val accent: Int) {
+    val text = foreground(darkIcons)
+    val secondary = ColorUtils.setAlphaComponent(text, 0xB3)
+    val off = offColor(darkIcons)
+    val separator = ColorUtils.setAlphaComponent(text, 0x33)
+
+    companion object {
+        val DEFAULT = DockBarPalette(false, 0xFF4EA1FF.toInt())
+        fun foreground(darkIcons: Boolean) = if (darkIcons) Color.BLACK else Color.WHITE
+        fun offColor(darkIcons: Boolean) = ColorUtils.setAlphaComponent(foreground(darkIcons), 0x99)
+    }
+}
 
 /**
  * Dock 栏根容器。
@@ -210,25 +226,47 @@ class DockLayout @JvmOverloads constructor(
 
     /**
      * 反色切换后刷新所有子控件颜色（图标着色、数值文字、音乐卡文字）和分隔线颜色。
-     * @param light true = 亮背景（黑字），false = 暗背景（白字）
+     * @param palette 调色板来自运行窗口或当前离屏样例。
      *
      * ★ v3.3：改成**递归**遍历。原来只处理直接子 View，
      *   而温度/风速组合按钮（「− 值 +」）是把 DockIconView 装在一个 LinearLayout 里
      *   再加进来的 → 里面的 ± 图标永远刷不到，白天模式下还是白色 → 看不见。
      */
-    fun applyPalette(light: Boolean) {
-        separatorColor = if (light) 0x33000000 else 0x33FFFFFF
-        applyPaletteDeep(this, light)
+    internal fun applyPalette(palette: DockBarPalette) {
+        separatorColor = palette.separator
+        applyPaletteDeep(this, palette)
     }
 
-    private fun applyPaletteDeep(v: android.view.View, light: Boolean) {
+    private fun applyPaletteDeep(v: View, palette: DockBarPalette) {
         when (v) {
-            is DockIconView -> v.refreshTint()
-            is DockValueView -> v.refreshColors()
-            is DockMusicView -> v.refreshColors()
-            is android.view.ViewGroup ->
-                for (i in 0 until v.childCount) applyPaletteDeep(v.getChildAt(i), light)
+            is DockIconView -> v.applyPalette(palette)
+            is DockValueView -> v.applyPalette(palette)
+            is DockMusicView -> v.applyPalette(palette)
+            is VolumeDockButton -> v.applyPalette(palette)
+            is ViewGroup -> for (i in 0 until v.childCount) applyPaletteDeep(v.getChildAt(i), palette)
         }
+    }
+
+    /** 同一份底板规则用于运行主栏与离屏预览；预览不模拟系统桌面的透明例外。 */
+    internal fun applyAppearance(onSystemHome: Boolean = false) {
+        cornerRadius = Prefs.cornerRadiusPx(context).toFloat()
+        showSeparators = Prefs.showSeparators(context)
+        blurBitmap = null
+        val mode = Prefs.bgMode(context)
+        bgColor = if (mode == BgMode.SOLID && !onSystemHome) Prefs.solidBgColor(context) else Color.TRANSPARENT
+        gradientAngle = 0
+        bgColors = if (mode == BgMode.GRADIENT) Prefs.currentGradientColors(context) else null
+        background = if (mode == BgMode.BLUR) {
+            GrayOverlayDrawable(Prefs.overlayGrayLevel(context), Prefs.overlayTransparency(context), cornerRadius)
+        } else null
+    }
+
+    internal fun previewPalette(backdrop: Int): DockBarPalette {
+        val middleGradient = bgColors?.let { it.getOrNull(it.size / 2) }
+        val overlay = (background as? GrayOverlayDrawable)?.compositingColor ?: middleGradient ?: bgColor
+        val color = ColorUtils.compositeColors(overlay, backdrop)
+        val brightness = 0.2126f * Color.red(color) + 0.7152f * Color.green(color) + 0.0722f * Color.blue(color)
+        return DockBarPalette(brightness > 127.5f, Prefs.accentColor(context))
     }
 
     /**

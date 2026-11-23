@@ -16,7 +16,6 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
-import androidx.core.content.ContextCompat
 import com.car.dockbar.R
 import com.car.dockbar.util.Logx
 import com.car.dockbar.util.Prefs
@@ -157,31 +156,14 @@ class TemperaturePopup(
     }
 
     private fun buildAndShow(anchor: View?) {
-        computeScale(ctx, 270)
+        val placement = DockPopupChrome.placement(ctx, anchor)
+        SCALE = placement.scale(2.5f, widthDp = 244, heightDp = 270)
         wm = ctx.getSystemService(Context.WINDOW_SERVICE) as WindowManager
         SensorBridge.init(ctx)
         val isDriver = zone == ZONE_DRIVER
         isDriverZone = isDriver
 
-        val card = LinearLayout(ctx).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER_HORIZONTAL
-            background = ContextCompat.getDrawable(ctx, R.drawable.bg_dock_popup_card)
-            val pad = dp(12)
-            setPadding(pad, dp(8), pad, dp(8))
-        }
-
-        // 标题行（统一规范：不放 × 关闭按钮）
-        card.addView(TextView(ctx).apply {
-            text = if (isDriver) "主驾温度" else "副驾温度"
-            setTextColor(DockIconView.popupFg)
-            textSize = sp(15f)
-            typeface = AppFont.bold(ctx)
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { bottomMargin = dp(6) }
-        })
+        val card = DockPopupStyle.card(ctx, SCALE, if (isDriver) "主驾温度" else "副驾温度")
 
         // 两栏主体
         val body = LinearLayout(ctx).apply {
@@ -223,7 +205,7 @@ class TemperaturePopup(
                 textSize = sp(16f)
                 typeface = AppFont.bold(ctx)
                 gravity = Gravity.CENTER
-                setTextColor(DockIconView.popupFg)
+                setTextColor(DockPopupStyle.secondary)
             }
             isFirst = false
             tempCells.add(value to item)
@@ -249,11 +231,7 @@ class TemperaturePopup(
             android.view.ViewGroup.LayoutParams.MATCH_PARENT, viewH
         ))
         val mask = View(ctx).apply {
-            background = android.graphics.drawable.GradientDrawable().apply {
-                setColor(0x264EA1FF.toInt())                      // 半透明蓝
-                cornerRadius = dp(8).toFloat()
-                setStroke(dp(1), 0x554EA1FF)
-            }
+            background = DockPopupStyle.selectedSurface(ctx, SCALE, DockPopupStyle.accent(ctx))
             isClickable = false
             isFocusable = false
         }
@@ -330,13 +308,9 @@ class TemperaturePopup(
                 R.drawable.ic_popup_cabin_temp,
                 "车内温度暂不可用",
                 "--",
-                iconScale = ICON_SCALE_CABIN_TEMP
-            ).apply {
-                minimumWidth = dp(116)
-                isClickable = false
-                isFocusable = false
-                background = null
-            }
+                iconScale = ICON_SCALE_CABIN_TEMP,
+                readOnly = true
+            ).apply { minimumWidth = dp(116) }
             // 自动规则保留阈值和 AUTO，避免与立即调节座椅档位混淆。
             btnVentHot = funcBtn(
                 R.drawable.ic_seat_feng_03,
@@ -369,7 +343,7 @@ class TemperaturePopup(
         card.addView(body)
 
         // 窗口参数：统一规范 —— 贴着触发图标
-        val p = DockPopupChrome.anchoredParams(ctx, anchor, card)
+        val p = placement.params(card)
 
         content = card
         params = p
@@ -453,8 +427,8 @@ class TemperaturePopup(
             }
             acMaxButton?.let { button ->
                 val on = VehicleController.acMaxOn()
-                button.setActive(on == true)
-                button.setCaption(if (on == null) "MAX 未知" else "MAX")
+                button.setActive(on)
+                button.setCaption(if (on == null) "MAX\n未知" else "MAX")
                 button.contentDescription = when (on) {
                     true -> "原厂急速降温已开启，点击关闭"
                     false -> "原厂急速降温已关闭，点击开启"
@@ -476,7 +450,8 @@ class TemperaturePopup(
                     false -> "双温同步关闭"
                     null -> "双温同步状态未知"
                 }
-                it.setActive(sync == true)
+                it.setActive(sync)
+                it.setCaption(if (sync == null) "SYNC\n未知" else "SYNC")
             }
             btnVentHot?.let {
                 it.visibility = if (st.seatVentVisible(driver = true)) View.VISIBLE else View.GONE
@@ -577,9 +552,8 @@ class TemperaturePopup(
         for ((index, pair) in tempCells.withIndex()) {
             val selected = index == centerIdx ||
                     (current != null && kotlin.math.abs(current - pair.first) < 0.24f)
-            pair.second.setTextColor(
-                if (selected) DockIconView.accentColor else DockIconView.popupFg
-            )
+            val cell = pair.second
+            cell.setTextColor(if (selected) DockPopupStyle.text else DockPopupStyle.secondary)
         }
     }
 
@@ -632,19 +606,8 @@ class TemperaturePopup(
         main.postDelayed(dismissRunnable, AUTO_DISMISS_MS)
     }
 
-    // ★ v1.4.48：弹窗整体放大（用户要求 2.5 倍）——但车机屏（1920×1080）高度有限，
-    //   固定 2.5 倍会超出屏幕（日志实锤）。改为自适应：min(2.5, 可用高 / 内容自然高)
+    // 大屏保留原有控制区尺寸；窗口边缘较紧时按真实锚点方向收敛。
     private var SCALE = 2.5f
-
-    /** 按屏幕可用高度收敛放大倍数（[naturalHdp] = 未放大时的内容总高估算，dp） */
-    private fun computeScale(context: Context, naturalHdp: Int) {
-        val dm = context.resources.displayMetrics
-        val dockPx = com.car.dockbar.util.Prefs.dockHeightPx(context) +
-                com.car.dockbar.util.Prefs.dockMarginPx(context)
-        val avail = (dm.heightPixels - dockPx - 40 * dm.density).coerceAtLeast(dm.heightPixels / 2f)
-        val naturalPx = naturalHdp * dm.density
-        SCALE = minOf(2.5f, avail / naturalPx).coerceAtLeast(1f)
-    }
 
     private fun dp(v: Int): Int = (v * SCALE * ctx.resources.displayMetrics.density).toInt()
 

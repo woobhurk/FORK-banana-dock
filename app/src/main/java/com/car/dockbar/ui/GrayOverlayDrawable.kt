@@ -17,15 +17,17 @@ internal class GrayOverlayDrawable(grayLevel: Int, transparency: Int, private va
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val rect = RectF()
     private var drawableAlpha = 255
+    internal val compositingColor: Int
+        get() = Color.argb((opacity * drawableAlpha / 255f).roundToInt(), gray, gray, gray)
 
     override fun onBoundsChange(bounds: Rect) { rect.set(bounds) }
 
     override fun draw(canvas: Canvas) {
-        val alpha = (opacity * drawableAlpha / 255f).roundToInt()
-        if (alpha == 0 || rect.isEmpty) return
+        val color = compositingColor
+        if (Color.alpha(color) == 0 || rect.isEmpty) return
         // A separate transparent paint cannot erase gray underneath it; apply transparency
         // to the gray layer's compositing Alpha instead. Dock children remain unaffected.
-        paint.color = Color.argb(alpha, gray, gray, gray)
+        paint.color = color
         val radius = cornerPx.coerceIn(0f, rect.height() / 2f)
         canvas.drawRoundRect(rect, radius, radius, paint)
     }

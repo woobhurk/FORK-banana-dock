@@ -12,11 +12,8 @@ import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
 import android.widget.LinearLayout
-import android.widget.TextView
-import androidx.core.content.ContextCompat
 import com.car.dockbar.R
 import com.car.dockbar.util.Logx
-import com.car.dockbar.util.Prefs
 import com.car.dockbar.vehicle.VehicleController
 
 /**
@@ -40,24 +37,9 @@ class AirDirectionPopup(private val ctx: Context) {
 
     private val AUTO_DISMISS_MS = 5000L
 
-    private var btnFace: IconBtn? = null
-    private var btnFoot: IconBtn? = null
-    private var btnDefrost: IconBtn? = null
-
-    /**
-     * 图标按钮只显示风向图标，不在下方加文字标签。
-     */
-    private class IconBtn(
-        val root: LinearLayout,
-        val img: android.widget.ImageView
-    ) {
-        /** 激活态：图标染强调色，未激活用普通前景色 + 0.6 透明度 */
-        fun setActive(on: Boolean) {
-            val c = if (on) DockIconView.accentColor else DockIconView.popupFg
-            img.setColorFilter(c)
-            root.alpha = if (on) 1f else 0.6f
-        }
-    }
+    private var btnFace: DockPopupIconButton? = null
+    private var btnFoot: DockPopupIconButton? = null
+    private var btnDefrost: DockPopupIconButton? = null
 
     var onDismissed: (() -> Unit)? = null
 
@@ -93,29 +75,11 @@ class AirDirectionPopup(private val ctx: Context) {
 
     private fun buildAndShow(anchor: View?) {
         // 标题与三个竖排图标按钮，未放大时内容总高约 200dp。
-        computeScale(ctx, 200)
+        val placement = DockPopupChrome.placement(ctx, anchor)
+        scale = placement.scale(2f, widthDp = 90, heightDp = 200)
         wm = ctx.getSystemService(Context.WINDOW_SERVICE) as WindowManager
 
-        val card = LinearLayout(ctx).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER_HORIZONTAL
-            background = ContextCompat.getDrawable(ctx, R.drawable.bg_dock_popup_card)
-            val pad = dp(14)
-            setPadding(pad, dp(10), pad, dp(10))
-        }
-
-        // 标题行（统一规范：不放 × 关闭按钮）
-        card.addView(TextView(ctx).apply {
-            // ── [P20] 标题 ───────────────────────
-            text = "风向"
-            setTextColor(DockIconView.popupFg)
-            textSize = sp(16f)
-            typeface = AppFont.bold(ctx)
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { bottomMargin = dp(8) }
-        })
+        val card = DockPopupStyle.card(ctx, scale, "风向")
 
         // 三个独立开关
         val column = LinearLayout(ctx).apply {
@@ -125,23 +89,23 @@ class AirDirectionPopup(private val ctx: Context) {
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
             )
         }
-        btnFace = makeIconBtn(R.drawable.ic_blowing_face).apply {
-            root.setOnClickListener { toggle(AirFlowDrawable.FACE) }
+        btnFace = makeIconBtn(R.drawable.ic_blowing_face, "吹脸").apply {
+            setOnClickListener { toggle(AirFlowDrawable.FACE) }
         }
-        btnFoot = makeIconBtn(R.drawable.ic_blowing_foot).apply {
-            root.setOnClickListener { toggle(AirFlowDrawable.FOOT) }
+        btnFoot = makeIconBtn(R.drawable.ic_blowing_foot, "吹脚").apply {
+            setOnClickListener { toggle(AirFlowDrawable.FOOT) }
         }
-        btnDefrost = makeIconBtn(R.drawable.ic_blowing_window).apply {
-            root.setOnClickListener { toggle(AirFlowDrawable.DEFROST) }
+        btnDefrost = makeIconBtn(R.drawable.ic_blowing_window, "吹前挡").apply {
+            setOnClickListener { toggle(AirFlowDrawable.DEFROST) }
         }
         // 顺序：① 吹前挡 ② 吹脸 ③ 吹脚
-        column.addView(btnDefrost?.root, quickParams())
-        column.addView(btnFace?.root, quickParams())
-        column.addView(btnFoot?.root, quickParams())
+        column.addView(btnDefrost, quickParams())
+        column.addView(btnFace, quickParams())
+        column.addView(btnFoot, quickParams())
         card.addView(column)
 
         // 窗口参数：统一规范 —— 贴着触发图标（DockPopupChrome 负责位置 + flags）
-        val p = DockPopupChrome.anchoredParams(ctx, anchor, card)
+        val p = placement.params(card)
 
         content = card
         params = p
@@ -209,48 +173,11 @@ class AirDirectionPopup(private val ctx: Context) {
         main.postDelayed(dismissRunnable, AUTO_DISMISS_MS)
     }
 
-    private fun makeBtn(text: String, sizeSp: Float = 15f): TextView {
-        return TextView(ctx).apply {
-            this.text = text
-            setTextColor(DockIconView.popupFg)
-            textSize = sp(sizeSp)
-            typeface = AppFont.bold(ctx)
-            gravity = Gravity.CENTER
-            background = ContextCompat.getDrawable(ctx, R.drawable.bg_item_press)
-            minHeight = dp(48)
-            minWidth = dp(72)
-            setPadding(dp(14), 0, dp(14), 0)
-            isClickable = true
-        }
-    }
-
-    /**
-     * ★ v3.13.13：图标按钮。
-     * ★ v3.13.14：按用户要求去掉文字标签，只留图标。
-     * @param iconRes 对应的 Dock 风向矢量（ic_blowing_face / _foot / _window）
-     */
-    private fun makeIconBtn(iconRes: Int): IconBtn {
-        val img = android.widget.ImageView(ctx).apply {
-            setImageResource(iconRes)
-            scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
-            layoutParams = LinearLayout.LayoutParams(dp(30), dp(30))
-        }
-        val root = LinearLayout(ctx).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-            background = ContextCompat.getDrawable(ctx, R.drawable.bg_item_press)
+    private fun makeIconBtn(iconRes: Int, description: String) =
+        DockPopupIconButton(ctx, scale, iconRes, description).apply {
+            // 保留原风向按钮的触控区，只更换状态背景。
             setPadding(dp(8), dp(6), dp(8), dp(6))
-            isClickable = true
-            addView(img)
         }
-        return IconBtn(root, img)
-    }
-
-    /** 高亮激活态：开启用强调色，关闭用普通前景色 */
-    private fun TextView.setActive(on: Boolean) {
-        setTextColor(if (on) DockIconView.accentColor else DockIconView.popupFg)
-        alpha = if (on) 1f else 0.6f
-    }
 
 
     private fun quickParams(): LinearLayout.LayoutParams =
@@ -260,22 +187,7 @@ class AirDirectionPopup(private val ctx: Context) {
             bottomMargin = dp(4)
         }
 
-    // ★ v1.4.50：整体放大 2 倍（用户反馈原尺寸在车机上偏小、不好点）
-    private var SCALE = 2.0f
+    private var scale = 2f
 
-    /**
-     * 按屏幕可用高度收敛放大倍数，避免放大后超出屏幕。
-     * @param naturalHdp 未放大时的内容总高估算（dp）
-     */
-    private fun computeScale(context: Context, naturalHdp: Int) {
-        val dm = context.resources.displayMetrics
-        val dockPx = Prefs.dockHeightPx(context) + Prefs.dockMarginPx(context)
-        val avail = (dm.heightPixels - dockPx - 40 * dm.density).coerceAtLeast(dm.heightPixels / 2f)
-        val naturalPx = naturalHdp * dm.density
-        SCALE = minOf(2.0f, avail / naturalPx).coerceAtLeast(1f)
-    }
-
-    private fun dp(v: Int): Int = (v * SCALE * ctx.resources.displayMetrics.density).toInt()
-
-    private fun sp(v: Float): Float = v * SCALE
+    private fun dp(value: Int): Int = DockPopupStyle.dp(ctx, scale, value)
 }

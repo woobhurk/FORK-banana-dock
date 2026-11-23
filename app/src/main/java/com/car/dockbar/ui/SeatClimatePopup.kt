@@ -1,8 +1,6 @@
 package com.car.dockbar.ui
 
 import android.content.Context
-import android.graphics.Color
-import android.graphics.drawable.GradientDrawable
 import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
@@ -12,10 +10,8 @@ import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
-import androidx.core.content.ContextCompat
 import com.car.dockbar.R
 import com.car.dockbar.util.Logx
-import com.car.dockbar.util.Prefs
 import com.car.dockbar.vehicle.VehicleController
 
 /** 主副驾各一列：加热三至一档、关闭、通风一至三档；点击直接选择同侧档位。 */
@@ -25,8 +21,7 @@ class SeatClimatePopup(private val ctx: Context) {
         val heating: Boolean,
         val level: Int,
         val root: FrameLayout,
-        val image: ImageView,
-        val outline: GradientDrawable
+        val image: ImageView
     )
 
     private val main = Handler(Looper.getMainLooper())
@@ -60,19 +55,12 @@ class SeatClimatePopup(private val ctx: Context) {
     }
 
     private fun buildAndShow(anchor: View?) {
-        computeScale(anchor)
+        val placement = DockPopupChrome.placement(ctx, anchor)
+        scale = placement.scale(2f, widthDp = 152, heightDp = 408)
         val manager = ctx.getSystemService(Context.WINDOW_SERVICE) as WindowManager
         wm = manager
         choices.clear()
-        val card = LinearLayout(ctx).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER_HORIZONTAL
-            background = ContextCompat.getDrawable(ctx, R.drawable.bg_dock_popup_card)
-            setPadding(dp(12), dp(8), dp(12), dp(8))
-        }
-        card.addView(label("座椅加热／通风", 15f), LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-        ).apply { bottomMargin = dp(6) })
+        val card = DockPopupStyle.card(ctx, scale, "座椅加热／通风")
         val columns = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.TOP
@@ -81,7 +69,7 @@ class SeatClimatePopup(private val ctx: Context) {
         columns.addView(column(false), columnParams())
         card.addView(columns)
         card.setOnTouchListener { _, event -> DockPopupChrome.onOutsideTouch(event) { hide() } }
-        val params = DockPopupChrome.anchoredParams(ctx, anchor, card)
+        val params = placement.params(card)
         card.alpha = 0f
         manager.addView(card, params)
         content = card
@@ -95,7 +83,7 @@ class SeatClimatePopup(private val ctx: Context) {
         orientation = LinearLayout.VERTICAL
         gravity = Gravity.CENTER_HORIZONTAL
         val side = if (driver) "主驾" else "副驾"
-        addView(label(side, 14f), LinearLayout.LayoutParams(
+        addView(label(side, 13f), LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
         ).apply { bottomMargin = dp(4) })
         for (row in ICONS.indices) {
@@ -109,15 +97,8 @@ class SeatClimatePopup(private val ctx: Context) {
                 setImageResource(ICONS[row])
                 scaleType = ImageView.ScaleType.FIT_CENTER
             }
-            val outline = GradientDrawable().apply {
-                setColor(Color.TRANSPARENT)
-                cornerRadius = dp(6).toFloat()
-                setStroke(dp(1).coerceAtLeast(1), DockIconView.accentColor)
-                alpha = 0
-            }
             val button = FrameLayout(ctx).apply {
-                background = ContextCompat.getDrawable(ctx, R.drawable.bg_item_press)
-                foreground = outline
+                background = DockPopupStyle.controlBackground(ctx, scale)
                 isClickable = true
                 isFocusable = true
                 contentDescription = if (level == 0) "$side 关闭加热和通风"
@@ -128,7 +109,7 @@ class SeatClimatePopup(private val ctx: Context) {
                     resetTimer()
                 }
             }
-            choices.add(Choice(driver, heating, level, button, image, outline))
+            choices.add(Choice(driver, heating, level, button, image))
             addView(button, LinearLayout.LayoutParams(dp(56), dp(44)).apply {
                 bottomMargin = dp(4)
             })
@@ -137,7 +118,7 @@ class SeatClimatePopup(private val ctx: Context) {
 
     private fun label(text: String, size: Float) = TextView(ctx).apply {
         this.text = text
-        setTextColor(DockIconView.popupFg)
+        setTextColor(DockPopupStyle.secondary)
         textSize = size * scale
         typeface = AppFont.bold(ctx)
         includeFontPadding = false
@@ -168,8 +149,7 @@ class SeatClimatePopup(private val ctx: Context) {
             val selected = if (choice.level == 0) heat == 0 && (!ventVisible || vent == 0)
                 else (if (choice.heating) heat else vent) == choice.level
             choice.root.isSelected = selected
-            choice.outline.alpha = if (selected) 255 else 0
-            choice.image.alpha = if (selected) 1f else 0.65f
+            choice.image.alpha = if (selected) 1f else 0.82f
         }
     }
 
@@ -199,24 +179,7 @@ class SeatClimatePopup(private val ctx: Context) {
         main.postDelayed(dismissRunnable, 8000L)
     }
 
-    private fun computeScale(anchor: View?) {
-        val dm = ctx.resources.displayMetrics
-        val edge = 8 * dm.density
-        val gap = 10 * dm.density
-        val availableHeight = if (anchor != null && anchor.width > 0 && anchor.height > 0) {
-            val location = IntArray(2)
-            anchor.getLocationOnScreen(location)
-            if (Prefs.dockAtBottom(ctx)) location[1] - gap - edge
-            else dm.heightPixels - location[1] - anchor.height - gap - edge
-        } else {
-            dm.heightPixels - Prefs.dockHeightPx(ctx) - Prefs.dockMarginPx(ctx) - 40 * dm.density
-        }
-        // 预留标题、列标题、七行按钮及间距；同时收敛高度与宽度，完整显示两列。
-        scale = minOf(2f, availableHeight.coerceAtLeast(1f) / (408 * dm.density),
-            (dm.widthPixels - 2 * edge).coerceAtLeast(1f) / (152 * dm.density))
-    }
-
-    private fun dp(value: Int): Int = (value * scale * ctx.resources.displayMetrics.density).toInt()
+    private fun dp(value: Int): Int = DockPopupStyle.dp(ctx, scale, value)
 
     private companion object {
         val ICONS = intArrayOf(

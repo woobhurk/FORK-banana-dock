@@ -13,8 +13,6 @@ import android.view.View
 import android.view.WindowManager
 import android.widget.LinearLayout
 import android.widget.TextView
-import androidx.core.content.ContextCompat
-import com.car.dockbar.R
 import com.car.dockbar.util.Logx
 import com.car.dockbar.util.Prefs
 import com.car.dockbar.vehicle.VehicleController
@@ -86,26 +84,7 @@ class HvacControlPopup(private val ctx: Context) {
     private fun buildAndShow(anchor: View?) {
         wm = ctx.getSystemService(Context.WINDOW_SERVICE) as WindowManager
 
-        val card = LinearLayout(ctx).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER_HORIZONTAL
-            background = ContextCompat.getDrawable(ctx, R.drawable.bg_dock_popup_card)
-            val pad = dp(16)
-            setPadding(pad, dp(12), pad, dp(12))
-        }
-
-        // 标题行（统一规范：不放 × 关闭按钮）
-        card.addView(TextView(ctx).apply {
-            // ── [P09] 标题 ───────────────────────
-            text = "空调控制"
-            setTextColor(DockIconView.popupFg)
-            textSize = 16f
-            typeface = AppFont.bold(ctx)
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { bottomMargin = dp(8) }
-        })
+        val card = DockPopupStyle.card(ctx, 1f, "空调控制")
 
         // 主驾温度行
         tvDriverTemp = valueText()
@@ -180,7 +159,7 @@ class HvacControlPopup(private val ctx: Context) {
         val hint = TextView(ctx).apply {
             // ── [P13] 关闭提示 ─────────────────────
             text = "点击空白处关闭"
-            setTextColor(DockIconView.popupFgDim)
+            setTextColor(DockPopupStyle.secondary)
             textSize = 11f
             gravity = Gravity.CENTER
             layoutParams = LinearLayout.LayoutParams(
@@ -191,7 +170,7 @@ class HvacControlPopup(private val ctx: Context) {
         card.addView(hint)
 
         // --- 窗口参数：统一规范 —— 贴着触发图标（DockPopupChrome 负责位置 + flags）---
-        val p = DockPopupChrome.anchoredParams(ctx, anchor, card)
+        val p = DockPopupChrome.placement(ctx, anchor).params(card)
 
         content = card
         params = p
@@ -214,24 +193,18 @@ class HvacControlPopup(private val ctx: Context) {
         tvPassengerTemp?.text = tempLabel(st.passengerTempC)
         tvFan?.text = fanLabel(st.fanLevel, st.fanAuto)
         tvFan?.setTextColor(
-            if (st.fanAuto) DockIconView.accentColor else DockIconView.popupFg
+            if (st.fanAuto) DockPopupStyle.selectedText(accent) else DockPopupStyle.text
         )
 
         btnRecirc?.text = if (st.recircInside) "内循环" else "外循环"
-        btnRecirc?.setTextColor(
-            if (st.recircInside) DockIconView.accentColor else DockIconView.popupFg
-        )
+        btnRecirc?.setPopupSelected(st.recircInside)
 
         btnAir?.text = "风向 ${airShort(st.airDirection)}"
 
         btnVent?.text = "通风 ${if (st.seatVent > 0) st.seatVent else "关"}"
-        btnVent?.setTextColor(
-            if (st.seatVent > 0) DockIconView.accentColor else DockIconView.popupFg
-        )
+        btnVent?.setPopupSelected(st.seatVent > 0)
         btnHeat?.text = "加热 ${if (st.seatHeat > 0) st.seatHeat else "关"}"
-        btnHeat?.setTextColor(
-            if (st.seatHeat > 0) DockIconView.accentColor else DockIconView.popupFg
-        )
+        btnHeat?.setPopupSelected(st.seatHeat > 0)
     }
 
     /** 淡出并移除窗口 */
@@ -288,7 +261,7 @@ class HvacControlPopup(private val ctx: Context) {
         }
         val lab = TextView(ctx).apply {
             text = label
-            setTextColor(DockIconView.popupFgDim)
+            setTextColor(DockPopupStyle.secondary)
             textSize = 13f
             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
                 marginEnd = dp(12)
@@ -312,15 +285,22 @@ class HvacControlPopup(private val ctx: Context) {
         return r
     }
 
-    /** 通用圆角按钮（用 bg_item_press 提供点击水波纹） */
+    private val accent get() = DockPopupStyle.accent(ctx)
+
+    private fun TextView.setPopupSelected(selected: Boolean) {
+        isSelected = selected
+        setTextColor(if (selected) DockPopupStyle.selectedText(accent) else DockPopupStyle.secondary)
+    }
+
+    /** 快捷操作共用 Dock 弹窗的按下和选中反馈。 */
     private fun makeBtn(text: String, sp: Float = 15f): TextView {
         return TextView(ctx).apply {
             this.text = text
-            setTextColor(DockIconView.popupFg)
+            setTextColor(DockPopupStyle.text)
             textSize = sp
             typeface = AppFont.bold(ctx)
             gravity = Gravity.CENTER
-            background = ContextCompat.getDrawable(ctx, R.drawable.bg_item_press)
+            background = DockPopupStyle.controlBackground(ctx, 1f)
             minHeight = dp(48)
             minWidth = dp(64)
             setPadding(dp(14), 0, dp(14), 0)
@@ -337,7 +317,7 @@ class HvacControlPopup(private val ctx: Context) {
 
     /** 大号数值显示（温度 / 风速） */
     private fun valueText(): TextView = TextView(ctx).apply {
-        setTextColor(DockIconView.popupFg)
+        setTextColor(DockPopupStyle.text)
         textSize = 22f
         typeface = AppFont.bold(ctx)
         gravity = Gravity.CENTER

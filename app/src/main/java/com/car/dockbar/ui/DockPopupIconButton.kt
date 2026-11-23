@@ -1,15 +1,11 @@
 package com.car.dockbar.ui
 
 import android.content.Context
-import android.graphics.Color
-import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
 import android.view.View
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
-import androidx.core.content.ContextCompat
-import com.car.dockbar.R
 
 /** 弹窗图标按钮：保留关键数值，并用选中边框补充颜色反馈。 */
 internal class DockPopupIconButton(
@@ -20,7 +16,8 @@ internal class DockPopupIconButton(
     caption: String = "",
     private val preserveIconColors: Boolean = false,
     /** 只缩放图标绘制，不改变按钮的触摸区域。 */
-    private val iconScale: Float = 1f
+    private val iconScale: Float = 1f,
+    private val readOnly: Boolean = false
 ): LinearLayout(context) {
     private val image = ImageView(context).apply {
         scaleType = ImageView.ScaleType.FIT_CENTER
@@ -28,24 +25,19 @@ internal class DockPopupIconButton(
     }
     private var captionView: TextView? = null
     private var currentIcon = 0
-    private var appliedTint = 0
-    private var hasTint = false
-    private val outline = GradientDrawable().apply {
-        setColor(Color.TRANSPARENT)
-        cornerRadius = dp(6).toFloat()
-        setStroke(dp(1).coerceAtLeast(1), DockIconView.accentColor)
-        alpha = 0
-    }
+    private var appliedTint: Int? = null
+    private val accent = DockPopupStyle.accent(context)
+    private val selectedColor = DockPopupStyle.selectedText(accent)
+    private var state: Boolean? = false
 
     init {
         orientation = HORIZONTAL
         gravity = Gravity.CENTER
         setPadding(dp(8), dp(4), dp(8), dp(4))
         minimumHeight = dp(40)
-        background = ContextCompat.getDrawable(context, R.drawable.bg_item_press)
-        foreground = outline
-        isClickable = true
-        isFocusable = true
+        if (!readOnly) background = DockPopupStyle.controlBackground(context, scale, accent)
+        isClickable = !readOnly
+        isFocusable = !readOnly
         importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
         contentDescription = description
         addView(image, LayoutParams(dp(30), dp(30)))
@@ -73,7 +65,7 @@ internal class DockPopupIconButton(
             gravity = Gravity.CENTER
             includeFontPadding = false
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-            setTextColor(if (this@DockPopupIconButton.isSelected) DockIconView.accentColor else DockIconView.popupFg)
+            setTextColor(labelColor())
             addView(this, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply {
                 marginStart = dp(5)
             })
@@ -82,19 +74,28 @@ internal class DockPopupIconButton(
         if (label.text != value) label.text = value
     }
 
-    fun setActive(active: Boolean) {
-        isSelected = active
-        outline.alpha = if (active) 255 else 0
-        image.alpha = if (active) 1f else 0.8f
-        val color = if (active) DockIconView.accentColor else DockIconView.popupFg
-        if (!preserveIconColors && (!hasTint || appliedTint != color)) {
-            image.setColorFilter(color)
-            appliedTint = color
-            hasTint = true
+    fun setActive(active: Boolean?) {
+        state = active
+        isSelected = active == true
+        val labelColor = labelColor()
+        if (!preserveIconColors) {
+            val tint = if (active == null) DockPopupStyle.secondary else labelColor
+            if (appliedTint != tint) {
+                image.setColorFilter(tint)
+                appliedTint = tint
+            }
+        } else {
+            image.alpha = if (active == true || readOnly) 1f else 0.82f
         }
-        captionView?.let { if (it.currentTextColor != color) it.setTextColor(color) }
+        captionView?.let { if (it.currentTextColor != labelColor) it.setTextColor(labelColor) }
     }
 
-    private fun dp(value: Int): Int =
-        (value * scale * context.resources.displayMetrics.density).toInt()
+    private fun labelColor() = when {
+        readOnly -> DockPopupStyle.text
+        state == true -> selectedColor
+        state == null -> DockPopupStyle.unknown
+        else -> DockPopupStyle.secondary
+    }
+
+    private fun dp(value: Int): Int = DockPopupStyle.dp(context, scale, value)
 }

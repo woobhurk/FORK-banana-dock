@@ -13,7 +13,6 @@ import android.view.View
 import android.view.WindowManager
 import android.widget.LinearLayout
 import android.widget.TextView
-import androidx.core.content.ContextCompat
 import com.car.dockbar.R
 import com.car.dockbar.util.Logx
 import com.car.dockbar.vehicle.VehicleController
@@ -26,7 +25,7 @@ import com.car.dockbar.vehicle.VehicleController
  *  下方：主驾 / 副驾列名，两行分别为通风和加热图标及当前档位。
  *
  * 遵循 [DockPopupChrome] 统一规范，风格与 [AirDirectionPopup] 一致：
- *  bg_card 圆角卡、贴着触发图标、点弹窗外面关闭、无 × 按钮、8 秒自动消失。
+ * 深色圆角卡，贴着触发图标，点外关闭，无 × 按钮，8 秒自动消失。
  * 激活（档位 > 0 / 被选中）显示边框，通风和加热图标保留原始档位颜色。
  */
 class SeatPopup(private val ctx: Context) {
@@ -80,29 +79,11 @@ class SeatPopup(private val ctx: Context) {
 
     private fun buildAndShow(anchor: View?) {
         // 标题、记忆位、列名及两行控制，加上内边距和间隔，按约 204dp 自然高度缩放。
-        computeScale(ctx, 204)
+        val placement = DockPopupChrome.placement(ctx, anchor)
+        SCALE = placement.scale(2.5f, widthDp = 330, heightDp = 204)
         wm = ctx.getSystemService(Context.WINDOW_SERVICE) as WindowManager
 
-        val card = LinearLayout(ctx).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER_HORIZONTAL
-            background = ContextCompat.getDrawable(ctx, R.drawable.bg_dock_popup_card)
-            val pad = dp(12)
-            setPadding(pad, dp(8), pad, dp(8))
-        }
-
-        // 标题行（统一规范：不放 × 关闭按钮）
-        card.addView(TextView(ctx).apply {
-            // ── [P14] 标题 ───────────────────────
-            text = "座椅"
-            setTextColor(DockIconView.popupFg)
-            textSize = sp(15f)
-            typeface = AppFont.bold(ctx)
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { bottomMargin = dp(6) }
-        })
+        val card = DockPopupStyle.card(ctx, SCALE, "座椅")
 
         // 第一行：三个座椅记忆位置，保留实际读回高亮和点击后的短暂反馈。
         val seatRow = LinearLayout(ctx).apply {
@@ -144,7 +125,7 @@ class SeatPopup(private val ctx: Context) {
         for (name in listOf("主驾", "副驾")) {
             columnNames.addView(TextView(ctx).apply {
                 text = name
-                setTextColor(DockIconView.popupFg)
+                setTextColor(DockPopupStyle.secondary)
                 textSize = sp(13f)
                 typeface = AppFont.bold(ctx)
                 gravity = Gravity.CENTER
@@ -242,7 +223,7 @@ class SeatPopup(private val ctx: Context) {
         ))
 
         // 窗口参数：统一规范 —— 贴着触发图标
-        val p = DockPopupChrome.anchoredParams(ctx, anchor, card)
+        val p = placement.params(card)
 
         content = card
         params = p
@@ -348,18 +329,7 @@ class SeatPopup(private val ctx: Context) {
         main.postDelayed(dismissRunnable, AUTO_DISMISS_MS)
     }
 
-    // ★ v1.4.48：弹窗整体放大 2.5 倍
     private var SCALE = 2.5f
-
-    /** 按屏幕可用高度收敛放大倍数（naturalHdp = 未放大时的内容总高估算，dp） */
-    private fun computeScale(context: Context, naturalHdp: Int) {
-        val dm = context.resources.displayMetrics
-        val dockPx = com.car.dockbar.util.Prefs.dockHeightPx(context) +
-                com.car.dockbar.util.Prefs.dockMarginPx(context)
-        val avail = (dm.heightPixels - dockPx - 40 * dm.density).coerceAtLeast(dm.heightPixels / 2f)
-        val naturalPx = naturalHdp * dm.density
-        SCALE = minOf(2.5f, avail / naturalPx).coerceAtLeast(1f)
-    }
 
     private fun dp(v: Int): Int = (v * SCALE * ctx.resources.displayMetrics.density).toInt()
 

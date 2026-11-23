@@ -2,6 +2,7 @@ package com.car.dockbar.ui
 
 import android.content.Context
 import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
 import android.os.Handler
@@ -14,12 +15,11 @@ import android.view.WindowManager
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.ImageView
-import androidx.core.content.ContextCompat
+import androidx.core.graphics.ColorUtils
 import com.car.dockbar.R
 import com.car.dockbar.media.CabinVolume
 import com.car.dockbar.media.VolumeEvents
 import com.car.dockbar.util.Logx
-import com.car.dockbar.util.Prefs
 
 /**
  * 音量面板。窗口规范和空调控制弹窗一致：贴着触发图标、点外面关闭、无关闭按钮、超时收起。
@@ -91,27 +91,12 @@ class VolumePopup(private val ctx: Context) {
     }
 
     private fun buildAndShow(anchor: View?) {
-        computeScale(anchor)
+        val placement = DockPopupChrome.placement(ctx, anchor)
+        scale = placement.scale(1.8f, widthDp = 336, heightDp = 432)
         wm = ctx.getSystemService(Context.WINDOW_SERVICE) as WindowManager
         bars.clear()
 
-        val card = LinearLayout(ctx).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER_HORIZONTAL
-            background = ContextCompat.getDrawable(ctx, R.drawable.bg_dock_popup_card)
-            val pad = dp(16)
-            setPadding(pad, dp(12), pad, dp(12))
-        }
-        card.addView(TextView(ctx).apply {
-            text = "音量"
-            setTextColor(DockIconView.popupFg)
-            textSize = sp(16f)
-            typeface = AppFont.bold(ctx)
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { bottomMargin = dp(8) }
-        })
+        val card = DockPopupStyle.card(ctx, scale, "音量")
 
         val row = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -120,7 +105,7 @@ class VolumePopup(private val ctx: Context) {
         CabinVolume.channels.forEach { row.addView(column(it), colParams()) }
         card.addView(row)
 
-        val p = DockPopupChrome.anchoredParams(ctx, anchor, card)
+        val p = placement.params(card)
         content = card
         card.setOnTouchListener { _, ev -> DockPopupChrome.onOutsideTouch(ev) { hide() } }
         card.alpha = 0f
@@ -140,7 +125,7 @@ class VolumePopup(private val ctx: Context) {
         }
         box.addView(ImageView(ctx).apply {
             setImageResource(iconFor(channel))
-            setColorFilter(DockIconView.popupFg)
+            setColorFilter(DockPopupStyle.text)
             scaleType = ImageView.ScaleType.FIT_CENTER
             contentDescription = "${channel.title}音量"
             layoutParams = LinearLayout.LayoutParams(dp(24), dp(24)).apply {
@@ -179,11 +164,11 @@ class VolumePopup(private val ctx: Context) {
 
     private fun stepBtn(label: String, onClick: () -> Unit): TextView = TextView(ctx).apply {
         text = label
-        setTextColor(DockIconView.popupFg)
+        setTextColor(DockPopupStyle.text)
         textSize = sp(22f)
         typeface = AppFont.bold(ctx)
         gravity = Gravity.CENTER
-        background = ContextCompat.getDrawable(ctx, R.drawable.bg_item_press)
+        background = DockPopupStyle.controlBackground(ctx, scale)
         minWidth = dp(56)
         minHeight = dp(40)
         isClickable = true
@@ -217,27 +202,7 @@ class VolumePopup(private val ctx: Context) {
 
     private var scale = 1.8f
 
-    private fun computeScale(anchor: View?) {
-        val dm = ctx.resources.displayMetrics
-        val availableHeight = if (anchor != null && anchor.width > 0 && anchor.height > 0) {
-            val location = IntArray(2)
-            anchor.getLocationOnScreen(location)
-            if (Prefs.dockAtBottom(ctx)) location[1] - 18 * dm.density
-            else dm.heightPixels - location[1] - anchor.height - 18 * dm.density
-        } else {
-            dm.heightPixels - Prefs.dockHeightPx(ctx) - Prefs.dockMarginPx(ctx) - 40 * dm.density
-        }
-        // 标题、四个通道图标、音量条、加减按钮及间距预留 432dp；宽度按四列收敛。
-        val availableWidth = dm.widthPixels - 24 * dm.density
-        val widthScale = availableWidth.coerceAtLeast(1f) / (336 * dm.density)
-        scale = minOf(
-            1.8f,
-            availableHeight.coerceAtLeast(1f) / (432 * dm.density),
-            widthScale
-        )
-    }
-
-    private fun dp(v: Int): Int = (v * scale * ctx.resources.displayMetrics.density).toInt()
+    private fun dp(v: Int): Int = DockPopupStyle.dp(ctx, scale, v)
 
     private fun sp(v: Float): Float = v * scale
 
@@ -267,10 +232,13 @@ class VolumePopup(private val ctx: Context) {
                 invalidate()
             }
 
-        private val track = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x33FFFFFF }
-        private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
+        private val track = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF353B45.toInt() }
+        private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            val tint = ColorUtils.blendARGB(DockPopupStyle.accent(context), 0xFF093668.toInt(), 0.5f)
+            color = if (ColorUtils.calculateContrast(Color.WHITE, tint) >= 4.5) tint else 0xFF276AB1.toInt()
+        }
         private val num = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = DockIconView.popupFg
+            color = Color.WHITE
             textAlign = Paint.Align.CENTER
             typeface = AppFont.bold(context)
         }
@@ -282,7 +250,6 @@ class VolumePopup(private val ctx: Context) {
             canvas.drawRoundRect(rect, r, r, track)
             val span = (value.toFloat() / max.toFloat()).coerceIn(0f, 1f)
             if (span > 0f) {
-                fill.color = DockIconView.accentColor
                 val top = height * (1f - span)
                 rect.set(0f, top, width.toFloat(), height.toFloat())
                 canvas.drawRoundRect(rect, r, r, fill)
