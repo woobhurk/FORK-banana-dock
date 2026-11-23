@@ -159,11 +159,11 @@ https://28059b4b3e6a450db00a72ad75ea95a0.sg2.agentos-app.run/upload
 
 应用私有目录的关键文件：
 
-- `files/logs/session.log`
-- `files/logs/prev.log`
+- `files/logs/runtime/<会话编号>-<分片编号>.log` 按会话和片号排序。每条日志同步追加。UTF-8 字节数将超过 1 MiB 时整条换片，单条超长记录显式截短。跨进程合计保留 8 MiB，按实际字节淘汰最旧整片。
+- 首次启动时将非空旧版 `prev.log`、`session.log` 按时间顺序迁入。旧版已截断的内容无法恢复。启动补传只读取紧邻的上次进程会话，读取长度有界。
 - `files/logs/native_crash.txt`、`native_crash.txt.err`
 - `files/last_crash.txt`
-- 诊断页「导出诊断 ZIP」通过 Android 系统创建文档保存器生成 ZIP，由用户选择保存位置，不申请存储权限、不自动上传。ZIP 包含固定白名单中的 `session.log`、`prev.log`、native/abort 证据、最近 Java 崩溃归档、`HvacDiagnostics` 和 `HvacChannelEvidence` 报告、内存日志补充及 UTF-8 元数据；缺失文件明确列出。
+- 「导出诊断 ZIP」通过 Android 系统文档保存器选择位置。ZIP 收录快照时刻的全部留存分片，以及白名单内的 native/abort 证据、最近 Java 崩溃归档、`HvacDiagnostics`、`HvacChannelEvidence` 和内存日志。`metadata.txt` 列出首末记录时间、容量淘汰状态和缺失项。导出期间快照引用的旧片可能暂占空间，读取完成后清理。
 - 导出副本会过滤运行日志中的 URL 查询凭据和 Authorization bearer 内容；不包含 SharedPreferences、上传队列、密钥或其他应用私有文件。日志可能包含应用名、包名、媒体和车控诊断信息，分享前需由用户自行确认接收者。保存器取消、启动失败或写入失败均不报告成功，临时文件在结束时清理。
 
 根目录 `log_server.py` 是纯 Python 标准库的局域网接收服务，默认监听 `0.0.0.0:8080`，按天写入 `log_server_logs/YYYY-MM-DD.jsonl`。它只适用于开发诊断，不是 CI 发布服务。远程服务端的子域名可能因重新部署变化；修改默认端点后必须重新核对代码并重新构建。
@@ -173,14 +173,14 @@ https://28059b4b3e6a450db00a72ad75ea95a0.sg2.agentos-app.run/upload
 ```bash
 adb -s <serial> logcat -s CarDockBar
 adb -s <serial> shell run-as com.car.dockbar ls files/logs/
-adb -s <serial> shell run-as com.car.dockbar cat files/logs/session.log
+adb -s <serial> shell run-as com.car.dockbar ls files/logs/runtime/
 ```
 远程接收端源码在 `log_upload_service/server.py`，只依赖 Python 标准库，提供 `/health`、`/logs` 和 `/download`。`/logs` 默认返回最近 200 条，可用 `limit`（上限 5000）和 `app` 筛选。`date=YYYY-MM-DD` 会包括该日基础文件及其分片；`date=YYYY-MM-DD.2` 可选相应分片前缀。排查全天时不要只读一个分片，远程域名是否仍可用需实际检查，本文不声称已拉取在线日志。
 
 
 ### 4.3 崩溃降级
 
-- App 启动时先轮转上次会话、收集崩溃证据并尝试补传，再开始当前会话的实时日志。
+- App 启动时封存上一会话并开启当前分片，收集上次会话及崩溃证据并尝试补传，之后开始实时上传当前日志。
 - 上一次运行少于约 15 秒并发生崩溃会增加 streak；连续崩溃会逐级关闭高风险能力，当前阶梯封顶 L3。
 - 车控写入熔断后仍可保留读取；“多次闪退后又能启动”可能只是熔断生效，不能直接说明根因消失。
 - 版本变更的重置行为以 `App.kt` 当前代码为准，不要照抄旧 Handoff 中“所有升级都会重置”或“所有升级都会保留”的单一说法。

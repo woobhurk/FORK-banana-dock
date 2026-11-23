@@ -314,12 +314,6 @@ object LogUploader {
 
     fun logDir(ctx: Context): File = File(ctx.filesDir, "logs").apply { mkdirs() }
 
-    /** 本次会话的落盘日志 */
-    fun sessionLog(ctx: Context): File = File(logDir(ctx), "session.log")
-
-    /** 上次会话的落盘日志（崩溃取证的主要素材） */
-    fun prevLog(ctx: Context): File = File(logDir(ctx), "prev.log")
-
     /** Java 崩溃堆栈（CrashHandler 写） */
     fun javaCrashFile(ctx: Context): File = File(ctx.filesDir, "last_crash.txt")
 
@@ -355,11 +349,10 @@ object LogUploader {
      *
      * @return 一句人类可读的结果，供主界面展示
      */
-    fun reportPreviousSession(ctx: Context): String {
+    internal fun reportPreviousSession(ctx: Context, logText: String): String {
         val java = javaCrashFile(ctx)
         val nat = nativeCrashFile(ctx)
         val abt = nativeAbortFile(ctx)
-        val prev = prevLog(ctx)
 
         val hasJava = java.exists() && java.length() > 0
         val hasNative = nat.exists() && nat.length() > 0
@@ -367,7 +360,6 @@ object LogUploader {
             if (abt.exists()) abt.readText().trim() else ""
         }.getOrDefault("")
         val hasAbort = abortMsg.isNotEmpty()
-        val logText = runCatching { if (prev.exists()) prev.readText() else "" }.getOrDefault("")
 
         // 上次是否正常结束（用户主动关 Dock 才会写这个标记）
         val clean = cleanExitMarker(ctx).exists()
@@ -526,7 +518,7 @@ object LogUploader {
     /** 行数或字数先到就立刻发，避免连点时在缓冲里多等 */
     private const val LIVE_FLUSH_LINES = 40
     private const val LIVE_FLUSH_CHARS = 8000
-    /** 离线队列上限。超出只留后半段，和 session.log 同一量级 */
+    /** 离线上传队列独立限额，超出只留后半段。 */
     private const val LIVE_SPILL_MAX = 512 * 1024
 
     private val liveLock = Object()

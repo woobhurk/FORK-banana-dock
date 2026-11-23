@@ -21,29 +21,12 @@ class App : Application() {
         // 覆盖安装、清数据、换设备，打开就是对的那个。
         LogUploader.migrateEndpoint(this)
 
-        // ---- 崩溃取证：必须在日志轮转之前/同时完成 ----
-        //
-        // 顺序很重要：
-        //  ① 先把上次会话的落盘日志留档（session.log → prev.log）
-        //  ② 收集崩溃证据（Java 堆栈 + Native 信号信息 + 上次会话日志）并补传
-        //  ③ 再把本次会话的新文件接上 Logx
-        //
-        // 为什么必须落盘：内存日志会随进程一起消失。
-        // Java 崩溃还能被 Thread.setDefaultUncaughtExceptionHandler 抓到；
-        // **native 崩溃（SIGSEGV/SIGABRT）不会触发任何 Java 回调**，
-        // 只能靠「提前落盘 + 下次启动回捞」这一条路。
-        val session = LogUploader.sessionLog(this)
-        val prev = LogUploader.prevLog(this)
-
-        var report = ""
-        runCatching {
-            if (session.exists() && session.length() > 0) {
-                session.copyTo(prev, overwrite = true)
-            }
-            report = LogUploader.reportPreviousSession(this)
-            session.writeText("")
+        // 封存上一进程会话，再收集崩溃证据。累计运行日志仅供本地诊断导出。
+        val previousLog = Logx.startSession(LogUploader.logDir(this))
+        val report = runCatching { LogUploader.reportPreviousSession(this, previousLog) }.getOrElse {
+            Logx.e("收集上次会话证据失败", it)
+            "收集上次会话证据失败"
         }
-        Logx.attachFile(session)
         // 有网就按批把新日志送上去；断网写进 live_queue.txt，恢复后再补。
         LogUploader.startLive(this)
 

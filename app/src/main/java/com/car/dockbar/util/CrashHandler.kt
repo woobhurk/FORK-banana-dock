@@ -41,14 +41,9 @@ object CrashHandler {
             runCatching { File(appCtx.filesDir, FILE).writeText(text) }
             Logx.e("⚠ 崩溃：${throwable.javaClass.simpleName}: ${throwable.message}")
 
-            // 把异步落盘的日志队列排空，保证「崩溃前最后几行」真的在磁盘上
-            Logx.flushSync()
-
             // 同步上传：进程马上会被回收，异步任务来不及跑
             runCatching {
-                val tail = runCatching {
-                    LogUploader.sessionLog(appCtx).readText().takeLast(24_000)
-                }.getOrDefault(Logx.snapshot().takeLast(200).joinToString("\n"))
+                val tail = Logx.currentSessionTail() ?: Logx.snapshot().takeLast(200).joinToString("\n")
                 LogUploader.uploadBlocking(
                     appCtx,
                     kind = "crash",

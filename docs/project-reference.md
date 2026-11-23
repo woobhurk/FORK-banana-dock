@@ -66,7 +66,7 @@
 | 空调通道观测证据与导出 | `vehicle/HvacChannelEvidence.kt`、`util/DiagnosticLogExporter.kt` |
 | 原车接口验证会话与结果报告 | `vehicle/HvacDiagnostics.kt`、`ui/LogsSettingsPage.kt` |
 | 传感器 | `vehicle/SensorBridge.kt` |
-| 日志、崩溃和上传 | `util/Logx.kt`、`util/LogUploader.kt`、`util/DiagnosticLogExporter.kt`、`util/NativeCrashHandler.kt` |
+| 日志、崩溃和上传 | `util/Logx.kt`、`util/RuntimeLogStore.kt`、`util/LogUploader.kt`、`util/DiagnosticLogExporter.kt`、`util/NativeCrashHandler.kt` |
 | 偏好设置兼容入口与启动 | `util/Prefs.kt`、`App.kt` |
 | Dock 黑名单默认值、迁移与存储 | `util/DockBlacklistDefaults.kt`、`util/DockBlacklistMigration.kt`、`util/DockBlacklistPreferences.kt`、`util/DockBlacklistRules.kt` |
 | 规则、迁移与控件单元测试 | `app/src/test/java/com/car/dockbar/util/`、`app/src/test/java/com/car/dockbar/dock/` |
