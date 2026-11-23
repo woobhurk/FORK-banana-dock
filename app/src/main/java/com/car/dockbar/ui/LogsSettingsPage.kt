@@ -13,6 +13,7 @@ import android.widget.TextView
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.widget.SwitchCompat
+import androidx.core.content.ContextCompat
 import androidx.core.view.isVisible
 import com.car.dockbar.util.DiagnosticLogExporter
 import java.text.SimpleDateFormat
@@ -207,7 +208,7 @@ internal class LogsSettingsPage(activity: MainActivity) :
     }
 
     private fun addLogConsole(clear: Button) {
-        val body = layout.fold(layout.logs, "查看运行日志", "收起运行日志") { open ->
+        val body = layout.fold(layout.logs, "运行日志") { open ->
             if (open && svLog.shouldFollowTail()) svLog.resumeFollowing()
         }
         clear.setOnClickListener {
@@ -221,18 +222,18 @@ internal class LogsSettingsPage(activity: MainActivity) :
     }
 
     private fun addPermissionSection() {
-        val parent = layout.permissions
-        permissionStatus = layout.note(parent)
-        repairPermissions = layout.action(parent, "检查并补齐权限", primary = true) { button ->
-            repairingPermissions = true
-            refreshPermissionStatus()
-            runDiagnostic(button, permissionReport, "正在检查并补齐核心权限…（最长 45 秒）",
-                "adb_grant", "核心权限检查与补齐", onFinished = {
-                    repairingPermissions = false
-                    refreshPermissionStatus()
-                }) { StartupPermissions.grantMissing(this) }
-        }
-        permissionDetails = layout.fold(parent, "查看权限详情", "收起权限详情") { refreshPermissionStatus() }
+        permissionDetails = layout.fold(layout.permissions, "权限状态", summary = { parent ->
+            permissionStatus = layout.note(parent, top = 0)
+            repairPermissions = layout.action(parent, "检查并补齐权限", primary = true) { button ->
+                repairingPermissions = true
+                refreshPermissionStatus()
+                runDiagnostic(button, permissionReport, "正在检查并补齐核心权限…（最长 45 秒）",
+                    "adb_grant", "核心权限检查与补齐", onFinished = {
+                        repairingPermissions = false
+                        refreshPermissionStatus()
+                    }) { StartupPermissions.grantMissing(this) }
+            }
+        }) { refreshPermissionStatus() }
         permissionReport = layout.note(permissionDetails).apply { setTextIsSelectable(true) }
         lateinit var probeReport: TextView
         layout.action(permissionDetails, "诊断提权环境") { button ->
@@ -253,6 +254,12 @@ internal class LogsSettingsPage(activity: MainActivity) :
             StartupPermissions.CheckState.CORE_MISSING -> "上次检查：有核心权限未满足"
             StartupPermissions.CheckState.FAILED -> "上次权限检查失败"
         }
+        permissionStatus.setTextColor(ContextCompat.getColor(this, when {
+            repairingPermissions -> R.color.settings_secondary
+            retry -> R.color.warn
+            result.state == StartupPermissions.CheckState.CORE_READY -> R.color.settings_service_running
+            else -> R.color.settings_secondary
+        }))
         repairPermissions.text = if (retry) "重试补齐权限" else "检查并补齐权限"
         repairPermissions.isVisible = retry || repairingPermissions || permissionDetails.isVisible
         if (!repairingPermissions && displayedPermissionCheck !== result) permissionReport.text = result.report
@@ -326,7 +333,7 @@ internal class LogsSettingsPage(activity: MainActivity) :
 
     /** 验证会话属于 Controller，切页或销毁本页面不会停止车上操作取证。 */
     private fun addHvacValidationActions(parent: LinearLayout) {
-        val section = layout.fold(parent, "车控验证", "收起车控验证") { refreshValidation?.invoke() }
+        val section = layout.fold(parent, "车控验证", titleSize = 17f) { refreshValidation?.invoke() }
         val status = layout.note(section)
         val start = layout.action(section, "开始 2 分钟验证") {
             val modes = HvacValidationMode.values()
@@ -474,7 +481,9 @@ internal class LogsSettingsPage(activity: MainActivity) :
     }
 
     private fun addAdvancedTools() {
-        val tools = layout.fold(layout.advanced, "高级排查", "收起高级排查") { open ->
+        val tools = layout.fold(layout.advanced, "高级排查", summary = {
+            layout.note(it, "车控验证、温度兼容性、车型适配、上传设置", top = 0)
+        }) { open ->
             if (open) refreshOverview()
             refreshValidation?.invoke()
         }
@@ -520,14 +529,13 @@ internal class LogsSettingsPage(activity: MainActivity) :
     private fun addVehicleTools(parent: LinearLayout) {
         layout.note(parent, "请停车后使用。扫描用于查找候选功能编号；循环取证用于查看原厂操作。")
         lateinit var scanReport: TextView
-        layout.action(parent, "扫描车控通道") { button ->
+        val scan = layout.button("扫描车控通道") { button ->
             runDiagnostic(button, scanReport, "正在扫描候选车控通道…", "channel_scan", "车控通道扫描") {
                 VehicleController.scanChannels(this)
             }
         }
-        scanReport = layout.note(parent).apply { isVisible = false; setTextIsSelectable(true) }
         lateinit var recircReport: TextView
-        layout.action(parent, "抓循环取证") { button ->
+        val recirc = layout.button("抓循环取证") { button ->
             AlertDialog.Builder(activity)
                 .setTitle("开始内外循环取证？")
                 .setMessage("请停车操作。开始后会尝试清空系统日志缓冲。请在原厂 Dock 或空调界面切换内外循环，由本应用采集结果。")
@@ -545,6 +553,8 @@ internal class LogsSettingsPage(activity: MainActivity) :
                 .setNegativeButton("取消", null)
                 .show()
         }
+        layout.pairedButtons(parent, scan, recirc)
+        scanReport = layout.note(parent).apply { isVisible = false; setTextIsSelectable(true) }
         recircReport = layout.note(parent).apply { isVisible = false; setTextIsSelectable(true) }
     }
 
