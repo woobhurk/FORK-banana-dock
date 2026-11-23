@@ -6,26 +6,26 @@
     android:viewportHeight="64">
     <path
         android:strokeColor="#FFFFFFFF"
-        android:strokeWidth="4.6"
+        android:strokeWidth="4.14"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
-        android:pathData="M17.3,12.5h6.4a4.8,4.8 0,0 1 4.8,4.8v6.4a4.8,4.8 0,0 1 -4.8,4.8h-6.4a4.8,4.8 0,0 1 -4.8,-4.8v-6.4a4.8,4.8 0,0 1 4.8,-4.8z" />
+        android:pathData="M18.77,14.45h5.76a4.32,4.32 0,0 1 4.32,4.32v5.76a4.32,4.32 0,0 1 -4.32,4.32h-5.76a4.32,4.32 0,0 1 -4.32,-4.32v-5.76a4.32,4.32 0,0 1 4.32,-4.32z" />
     <path
         android:strokeColor="#FFFFFFFF"
-        android:strokeWidth="4.6"
+        android:strokeWidth="4.14"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
-        android:pathData="M17.3,35.5h6.4a4.8,4.8 0,0 1 4.8,4.8v6.4a4.8,4.8 0,0 1 -4.8,4.8h-6.4a4.8,4.8 0,0 1 -4.8,-4.8v-6.4a4.8,4.8 0,0 1 4.8,-4.8z" />
+        android:pathData="M18.77,35.15h5.76a4.32,4.32 0,0 1 4.32,4.32v5.76a4.32,4.32 0,0 1 -4.32,4.32h-5.76a4.32,4.32 0,0 1 -4.32,-4.32v-5.76a4.32,4.32 0,0 1 4.32,-4.32z" />
     <path
         android:strokeColor="#FFFFFFFF"
-        android:strokeWidth="4.6"
+        android:strokeWidth="4.14"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
-        android:pathData="M40.3,12.5h6.4a4.8,4.8 0,0 1 4.8,4.8v6.4a4.8,4.8 0,0 1 -4.8,4.8h-6.4a4.8,4.8 0,0 1 -4.8,-4.8v-6.4a4.8,4.8 0,0 1 4.8,-4.8z" />
+        android:pathData="M39.47,14.45h5.76a4.32,4.32 0,0 1 4.32,4.32v5.76a4.32,4.32 0,0 1 -4.32,4.32h-5.76a4.32,4.32 0,0 1 -4.32,-4.32v-5.76a4.32,4.32 0,0 1 4.32,-4.32z" />
     <path
         android:strokeColor="#FFFFFFFF"
-        android:strokeWidth="4.6"
+        android:strokeWidth="4.14"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
-        android:pathData="M40.3,35.5h6.4a4.8,4.8 0,0 1 4.8,4.8v6.4a4.8,4.8 0,0 1 -4.8,4.8h-6.4a4.8,4.8 0,0 1 -4.8,-4.8v-6.4a4.8,4.8 0,0 1 4.8,-4.8z" />
+        android:pathData="M39.47,35.15h5.76a4.32,4.32 0,0 1 4.32,4.32v5.76a4.32,4.32 0,0 1 -4.32,4.32h-5.76a4.32,4.32 0,0 1 -4.32,-4.32v-5.76a4.32,4.32 0,0 1 4.32,-4.32z" />
 </vector>

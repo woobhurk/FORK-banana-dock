@@ -86,6 +86,8 @@ class SeatClimatePopup(private val ctx: Context) {
         addView(label(side, 13f), LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
         ).apply { bottomMargin = dp(4) })
+        val buttonHeight = dp(44)
+        val iconSize = DockPopupStyle.iconSizePx(ctx, buttonHeight)
         for (row in ICONS.indices) {
             val heating = row < 3
             val level = when {
@@ -103,14 +105,14 @@ class SeatClimatePopup(private val ctx: Context) {
                 isFocusable = true
                 contentDescription = if (level == 0) "$side 关闭加热和通风"
                     else "$side ${if (heating) "加热" else "通风"} $level 档"
-                addView(image, FrameLayout.LayoutParams(dp(36), dp(36), Gravity.CENTER))
+                addView(image, FrameLayout.LayoutParams(iconSize, iconSize, Gravity.CENTER))
                 setOnClickListener {
                     VehicleController.setSeatComfortLevel(ctx, driver, heating, level)
                     resetTimer()
                 }
             }
             choices.add(Choice(driver, heating, level, button, image))
-            addView(button, LinearLayout.LayoutParams(dp(56), dp(44)).apply {
+            addView(button, LinearLayout.LayoutParams(dp(56), buttonHeight).apply {
                 bottomMargin = dp(4)
             })
         }

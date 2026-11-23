@@ -10,10 +10,10 @@
         android:rotation="0">
         <path
             android:strokeColor="#FFFFFFFF"
-            android:strokeWidth="3.45"
+            android:strokeWidth="2.208"
             android:strokeLineCap="round"
             android:strokeLineJoin="round"
-            android:pathData="M32 32V5.5m-7.2 6 7.2 7.2 7.2-7.2" />
+            android:pathData="M32 32V15.04m-4.608 3.84 4.608 4.608 4.608-4.608" />
     </group>
     <group
         android:pivotX="32"
@@ -21,10 +21,10 @@
         android:rotation="60">
         <path
             android:strokeColor="#FFFFFFFF"
-            android:strokeWidth="3.45"
+            android:strokeWidth="2.208"
             android:strokeLineCap="round"
             android:strokeLineJoin="round"
-            android:pathData="M32 32V5.5m-7.2 6 7.2 7.2 7.2-7.2" />
+            android:pathData="M32 32V15.04m-4.608 3.84 4.608 4.608 4.608-4.608" />
     </group>
     <group
         android:pivotX="32"
@@ -32,10 +32,10 @@
         android:rotation="120">
         <path
             android:strokeColor="#FFFFFFFF"
-            android:strokeWidth="3.45"
+            android:strokeWidth="2.208"
             android:strokeLineCap="round"
             android:strokeLineJoin="round"
-            android:pathData="M32 32V5.5m-7.2 6 7.2 7.2 7.2-7.2" />
+            android:pathData="M32 32V15.04m-4.608 3.84 4.608 4.608 4.608-4.608" />
     </group>
     <group
         android:pivotX="32"
@@ -43,10 +43,10 @@
         android:rotation="180">
         <path
             android:strokeColor="#FFFFFFFF"
-            android:strokeWidth="3.45"
+            android:strokeWidth="2.208"
             android:strokeLineCap="round"
             android:strokeLineJoin="round"
-            android:pathData="M32 32V5.5m-7.2 6 7.2 7.2 7.2-7.2" />
+            android:pathData="M32 32V15.04m-4.608 3.84 4.608 4.608 4.608-4.608" />
     </group>
     <group
         android:pivotX="32"
@@ -54,10 +54,10 @@
         android:rotation="240">
         <path
             android:strokeColor="#FFFFFFFF"
-            android:strokeWidth="3.45"
+            android:strokeWidth="2.208"
             android:strokeLineCap="round"
             android:strokeLineJoin="round"
-            android:pathData="M32 32V5.5m-7.2 6 7.2 7.2 7.2-7.2" />
+            android:pathData="M32 32V15.04m-4.608 3.84 4.608 4.608 4.608-4.608" />
     </group>
     <group
         android:pivotX="32"
@@ -65,9 +65,9 @@
         android:rotation="300">
         <path
             android:strokeColor="#FFFFFFFF"
-            android:strokeWidth="3.45"
+            android:strokeWidth="2.208"
             android:strokeLineCap="round"
             android:strokeLineJoin="round"
-            android:pathData="M32 32V5.5m-7.2 6 7.2 7.2 7.2-7.2" />
+            android:pathData="M32 32V15.04m-4.608 3.84 4.608 4.608 4.608-4.608" />
     </group>
 </vector>

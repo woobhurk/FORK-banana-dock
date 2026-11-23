@@ -28,7 +28,7 @@ internal object AppDrawerSlotStyle {
     fun emptyIcon(view: ImageView, sizePx: Int, color: Int) = with(view) {
         setImageResource(R.drawable.ic_dock_apps)
         setColorFilter(color)
-        val pad = (sizePx * 0.22f).roundToInt()
+        val pad = (sizePx * 0.19f).roundToInt()
         setPadding(pad, pad, pad, pad)
         background = outline(sizePx * 0.22f, resources.displayMetrics.density, color, dashed = true)
     }

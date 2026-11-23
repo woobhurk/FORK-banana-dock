@@ -35,7 +35,6 @@ private fun spec(
     fixedWidthPx: Int = 0,
     flexMinPx: Int = 0,
     flexMaxPx: Int = 0,
-    iconScale: Float = 1f,
     preserveColors: Boolean = false,
     arrowPx: Int = 0,
     arrowHitPx: Int = 0,
@@ -52,7 +51,6 @@ private fun spec(
     fixedWidthPx = fixedWidthPx,
     flexMinPx = flexMinPx,
     flexMaxPx = flexMaxPx,
-    iconScale = iconScale,
     preserveColors = preserveColors,
     arrowPx = arrowPx,
     arrowHitPx = arrowHitPx,
@@ -89,21 +87,19 @@ private fun iconWidget(
     gestures: Map<String, GestureBinding>,
     bindKind: BindKind = BindKind.NONE,
     lockSpan: Boolean = false,
-    iconScale: Float = 1f,
     preserveColors: Boolean = false,
     inactiveAlpha: Float = 1f,
 ): DockWidget = object : DockWidget {
     override val spec = spec(
         builtin, iconFor(builtin.action), bindKind, lockSpan,
-        iconScale = iconScale, preserveColors = preserveColors,
+        preserveColors = preserveColors,
     )
     override fun bind(mounted: MountedEntry, snapshot: DockSnapshot) {
         (mounted.view as? DockIconView)?.let { paintIcon(it, spec.bindKind, snapshot) }
     }
     override fun defaultGestures() = gestures
     override fun create(ctx: Context, entry: DockEntry, iconPx: Int): MountedEntry {
-        val size = (iconPx * spec.iconScale).toInt().coerceAtLeast(1)
-        val view = DockIconView(ctx, spec.catalogIcon, size, spec.preserveColors, inactiveAlpha)
+        val view = DockIconView(ctx, spec.catalogIcon, iconPx.coerceAtLeast(1), spec.preserveColors, inactiveAlpha)
         return mounted(this, entry, view, linkedMapOf(HitTargets.ROOT to view), null)
     }
 }
@@ -259,11 +255,10 @@ internal object AppWidget : DockWidget {
     override val spec = WidgetSpec(
         action = "app", label = "", span = 1, separatorBefore = false, hint = "",
         hidden = true, catalogIcon = R.drawable.ic_apps,
-        iconScale = 0.86f,
     )
     override fun defaultGestures() = root(tap(DockAction.LaunchThisEntry))
     override fun create(ctx: Context, entry: DockEntry, iconPx: Int): MountedEntry {
-        val view = DockIconView(ctx, 0, (iconPx * spec.iconScale).toInt().coerceAtLeast(1))
+        val view = DockIconView(ctx, 0, DockMetrics.appIconSizePx(iconPx))
         runCatching { view.setDynamic(ctx.packageManager.getApplicationIcon(entry.action)) }
             .onFailure { runCatching { view.setIcon(R.drawable.ic_dock_car) } }
         return mounted(this, entry, view, linkedMapOf(HitTargets.ROOT to view), null)
@@ -285,12 +280,12 @@ internal class MissingWidget(action: String) : DockWidget {
 
 internal object BuiltinWidgets {
     val all: List<DockWidget> = listOf(
-        iconWidget(Builtin.HOME, root(GestureBinding(tap = DockAction.GoHome, longPress = DockAction.OpenRecents)), iconScale = 0.8f),
+        iconWidget(Builtin.HOME, root(GestureBinding(tap = DockAction.GoHome, longPress = DockAction.OpenRecents))),
         MusicWidget,
         iconWidget(Builtin.LYRIC, root(tapLong(DockAction.ToggleLyric, DockAction.OpenThisApp)), BindKind.LYRIC, lockSpan = true),
         VolumeWidget,
         iconWidget(Builtin.SETTINGS, root(tapLong(DockAction.OpenCarSettings, DockAction.OpenDockSettings))),
-        iconWidget(Builtin.APP_DRAWER, root(tapLong(DockAction.ShowPopup("appDrawer"), DockAction.OpenAppDrawerSettings)), iconScale = 0.9f),
+        iconWidget(Builtin.APP_DRAWER, root(tapLong(DockAction.ShowPopup("appDrawer"), DockAction.OpenAppDrawerSettings))),
         comboWidget(
             Builtin.TEMP_DRIVER_COMBO,
             DockAction.TempStep(true, -1), DockAction.TempStep(true, 1),
@@ -315,7 +310,7 @@ internal object BuiltinWidgets {
         iconWidget(Builtin.TEMP_DOWN_DRIVER, root(tap(DockAction.TempStep(true, -1)))),
         valueWidget(Builtin.TEMP_DRIVER, root(tapLong(DockAction.ToggleHvacWindow, DockAction.ToggleAc)), BindKind.TEMP_DRIVER),
         iconWidget(Builtin.TEMP_UP_DRIVER, root(tap(DockAction.TempStep(true, 1)))),
-        iconWidget(Builtin.AIR, root(tapLong(DockAction.ToggleAirflow, DockAction.ShowPopup("airDirection"))), BindKind.AIR, iconScale = 1.15f),
+        iconWidget(Builtin.AIR, root(tapLong(DockAction.ToggleAirflow, DockAction.ShowPopup("airDirection"))), BindKind.AIR),
         iconWidget(Builtin.VENT, root(tapLong(DockAction.ToggleSeatVent, DockAction.ShowPopup("seatClimate"))), BindKind.VENT, preserveColors = true),
         iconWidget(Builtin.SEAT_HEAT, root(tapLong(DockAction.LevelBump("seatHeat", "down"), DockAction.LevelBump("seatHeat", "up"))), BindKind.SEAT_HEAT, preserveColors = true),
         iconWidget(Builtin.FAN_DOWN, root(tap(DockAction.FanStep(-1)))),

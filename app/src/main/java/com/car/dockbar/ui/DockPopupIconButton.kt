@@ -15,9 +15,8 @@ internal class DockPopupIconButton(
     description: String,
     caption: String = "",
     private val preserveIconColors: Boolean = false,
-    /** 只缩放图标绘制，不改变按钮的触摸区域。 */
-    private val iconScale: Float = 1f,
-    private val readOnly: Boolean = false
+    private val readOnly: Boolean = false,
+    maxIconSizePx: Int? = null
 ): LinearLayout(context) {
     private val image = ImageView(context).apply {
         scaleType = ImageView.ScaleType.FIT_CENTER
@@ -40,10 +39,8 @@ internal class DockPopupIconButton(
         isFocusable = !readOnly
         importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
         contentDescription = description
-        val iconSize = dp(DockPopupStyle.ICON_DP)
+        val iconSize = DockPopupStyle.iconSizePx(context, maxIconSizePx ?: (minimumHeight - paddingTop - paddingBottom))
         addView(image, LayoutParams(iconSize, iconSize))
-        image.scaleX = iconScale
-        image.scaleY = iconScale
         setIcon(iconRes)
         setCaption(caption)
         setActive(false)

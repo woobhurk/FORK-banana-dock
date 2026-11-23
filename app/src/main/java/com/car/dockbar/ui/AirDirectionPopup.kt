@@ -74,9 +74,9 @@ class AirDirectionPopup(private val ctx: Context) {
     }
 
     private fun buildAndShow(anchor: View?) {
-        // 标题与三个竖排图标按钮，未放大时内容总高约 200dp。
+        // 按图标、标题和三行按钮的自然高度限制紧凑窗口。
         val placement = DockPopupChrome.placement(ctx, anchor)
-        scale = placement.scale(2f, widthDp = 90, heightDp = 200)
+        scale = placement.scale(2f, widthDp = 90, heightDp = 230)
         wm = ctx.getSystemService(Context.WINDOW_SERVICE) as WindowManager
 
         val card = DockPopupStyle.card(ctx, scale, "风向")
@@ -174,7 +174,7 @@ class AirDirectionPopup(private val ctx: Context) {
     }
 
     private fun makeIconBtn(iconRes: Int, description: String) =
-        DockPopupIconButton(ctx, scale, iconRes, description, iconScale = 1.2f).apply {
+        DockPopupIconButton(ctx, scale, iconRes, description, maxIconSizePx = dp(40)).apply {
             // 保留原风向按钮的触控区，只更换状态背景。
             setPadding(dp(8), dp(6), dp(8), dp(6))
         }

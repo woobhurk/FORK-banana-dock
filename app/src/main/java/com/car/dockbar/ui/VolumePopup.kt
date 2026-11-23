@@ -119,6 +119,8 @@ class VolumePopup(private val ctx: Context) {
     }
 
     private fun column(channel: CabinVolume.Channel): LinearLayout {
+        val trackWidth = dp(56)
+        val iconSize = DockPopupStyle.iconSizePx(ctx, trackWidth)
         val box = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
@@ -128,7 +130,7 @@ class VolumePopup(private val ctx: Context) {
             setColorFilter(DockPopupStyle.text)
             scaleType = ImageView.ScaleType.FIT_CENTER
             contentDescription = "${channel.title}音量"
-            layoutParams = LinearLayout.LayoutParams(dp(24), dp(24)).apply {
+            layoutParams = LinearLayout.LayoutParams(iconSize, iconSize).apply {
                 gravity = Gravity.CENTER_HORIZONTAL
                 bottomMargin = dp(6)
             }
@@ -144,7 +146,7 @@ class VolumePopup(private val ctx: Context) {
             resetTimer()
         }
         bars[channel] = bar
-        box.addView(bar, LinearLayout.LayoutParams(dp(56), dp(148)).apply {
+        box.addView(bar, LinearLayout.LayoutParams(trackWidth, dp(148)).apply {
             topMargin = dp(6)
             bottomMargin = dp(6)
         })
@@ -155,7 +157,7 @@ class VolumePopup(private val ctx: Context) {
         return box
     }
     private fun iconFor(channel: CabinVolume.Channel): Int = when (channel) {
-        CabinVolume.MEDIA -> R.drawable.ic_music_note
+        CabinVolume.MEDIA -> R.drawable.ic_popup_media
         CabinVolume.NAVI -> R.drawable.ic_popup_navigation
         CabinVolume.PHONE -> R.drawable.ic_popup_phone
         CabinVolume.VOICE -> R.drawable.ic_popup_voice

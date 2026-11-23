@@ -24,7 +24,6 @@ data class WidgetSpec(
     val flexMinPx: Int = 0,
     val flexMaxPx: Int = 0,
     val lockSpan: Boolean = false,
-    val iconScale: Float = 1f,
     val preserveColors: Boolean = false,
     val arrowPx: Int = 0,
     /** 箭头点击列宽。0 表示与数值三等分。 */
@@ -68,6 +67,8 @@ object DockMetrics {
     const val MUSIC_MAX_WIDTH_PX = 500
 
     internal fun iconSizePx(context: Context) = (65 * Prefs.iconScale(context)).toInt().coerceAtLeast(12)
+
+    internal fun appIconSizePx(iconPx: Int) = (iconPx * 0.86f).toInt().coerceAtLeast(1)
 
     fun fixedWidthFor(span: Int): Int = when (span) {
         1 -> SLOT_FIXED_PX

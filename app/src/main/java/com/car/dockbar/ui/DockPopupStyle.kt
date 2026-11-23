@@ -12,11 +12,11 @@ import android.widget.TextView
 import androidx.core.content.ContextCompat
 import androidx.core.graphics.ColorUtils
 import com.car.dockbar.R
+import com.car.dockbar.dock.DockMetrics
 import com.car.dockbar.util.Prefs
 
 /** 深色弹窗独立于主栏与设置主题；只共享外壳、标题和控件的视觉状态。 */
 internal object DockPopupStyle {
-    const val ICON_DP = 30
     val text = 0xFFF2F4F8.toInt()
     val secondary = 0xFFA6AEBB.toInt()
     val unknown = 0xFFEAC58A.toInt()
@@ -24,6 +24,9 @@ internal object DockPopupStyle {
 
     fun dp(context: Context, scale: Float, value: Int): Int =
         (value * scale * context.resources.displayMetrics.density).toInt()
+
+    fun iconSizePx(context: Context, availablePx: Int): Int =
+        DockMetrics.iconSizePx(context).coerceAtMost(availablePx.coerceAtLeast(1))
 
     fun card(context: Context, scale: Float, title: String) = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL

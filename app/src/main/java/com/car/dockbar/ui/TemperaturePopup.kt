@@ -48,14 +48,6 @@ class TemperaturePopup(
             R.drawable.ic_sw_heat_02,
             R.drawable.ic_sw_heat_03
         )
-        // 按前挡图标的可见轮廓归一，不能只比较资源的 viewport 尺寸。
-        private const val ICON_SCALE_REAR_DEFROST = 1.0f
-        private const val ICON_SCALE_FAST_COOL = 0.64f
-        private const val ICON_SCALE_FAST_HEAT = 0.74f
-        private const val ICON_SCALE_STEERING_HEAT = 1.0f
-        private const val ICON_SCALE_SYNC = 0.95f
-        private const val ICON_SCALE_CABIN_TEMP = 1.05f
-        private const val ICON_SCALE_AUTO_SEAT = 0.98f
     }
 
     private var wm: WindowManager? = null
@@ -252,7 +244,7 @@ class TemperaturePopup(
                 resetTimer()
             }
             btnDefrostRear = funcBtn(
-                R.drawable.ic_popup_defrost_rear, "后挡加热", iconScale = ICON_SCALE_REAR_DEFROST
+                R.drawable.ic_popup_defrost_rear, "后挡加热"
             ) {
                 VehicleController.toggleDefrostRear(ctx)
                 resetTimer()
@@ -261,7 +253,6 @@ class TemperaturePopup(
                 R.drawable.ic_popup_cool,
                 "原厂急速降温",
                 "MAX",
-                iconScale = ICON_SCALE_FAST_COOL
             ) {
                 if (!VehicleController.toggleAcMax(ctx)) {
                     val message = if (VehicleController.acMaxOn() == null) "急速降温状态未知，未发送"
@@ -272,7 +263,7 @@ class TemperaturePopup(
             }
             acMaxButton = fastCool
             val fastHeat = funcBtn(
-                R.drawable.ic_popup_heat, "极速升温", "MAX", iconScale = ICON_SCALE_FAST_HEAT
+                R.drawable.ic_popup_heat, "极速升温", "MAX"
             ) {
                 VehicleController.fastHeat(ctx)
                 resetTimer()
@@ -282,7 +273,6 @@ class TemperaturePopup(
                 "方向盘加热关闭",
                 "0",
                 preserveIconColors = true,
-                iconScale = ICON_SCALE_STEERING_HEAT
             ) {
                 VehicleController.steeringHeatCycle(ctx)
                 resetTimer()
@@ -294,7 +284,7 @@ class TemperaturePopup(
             rightCol.addView(btnSteerHeat, funcLp())
         } else {
             btnDualSync = funcBtn(
-                R.drawable.ic_popup_sync, "双温同步", "SYNC", iconScale = ICON_SCALE_SYNC
+                R.drawable.ic_popup_sync, "双温同步", "SYNC"
             ) {
                 val next = VehicleController.state.tempDualOn != true
                 runCatching { VehicleController.setTempDual(ctx, next) }
@@ -308,7 +298,6 @@ class TemperaturePopup(
                 R.drawable.ic_popup_cabin_temp,
                 "车内温度暂不可用",
                 "--",
-                iconScale = ICON_SCALE_CABIN_TEMP,
                 readOnly = true
             ).apply { minimumWidth = dp(116) }
             // 自动规则保留阈值和 AUTO，避免与立即调节座椅档位混淆。
@@ -316,7 +305,6 @@ class TemperaturePopup(
                 R.drawable.ic_seat_feng_03,
                 "高于25℃自动通风",
                 ">25℃\nAUTO",
-                iconScale = ICON_SCALE_AUTO_SEAT
             ) {
                 Prefs.setAutoSeatVentHot(ctx, !Prefs.autoSeatVentHot(ctx))
                 render(VehicleController.state)
@@ -326,7 +314,6 @@ class TemperaturePopup(
                 R.drawable.ic_seat_hot_03,
                 "低于15℃自动加热",
                 "<15℃\nAUTO",
-                iconScale = ICON_SCALE_AUTO_SEAT
             ) {
                 Prefs.setAutoSeatHeatCold(ctx, !Prefs.autoSeatHeatCold(ctx))
                 render(VehicleController.state)
@@ -368,10 +355,9 @@ class TemperaturePopup(
         description: String,
         caption: String = "",
         preserveIconColors: Boolean = false,
-        iconScale: Float = 1f,
         onClick: () -> Unit
     ): DockPopupIconButton = DockPopupIconButton(
-        ctx, SCALE, iconRes, description, caption, preserveIconColors, iconScale
+        ctx, SCALE, iconRes, description, caption, preserveIconColors
     ).apply {
         minimumWidth = dp(116)
         setOnClickListener { onClick() }

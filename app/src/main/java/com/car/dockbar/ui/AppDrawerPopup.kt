@@ -10,6 +10,7 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import com.car.dockbar.R
+import com.car.dockbar.dock.DockMetrics
 import com.car.dockbar.model.AppDrawerApp
 import com.car.dockbar.model.AppDrawerApps
 import com.car.dockbar.util.IntentLauncher
@@ -31,6 +32,7 @@ class AppDrawerPopup(
         const val WIDTH_DP = 312
         const val CELL_HEIGHT_DP = 64
         const val CELL_VERTICAL_MARGIN_DP = 2
+        const val CELL_ICON_SPACE_DP = 30
     }
 
     private val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
@@ -110,6 +112,7 @@ class AppDrawerPopup(
         host.removeAllViews()
         val cellHeight = dp(CELL_HEIGHT_DP)
         val verticalMargin = dp(CELL_VERTICAL_MARGIN_DP)
+        val iconSize = DockMetrics.appIconSizePx(DockMetrics.iconSizePx(context)).coerceAtMost(dp(CELL_ICON_SPACE_DP))
         repeat(2) { rowIndex ->
             val row = LinearLayout(context).apply {
                 orientation = LinearLayout.HORIZONTAL
@@ -117,7 +120,7 @@ class AppDrawerPopup(
             }
             repeat(3) { columnIndex ->
                 val index = rowIndex * 3 + columnIndex
-                row.addView(appCell(index), LinearLayout.LayoutParams(0, cellHeight, 1f).apply {
+                row.addView(appCell(index, iconSize), LinearLayout.LayoutParams(0, cellHeight, 1f).apply {
                     setMargins(dp(3), verticalMargin, dp(3), verticalMargin)
                 })
             }
@@ -203,7 +206,7 @@ class AppDrawerPopup(
     }
 
     /** @param index 槽位 0..5（[slotApps] 里为 null 就是空位） */
-    private fun appCell(index: Int): View {
+    private fun appCell(index: Int, iconSize: Int): View {
         val app = slotApps.getOrNull(index)
         val cell = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
@@ -215,7 +218,6 @@ class AppDrawerPopup(
         val icon = ImageView(context).apply {
             scaleType = ImageView.ScaleType.FIT_CENTER
         }
-        val iconSize = dp(DockPopupStyle.ICON_DP)
         val title = TextView(context)
         AppDrawerSlotStyle.label(title, app?.label ?: "空位",
             if (app == null) DockPopupStyle.secondary else DockPopupStyle.text, scale)
