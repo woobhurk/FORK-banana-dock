@@ -49,6 +49,6 @@
 - Secrets 名称：`ANDROID_KEYSTORE_BASE64`、`ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD`。不得把 keystore、密码或 Base64 内容提交到仓库。
 - CI 将 Gradle 产物复制到 `dist/`。关键词触发的自动发布文件名为 `CarDockBar-<versionName>.apk`（当前版本形如 `CarDockBar-4.5.0.apk`）。手动 `workflow_dispatch` 仍使用 `CarDockBar-<versionName>-r<run>.apk`（形如 `CarDockBar-4.5.0-r123.apk`），同一次 run 重跑时为 `CarDockBar-<versionName>-r<run>-a<attempt>.apk`。`versionName` / `versionCode` 仍只由 APK 与 `app/build.gradle` 交叉校验，CI 不改写它们，因此同一版本的新旧包可以互相覆盖安装。每次构建另写自己的 `update.json` 和 `SHA256SUMS`。
 - 关键词触发的自动发布是正式 Release，tag 为 `v<versionName>`，标题为 `CarDockBar <versionName>`。同一 `versionName` 的自动 tag 已存在时拒绝再次发布，不会覆盖或删除已有 Release。手动 `workflow_dispatch` 发布为 Pre-release，不标为 Latest；tag 为 `v<versionName>-r<run>`（重跑时为 `v<versionName>-r<run>-a<attempt>`），标题为 `CarDockBar <versionName> (r<run>)`。发布资产名与本地 `Banana_Dock-4.5.0.apk` 有意不同，不要混写。
-- Release 正文先列出相对最近一个稳定 Release 的提交说明。稳定 Release 指非 Pre-release，且其 tag 是当前提交的祖先；手动 Pre-release 的 `v<versionName>-r<run>` 不作为起点。以 `ci` 开头的发布提交不写入，再由 GitHub 自动 Changelog 从同一起点接在后面。正文开头保留不可见的 `<!-- android-version-code: ... -->`，供下次发布判断能否标为 Latest。
+- 稳定 Release 正文先列出相对最近一个稳定 Release 的提交说明。稳定 Release 指非 Pre-release，且其 tag 是当前提交的祖先。预览版（手动 `workflow_dispatch` 的 Pre-release）正文先列出相对最近一个 Pre-release 的提交说明，起点同样要求该 tag 是当前提交的祖先。没有更早的同类 Release 时，更新日志包含全部提交。以 `ci` 开头的发布提交不写入，再由 GitHub 自动 Changelog 从同一起点接在后面。正文开头保留不可见的 `<!-- android-version-code: ... -->`，供下次发布判断能否标为 Latest。
 - 普通文档提交不要写成 `ci:` 开头并带「发布 / 新版」或英文 `release` / `new version`，避免触发 Release。
 
