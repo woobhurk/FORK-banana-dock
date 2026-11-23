@@ -106,7 +106,7 @@ class App : Application() {
             Logx.w("⚠ 上次会话崩溃过 → 已自动关闭「温度事件监听」实验开关")
         }
         if (Prefs.suspendHvacEventsAfterCrash(this, LogUploader.lastReportHasCrashEvidence, streak)) {
-            Logx.w("⚠ 上次会话崩溃过 → 已关闭日常车控状态同步的可选订阅，保留轮询，需人工确认后再开启")
+            Logx.w("⚠ 崩溃保护 → 已清空日常车控状态同步的可选通道勾选，保留轮询；可先导出诊断 ZIP，再按需恢复")
         }
         Prefs.migrateHvacSeatEventDefaults(this)
 

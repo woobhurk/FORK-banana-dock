@@ -174,7 +174,7 @@ class AirDirectionPopup(private val ctx: Context) {
     }
 
     private fun makeIconBtn(iconRes: Int, description: String) =
-        DockPopupIconButton(ctx, scale, iconRes, description).apply {
+        DockPopupIconButton(ctx, scale, iconRes, description, iconScale = 1.2f).apply {
             // 保留原风向按钮的触控区，只更换状态背景。
             setPadding(dp(8), dp(6), dp(8), dp(6))
         }

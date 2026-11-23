@@ -375,6 +375,7 @@ object VehicleController {
     private var publishedPowerState = PowerState.UNKNOWN
     // MAX A/C 的日常观测不随临时验证开始或结束失效，只使用本连接的合法裸值。
     private data class AcMaxObservation(val raw: Int, val connection: Long)
+    private const val AC_MAX_READBACK_DELAY_MS = 400L
     @Volatile private var acMaxObservation: AcMaxObservation? = null
     private var acMaxWriteBasis: AcMaxObservation? = null
     private var acMaxWriteNeedsObservation = false
@@ -665,6 +666,7 @@ object VehicleController {
         ctx: Context, value: Int, entry: String,
         requiredEpoch: Long? = null, basis: AcMaxObservation? = null,
     ): Boolean {
+        val configEpoch = validationEpoch
         val epoch = requiredEpoch ?: acMaxValidationEpoch()
         fun record(stage: String, detail: String = "") {
             if (epoch == null) return
@@ -679,14 +681,23 @@ object VehicleController {
             return false
         }
         val connection = VehicleBridge.connectionGeneration
-        fun finish(sent: Boolean) = onMain {
+        fun finish(sent: Boolean, accepted: Boolean = false) = onMain {
             val currentConnection = connection == VehicleBridge.connectionGeneration
             if (basis != null && acMaxWriteBasis === basis) {
                 // 事件可能先于厂商返回；没有较新的有效观测才继续等待。
                 acMaxWriteNeedsObservation = sent && currentConnection && currentAcMaxObservation() === basis
                 if (!acMaxWriteNeedsObservation) acMaxWriteBasis = null
             }
-            if (sent && currentConnection) requestRefresh(ctx, CLIMATE_GROUP)
+            if (!sent || !currentConnection || configEpoch != validationEpoch) return@onMain
+            if (basis == null || epoch != null || !accepted) {
+                requestRefresh(ctx, CLIMATE_GROUP)
+            } else if (currentAcMaxObservation() === basis) {
+                main.postDelayed({
+                    if (configEpoch == validationEpoch && currentAcMaxObservation() === basis) {
+                        requestRefresh(ctx, CLIMATE_GROUP)
+                    }
+                }, AC_MAX_READBACK_DELAY_MS)
+            }
         }
         return HvacCommands.submit(ctx, "ac_max entry=$entry target=$value", onSkipped = {
             record("ABORT", "提交或执行未完成，原因见 HVAC_WRITE / HVAC_TRACE")
@@ -698,7 +709,7 @@ object VehicleController {
             val sent = HvacCommands.operationNativeWrites() != 0
             if (sent) record("RETURN", "accepted=$accepted；生效看事件、读回和原车状态")
             else record("SKIPPED", "未调用厂商接口，原因见 HVAC_WRITE / HVAC_TRACE")
-            finish(sent)
+            finish(sent, accepted)
         }
     }
 
@@ -1002,7 +1013,7 @@ object VehicleController {
         }
         val powerRaw = if (group == VehicleRefreshGroup.CLIMATE) readSwitch(POWER_VALIDATION_KEY) else null
         val acMaxRaw = if (group == VehicleRefreshGroup.CLIMATE) readSwitch(AC_MAX_KEY) else null
-        val normalKeys = Prefs.hvacEventKeys(c)
+        val normalKeys = if (group == VehicleRefreshGroup.TEMPERATURE) Prefs.hvacEventKeys(c) else emptySet()
         val temperatures = if (group == VehicleRefreshGroup.TEMPERATURE &&
             (activeValidationMode() == HvacValidationMode.TEMPERATURE || normalKeys.any { it == "temp_driver" || it == "temp_passenger" } ||
                 floatingConfirmation("temp_driver") || floatingConfirmation("temp_passenger"))) FloatArray(keys.size) { Float.NaN } else null

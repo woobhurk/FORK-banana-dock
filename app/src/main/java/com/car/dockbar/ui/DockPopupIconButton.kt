@@ -40,7 +40,8 @@ internal class DockPopupIconButton(
         isFocusable = !readOnly
         importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
         contentDescription = description
-        addView(image, LayoutParams(dp(30), dp(30)))
+        val iconSize = dp(DockPopupStyle.ICON_DP)
+        addView(image, LayoutParams(iconSize, iconSize))
         image.scaleX = iconScale
         image.scaleY = iconScale
         setIcon(iconRes)

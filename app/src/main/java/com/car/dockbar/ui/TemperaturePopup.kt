@@ -53,8 +53,8 @@ class TemperaturePopup(
         private const val ICON_SCALE_FAST_COOL = 0.64f
         private const val ICON_SCALE_FAST_HEAT = 0.74f
         private const val ICON_SCALE_STEERING_HEAT = 1.0f
-        private const val ICON_SCALE_SYNC = 0.66f
-        private const val ICON_SCALE_CABIN_TEMP = 0.78f
+        private const val ICON_SCALE_SYNC = 0.95f
+        private const val ICON_SCALE_CABIN_TEMP = 1.05f
         private const val ICON_SCALE_AUTO_SEAT = 0.98f
     }
 

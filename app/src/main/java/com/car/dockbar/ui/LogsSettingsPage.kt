@@ -263,8 +263,9 @@ internal class LogsSettingsPage(activity: MainActivity) :
         layout.action(parent, "日常车控状态同步") {
             AlertDialog.Builder(activity)
                 .setTitle("日常车控状态同步")
-                .setMessage("选中的通道尝试接收原车状态变化，定时读取继续兜底。默认勾选除主副驾温度外的原厂通道；当前已保存选择优先，可用“恢复默认”重新套用。\n" +
+                .setMessage("选中的通道尝试接收原车状态变化，定时读取继续兜底。默认勾选除主副驾温度外的可选通道；当前已保存选择优先，可用“恢复默认”重新套用。\n" +
                     "⚠ 厂商回调及温度浮点读取可能导致进程闪退，请停车后配置；支持情况因车机而异。\n" +
+                    "崩溃熔断会清空勾选；恢复前可先导出诊断 ZIP。\n" +
                     "保存仅调整订阅与读取，不自动写入车控或补权，也不改变车控写入开关。临时验证结束不会清除此配置。")
                 .setPositiveButton("选择通道") { _, _ ->
                     val labels = arrayOf(

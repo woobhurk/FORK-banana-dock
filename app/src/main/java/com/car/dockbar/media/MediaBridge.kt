@@ -286,8 +286,7 @@ object MediaBridge {
      *
      *  真正带封面 Bitmap 的是另外那个会话。
      *
-     *  ⚠ 不能每 2.5s 无脑重选，否则歌名/歌手会来回跳。
-     *    所以：**当前会话仍有效且已有封面 → 保持不动**；只在「当前没封面」或「会话消失」时才切换。
+     *  候选的播放状态和元数据随时会变化，每轮只用一次采样给每个候选打分；同分优先保留当前会话。
      */
     private fun bindBest(sessions: List<MediaController>?) {
         val list = sessions ?: emptyList()
@@ -305,41 +304,26 @@ object MediaBridge {
         }
 
         val cur = controller
-        val curAlive = cur != null && list.any { it.sessionToken == cur.sessionToken }
-
-        // ★ 诊断：把候选会话逐个打出来（一轮日志就能定位是不是选错了会话）
-        list.forEachIndexed { i, c ->
-            // MediaController.getPackageName() 是公开 API（Token.describe() 是 @hide）
-            val pkg = runCatching { c.packageName }.getOrNull() ?: "?"
-            val playing = c.playbackState?.state == PlaybackState.STATE_PLAYING
-            val title = runCatching { c.metadata?.getString(MediaMetadata.METADATA_KEY_TITLE) }.getOrNull()
-            Logx.d(
-                "媒体：会话[" + i + "] pkg=" + pkg + " playing=" + playing +
-                " 有封面=" + hasArt(c) + " 打分=" + scoreOf(c) + " title=" + (title ?: "-")
-            )
+        val curToken = cur?.sessionToken
+        var best = list[0]
+        var top = Int.MIN_VALUE
+        var bestTitle: String? = null
+        list.forEachIndexed { index, candidate ->
+            val pkg = runCatching { candidate.packageName }.getOrNull()
+            val playback = runCatching { candidate.playbackState?.state }.getOrNull()
+            val metadata = runCatching { candidate.metadata }.getOrNull()
+            val title = runCatching { metadata?.getString(MediaMetadata.METADATA_KEY_TITLE) }.getOrNull()
+            val art = hasArt(metadata, pkg)
+            val score = scoreOf(playback, title, art)
+            Logx.d("媒体：会话[$index] pkg=${pkg ?: "?"} playing=${playback == PlaybackState.STATE_PLAYING}" +
+                " 有封面=$art 打分=$score title=${title ?: "-"}")
+            if (score > top || (score == top && curToken != null && candidate.sessionToken == curToken)) {
+                best = candidate
+                top = score
+                bestTitle = title
+            }
         }
 
-        // ★★ v1.4.97 #5：改成「打分」选会话。
-        //
-        //   v1.4.88 为了修「读不到封面」把优先级换成「有封面 > 正在播放」——
-        //   副作用就是现在会绑到一个**压根没在播**的会话上（用户反馈 #5）。
-        //   现在两者都要：正在播放优先，播放中同分时才有封面优先；
-        //   STOPPED / NONE / ERROR 的会话明确排到最低（除非只剩它一个）。
-        var best: MediaController? = null
-        if (curAlive) {
-            // 当前会话还在：只有在它**不是最高分**时才换（避免歌名来回跳）
-            val curScore = scoreOf(cur!!)
-            val top = list.maxOf { scoreOf(it) }
-            best = if (curScore >= top) cur else list.first { scoreOf(it) == top }
-        } else {
-            // 首次绑定 / 当前会话消失：取最高分的那个（同分取靠前的）
-            val top = list.maxOf { scoreOf(it) }
-            best = list.first { scoreOf(it) == top }
-        }
-
-        val bestTitle = runCatching {
-            best?.metadata?.getString(MediaMetadata.METADATA_KEY_TITLE)
-        }.getOrNull()
         // 标准会话没有歌名时，保留 Flyme / QQ 通知里的那条
         if (usingNote && isRealTitle(noteTitle) && !isRealTitle(bestTitle)) {
             publishNote()
@@ -347,14 +331,14 @@ object MediaBridge {
         }
         usingNote = false
 
-        if (best?.sessionToken == cur?.sessionToken) {
+        if (best.sessionToken == curToken) {
             publish()
             return
         }
         runCatching { controller?.unregisterCallback(controllerCallback) }
         controller = best
-        runCatching { best?.registerCallback(controllerCallback, main) }
-        Logx.d("媒体：切换会话 → " + (runCatching { best?.packageName }.getOrNull() ?: "无"))
+        runCatching { best.registerCallback(controllerCallback, main) }
+        Logx.d("媒体：切换会话 → " + (runCatching { best.packageName }.getOrNull() ?: "无"))
         publish()
     }
 
@@ -371,29 +355,24 @@ object MediaBridge {
      *   所以单看 playing 分不开；但**真的没在播**的那些是 STOPPED/NONE，
      *   现在会被压到 0 分 —— 只要还有别的候选就不会再绑到它们上。
      */
-    private fun scoreOf(c: MediaController): Int {
-        val st = runCatching { c.playbackState?.state }.getOrNull()
-        val playing = st == PlaybackState.STATE_PLAYING
-        val dead = st == PlaybackState.STATE_STOPPED ||
-                st == PlaybackState.STATE_NONE ||
-                st == PlaybackState.STATE_ERROR
-        val art = hasArt(c)
-        val titled = !TextUtils.isEmpty(
-            runCatching { c.metadata?.getString(MediaMetadata.METADATA_KEY_TITLE) }.getOrNull()
-        )
+    private fun scoreOf(playback: Int?, title: String?, art: Boolean): Int {
+        val playing = playback == PlaybackState.STATE_PLAYING
+        val dead = playback == PlaybackState.STATE_STOPPED ||
+                playback == PlaybackState.STATE_NONE ||
+                playback == PlaybackState.STATE_ERROR
         return when {
             dead -> 0
             playing && art -> 4
             playing -> 3
             art -> 2
-            titled -> 1
+            !title.isNullOrEmpty() -> 1
             else -> 0
         }
     }
 
     /** ★ v1.4.88：这个会话的 metadata 里有没有封面（Bitmap 或 URI 都算） */
-    private fun hasArt(c: MediaController): Boolean {
-        val md = runCatching { c.metadata }.getOrNull() ?: return false
+    private fun hasArt(md: MediaMetadata?, pkg: String?): Boolean {
+        md ?: return false
         for (k in ART_KEYS) {
             if (runCatching { md.getBitmap(k) }.getOrNull() != null) return true
         }
@@ -402,8 +381,7 @@ object MediaBridge {
                 ?: runCatching { md.getText(k)?.toString() }.getOrNull()
             if (!uri.isNullOrBlank()) return true
         }
-        val pkg = runCatching { c.packageName }.getOrNull() ?: return false
-        if (pkg == "com.android.bluetooth" || pkg == FLYME_MUSIC) return false
+        if (pkg == null || pkg == "com.android.bluetooth" || pkg == FLYME_MUSIC) return false
         val items = DockNotificationListener.instance?.activeNotifications ?: return false
         return items.any { it.packageName == pkg && it.notification?.getLargeIcon() != null }
     }

@@ -259,10 +259,11 @@ internal object AppWidget : DockWidget {
     override val spec = WidgetSpec(
         action = "app", label = "", span = 1, separatorBefore = false, hint = "",
         hidden = true, catalogIcon = R.drawable.ic_apps,
+        iconScale = 0.86f,
     )
     override fun defaultGestures() = root(tap(DockAction.LaunchThisEntry))
     override fun create(ctx: Context, entry: DockEntry, iconPx: Int): MountedEntry {
-        val view = DockIconView(ctx, 0, iconPx)
+        val view = DockIconView(ctx, 0, (iconPx * spec.iconScale).toInt().coerceAtLeast(1))
         runCatching { view.setDynamic(ctx.packageManager.getApplicationIcon(entry.action)) }
             .onFailure { runCatching { view.setIcon(R.drawable.ic_dock_car) } }
         return mounted(this, entry, view, linkedMapOf(HitTargets.ROOT to view), null)
@@ -289,7 +290,7 @@ internal object BuiltinWidgets {
         iconWidget(Builtin.LYRIC, root(tapLong(DockAction.ToggleLyric, DockAction.OpenThisApp)), BindKind.LYRIC, lockSpan = true),
         VolumeWidget,
         iconWidget(Builtin.SETTINGS, root(tapLong(DockAction.OpenCarSettings, DockAction.OpenDockSettings))),
-        iconWidget(Builtin.APP_DRAWER, root(tapLong(DockAction.ShowPopup("appDrawer"), DockAction.OpenAppDrawerSettings))),
+        iconWidget(Builtin.APP_DRAWER, root(tapLong(DockAction.ShowPopup("appDrawer"), DockAction.OpenAppDrawerSettings)), iconScale = 0.9f),
         comboWidget(
             Builtin.TEMP_DRIVER_COMBO,
             DockAction.TempStep(true, -1), DockAction.TempStep(true, 1),
@@ -314,7 +315,7 @@ internal object BuiltinWidgets {
         iconWidget(Builtin.TEMP_DOWN_DRIVER, root(tap(DockAction.TempStep(true, -1)))),
         valueWidget(Builtin.TEMP_DRIVER, root(tapLong(DockAction.ToggleHvacWindow, DockAction.ToggleAc)), BindKind.TEMP_DRIVER),
         iconWidget(Builtin.TEMP_UP_DRIVER, root(tap(DockAction.TempStep(true, 1)))),
-        iconWidget(Builtin.AIR, root(tapLong(DockAction.ToggleAirflow, DockAction.ShowPopup("airDirection"))), BindKind.AIR),
+        iconWidget(Builtin.AIR, root(tapLong(DockAction.ToggleAirflow, DockAction.ShowPopup("airDirection"))), BindKind.AIR, iconScale = 1.15f),
         iconWidget(Builtin.VENT, root(tapLong(DockAction.ToggleSeatVent, DockAction.ShowPopup("seatClimate"))), BindKind.VENT, preserveColors = true),
         iconWidget(Builtin.SEAT_HEAT, root(tapLong(DockAction.LevelBump("seatHeat", "down"), DockAction.LevelBump("seatHeat", "up"))), BindKind.SEAT_HEAT, preserveColors = true),
         iconWidget(Builtin.FAN_DOWN, root(tap(DockAction.FanStep(-1)))),

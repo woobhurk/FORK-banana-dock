@@ -27,6 +27,12 @@ class AppDrawerPopup(
     private val context: Context,
     private val onInteraction: () -> Unit
 ) {
+    private companion object {
+        const val WIDTH_DP = 312
+        const val CELL_HEIGHT_DP = 64
+        const val CELL_VERTICAL_MARGIN_DP = 2
+    }
+
     private val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
     private var content: LinearLayout? = null
     var isShowing: Boolean = false
@@ -58,11 +64,11 @@ class AppDrawerPopup(
             return
         }
         val placement = DockPopupChrome.placement(context, anchor)
-        scale = placement.scale(2.5f, widthDp = 186, heightDp = 230)
+        scale = placement.scale(2f, widthDp = WIDTH_DP, heightDp = 190)
         val view = buildContent()
         // 点面板外面立即关闭（规范第 2 条）
         view.setOnTouchListener { _, ev -> DockPopupChrome.onOutsideTouch(ev) { dismiss() } }
-        val params = placement.params(view, minOf(dp(510), placement.availableWidth))
+        val params = placement.params(view, dp(WIDTH_DP))
         runCatching {
             windowManager.addView(view, params)
             content = view
@@ -102,6 +108,8 @@ class AppDrawerPopup(
     private fun renderGrid() {
         val host = gridHost ?: return
         host.removeAllViews()
+        val cellHeight = dp(CELL_HEIGHT_DP)
+        val verticalMargin = dp(CELL_VERTICAL_MARGIN_DP)
         repeat(2) { rowIndex ->
             val row = LinearLayout(context).apply {
                 orientation = LinearLayout.HORIZONTAL
@@ -109,12 +117,12 @@ class AppDrawerPopup(
             }
             repeat(3) { columnIndex ->
                 val index = rowIndex * 3 + columnIndex
-                row.addView(appCell(index), LinearLayout.LayoutParams(0, dp(86), 1f).apply {
-                    setMargins(dp(3), dp(2), dp(3), dp(2))
+                row.addView(appCell(index), LinearLayout.LayoutParams(0, cellHeight, 1f).apply {
+                    setMargins(dp(3), verticalMargin, dp(3), verticalMargin)
                 })
             }
             host.addView(row, LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(90)
+                LinearLayout.LayoutParams.MATCH_PARENT, cellHeight + 2 * verticalMargin
             ))
         }
     }
@@ -207,11 +215,12 @@ class AppDrawerPopup(
         val icon = ImageView(context).apply {
             scaleType = ImageView.ScaleType.FIT_CENTER
         }
+        val iconSize = dp(DockPopupStyle.ICON_DP)
         val title = TextView(context)
         AppDrawerSlotStyle.label(title, app?.label ?: "空位",
             if (app == null) DockPopupStyle.secondary else DockPopupStyle.text, scale)
         if (app == null) {
-            AppDrawerSlotStyle.emptyIcon(icon, dp(38), DockPopupStyle.secondary)
+            AppDrawerSlotStyle.emptyIcon(icon, iconSize, DockPopupStyle.secondary)
         } else {
             runCatching { icon.setImageDrawable(context.packageManager.getApplicationIcon(app.packageName)) }
                 .onFailure { icon.setImageResource(R.drawable.ic_car) }
@@ -228,7 +237,7 @@ class AppDrawerPopup(
             }
             setupSlotDrag(cell, index)
         }
-        cell.addView(icon, LinearLayout.LayoutParams(dp(38), dp(38)))
+        cell.addView(icon, LinearLayout.LayoutParams(iconSize, iconSize))
         cell.addView(title, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
         ).apply { topMargin = dp(4) })
@@ -236,7 +245,7 @@ class AppDrawerPopup(
         return cell
     }
 
-    private var scale = 2.5f
+    private var scale = 2f
 
     private fun dp(value: Int): Int = DockPopupStyle.dp(context, scale, value).coerceAtLeast(1)
 }

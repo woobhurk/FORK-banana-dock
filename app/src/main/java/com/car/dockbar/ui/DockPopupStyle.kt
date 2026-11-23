@@ -16,6 +16,7 @@ import com.car.dockbar.util.Prefs
 
 /** 深色弹窗独立于主栏与设置主题；只共享外壳、标题和控件的视觉状态。 */
 internal object DockPopupStyle {
+    const val ICON_DP = 30
     val text = 0xFFF2F4F8.toInt()
     val secondary = 0xFFA6AEBB.toInt()
     val unknown = 0xFFEAC58A.toInt()
@@ -34,7 +35,7 @@ internal object DockPopupStyle {
         addView(TextView(context).apply {
             text = title
             setTextColor(DockPopupStyle.text)
-            textSize = 16f * scale
+            textSize = 16f * minOf(scale, 2f)
             typeface = AppFont.bold(context)
             gravity = Gravity.START or Gravity.CENTER_VERTICAL
             includeFontPadding = false

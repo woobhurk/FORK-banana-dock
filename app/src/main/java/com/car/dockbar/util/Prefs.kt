@@ -264,7 +264,7 @@ object Prefs {
     ) + SEAT_CLIMATE_EVENT_KEYS
 
 
-    /** 升级时只补入旧版还没有的座椅选项，已全关或因崩溃清空的配置继续保留。 */
+    /** 升级时只补入旧版还没有的座椅选项，显式全关和崩溃熔断清空的配置继续保留。 */
     internal fun migrateHvacSeatEventDefaults(ctx: Context) {
         val prefs = sp(ctx)
         if (prefs.getBoolean(HVAC_SEAT_DEFAULTS_MIGRATED, false)) return
@@ -288,7 +288,7 @@ object Prefs {
     /** 用户在设置页明确恢复照片对应的默认选择；不自动覆盖显式空集合。 */
     fun resetHvacEventKeys(ctx: Context) = setHvacEventKeys(ctx, DEFAULT_HVAC_EVENT_KEYS)
 
-    /** 真实崩溃或早期连续异常才关闭新增通道；稳定后无证据退出保留用户配置。 */
+    /** 有崩溃证据或早期连续异常时清空日常可选通道；稳定后无证据退出不改勾选。 */
     internal fun suspendHvacEventsAfterCrash(ctx: Context, hasEvidence: Boolean, earlyStreak: Int): Boolean {
         if ((!hasEvidence && earlyStreak < 1) || hvacEventKeys(ctx).isEmpty()) return false
         setHvacEventKeys(ctx, emptySet())
