@@ -19,5 +19,5 @@
         android:strokeWidth="2.85"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
-        android:pathData="M32 15.7v27.5" />
+        android:pathData="M32 9.7V43.2" />
 </vector>
