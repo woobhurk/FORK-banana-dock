@@ -2,6 +2,7 @@ package com.car.dockbar.util
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.car.dockbar.config.VehicleChannels.AC_MAX_KEY
 
 /**
  * 全部用户配置集中在这里，键名稳定，方便车机上直接改 XML 或用调试页改。
@@ -253,12 +254,12 @@ object Prefs {
 
     // 仅允许已开放的车控同步通道；旧监听开关与日常配置互不改写。
     private val HVAC_EVENT_KEYS = setOf(
-        "fan_manual", "fan_auto", "ac", "temp_driver", "temp_passenger", "recirc", "air_direction",
+        "fan_manual", "fan_auto", "ac", AC_MAX_KEY, "temp_driver", "temp_passenger", "recirc", "air_direction",
         "seat_vent_passenger", "defrost_front", "defrost_rear", "steering_heat"
     ) + SEAT_CLIMATE_EVENT_KEYS
 
     private val DEFAULT_HVAC_EVENT_KEYS = setOf(
-        "fan_manual", "fan_auto", "ac", "recirc", "air_direction",
+        "fan_manual", "fan_auto", "ac", AC_MAX_KEY, "recirc", "air_direction",
         "seat_vent_passenger", "defrost_front", "defrost_rear", "steering_heat"
     ) + SEAT_CLIMATE_EVENT_KEYS
 

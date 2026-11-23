@@ -30,7 +30,7 @@ class HvacEventSubscriptionTest {
     @Test
     fun freshPreferencesSubscribeToDefaultClimateAndComfortChannels() {
         assertEquals(
-            setOf("fan_manual", "fan_auto", "ac", "recirc", "air_direction", "seat_vent", "seat_heat",
+            setOf("fan_manual", "fan_auto", "ac", "ac_max", "recirc", "air_direction", "seat_vent", "seat_heat",
                 "seat_heat_passenger", "seat_vent_passenger", "defrost_front", "defrost_rear", "steering_heat"),
             Prefs.hvacEventKeys(context)
         )
@@ -86,13 +86,13 @@ class HvacEventSubscriptionTest {
         assertTrue(Prefs.hvacEventKeys(context).isEmpty())
     }
     @Test
-    fun explicitResetRestoresThePhotoDefaultSelection() {
+    fun explicitResetRestoresTheDefaultSelection() {
         Prefs.setHvacEventKeys(context, emptySet())
 
         Prefs.resetHvacEventKeys(context)
 
         assertEquals(
-            setOf("fan_manual", "fan_auto", "ac", "recirc", "air_direction", "seat_vent", "seat_heat",
+            setOf("fan_manual", "fan_auto", "ac", "ac_max", "recirc", "air_direction", "seat_vent", "seat_heat",
                 "seat_heat_passenger", "seat_vent_passenger", "defrost_front", "defrost_rear", "steering_heat"),
             Prefs.hvacEventKeys(context)
         )

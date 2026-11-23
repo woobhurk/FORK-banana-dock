@@ -3,7 +3,7 @@ package com.car.dockbar.vehicle
 import android.content.Context
 import android.os.SystemClock
 import com.car.dockbar.config.VehicleChannels
-import com.car.dockbar.config.VehicleChannels.AC_MAX_VALIDATION_KEY
+import com.car.dockbar.config.VehicleChannels.AC_MAX_KEY
 import com.car.dockbar.config.VehicleChannels.POWER_VALIDATION_KEY
 import com.car.dockbar.util.Logx
 
@@ -22,7 +22,7 @@ internal enum class HvacValidationMode(
     FAN("风量：手动 / 自动风量", listOf("fan_manual", "fan_auto")),
     CLIMATE("常用空调：风量 + A/C / 循环 / 风向 / 双温", FAN.keys + listOf("ac", "recirc", "air_direction", "temp_dual")),
     TEMPERATURE("含温度：额外调用浮点 Customize/native", CLIMATE.keys + listOf("temp_driver", "temp_passenger")),
-    AC_MAX("急速降温：原厂 MAX A/C", listOf(AC_MAX_VALIDATION_KEY)),
+    AC_MAX("急速降温：原厂 MAX A/C", listOf(AC_MAX_KEY)),
     POWER("空调电源：原厂总开关（风向短按）", listOf(POWER_VALIDATION_KEY)),
     SEAT_ECARX_DIRECT(
         "座椅：${SeatWriteValidationMode.ECARX_DIRECT.label}",
@@ -212,7 +212,7 @@ internal object HvacDiagnostics {
         append("命令接受、注册接受、观测匹配均不证明真车物理效果，请人工观察；温度 Customize/native 接口可能导致进程闪退。")
     }
 
-    private fun isSwitch(key: String): Boolean = key == AC_MAX_VALIDATION_KEY || key == POWER_VALIDATION_KEY
+    private fun isSwitch(key: String): Boolean = key == AC_MAX_KEY || key == POWER_VALIDATION_KEY
 
     private fun switchText(value: Int?): String = when (value) {
         0 -> "关闭(0)"

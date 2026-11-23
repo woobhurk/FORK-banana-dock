@@ -118,7 +118,7 @@ class TemperaturePopup(
     // 右栏 主驾
     private var btnDefrostFront: DockPopupIconButton? = null
     private var btnDefrostRear: DockPopupIconButton? = null
-    private var acMaxButton: Pair<Long, DockPopupIconButton>? = null
+    private var acMaxButton: DockPopupIconButton? = null
     private var btnSteerHeat: DockPopupIconButton? = null
 
     // 右栏 副驾
@@ -279,25 +279,20 @@ class TemperaturePopup(
                 VehicleController.toggleDefrostRear(ctx)
                 resetTimer()
             }
-            val acMaxEpoch = VehicleController.acMaxValidationEpoch()
             val fastCool = funcBtn(
                 R.drawable.ic_popup_cool,
-                if (acMaxEpoch == null) "极速降温" else "原厂急速降温试开",
-                if (acMaxEpoch == null) "MAX" else "MAX 试开",
+                "原厂急速降温",
+                "MAX",
                 iconScale = ICON_SCALE_FAST_COOL
             ) {
-                // 按打开弹窗时展示的动作提交；试写过期时不能退回组合预设。
-                if (acMaxEpoch == null) {
-                    VehicleController.fastCool(ctx)
-                } else {
-                    val queued = VehicleController.writeAcMaxForValidation(ctx, acMaxEpoch, on = true, entry = "DOCK")
-                    val message = if (queued) "原厂 MAX A/C 试开已排队，请看原车和验证报告"
-                    else "原厂 MAX A/C 未提交，请检查验证窗口和车控写入状态"
+                if (!VehicleController.toggleAcMax(ctx)) {
+                    val message = if (VehicleController.acMaxOn() == null) "急速降温状态未知，未发送"
+                    else "急速降温未发送，请检查车控写入开关或等待回读"
                     Toast.makeText(ctx, message, Toast.LENGTH_SHORT).show()
                 }
                 resetTimer()
             }
-            acMaxButton = acMaxEpoch?.let { it to fastCool }
+            acMaxButton = fastCool
             val fastHeat = funcBtn(
                 R.drawable.ic_popup_heat, "极速升温", "MAX", iconScale = ICON_SCALE_FAST_HEAT
             ) {
@@ -456,16 +451,15 @@ class TemperaturePopup(
                 it.contentDescription = "后挡加热${if (st.defrostRear) "开启" else "关闭"}"
                 it.setActive(st.defrostRear)
             }
-            acMaxButton?.let { (epoch, button) ->
-                val on = VehicleController.acMaxOn(epoch)
+            acMaxButton?.let { button ->
+                val on = VehicleController.acMaxOn()
                 button.setActive(on == true)
-                button.setCaption(if (on == null) "MAX 未知" else "MAX 试开")
-                val status = when (on) {
-                    true -> "已开启"
-                    false -> "已关闭"
-                    null -> "未知"
+                button.setCaption(if (on == null) "MAX 未知" else "MAX")
+                button.contentDescription = when (on) {
+                    true -> "原厂急速降温已开启，点击关闭"
+                    false -> "原厂急速降温已关闭，点击开启"
+                    null -> "原厂急速降温状态未知"
                 }
-                button.contentDescription = "原厂急速降温试开，当前状态：$status"
             }
             btnSteerHeat?.let {
                 it.visibility = if (st.steeringHeatVisible) View.VISIBLE else View.GONE

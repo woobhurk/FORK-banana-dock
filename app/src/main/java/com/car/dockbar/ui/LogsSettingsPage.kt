@@ -20,6 +20,7 @@ import java.util.Date
 import java.util.Locale
 import com.car.dockbar.App
 import com.car.dockbar.R
+import com.car.dockbar.config.VehicleChannels.AC_MAX_KEY
 import com.car.dockbar.util.CrashHandler
 import com.car.dockbar.util.LogUploader
 import com.car.dockbar.util.Logx
@@ -269,6 +270,7 @@ internal class LogsSettingsPage(activity: MainActivity) :
                     val labels = arrayOf(
                         "风量（手动 + AUTO）",
                         "A/C",
+                        "急速降温（MAX A/C）",
                         "主副驾温度（含浮点读取，native 风险）",
                         "循环（本车仅验证读取）",
                         "风向（0/8 语义未定）",
@@ -281,6 +283,7 @@ internal class LogsSettingsPage(activity: MainActivity) :
                     val groups = arrayOf(
                         setOf("fan_manual", "fan_auto"),
                         setOf("ac"),
+                        setOf(AC_MAX_KEY),
                         setOf("temp_driver", "temp_passenger"),
                         setOf("recirc"),
                         setOf("air_direction"),
@@ -337,8 +340,8 @@ internal class LogsSettingsPage(activity: MainActivity) :
                         null -> when {
                             mode == HvacValidationMode.AC_MAX ->
                                 "请停车操作。开始时只读和订阅，厂商回调可能导致闪退。先在原车空调界面开关并确认读回。" +
-                                    "再保持原车 MAX A/C 关闭，验证窗口内长按 Dock 主驾温度并点击「MAX 试开」，或在本页点「急速降温测试写入」。" +
-                                    "未启动验证时，Dock 的 MAX 仍是原有的组合预设。"
+                                    "再长按 Dock 主驾温度，用「MAX」分别开、关并核对原车状态，或在本页点「急速降温测试写入」。" +
+                                    "不启动验证也可用 Dock 操作原厂 MAX A/C。"
                             mode == HvacValidationMode.POWER ->
                                 "请停车操作。开始时只读和订阅，厂商回调可能导致闪退。先在原车空调界面开关电源，确认 Dock 风向图标随状态变化；" +
                                     "再在验证窗口内短按风向，核对原车电源是否切换。状态未知不写入，停止或到期后验证订阅恢复基线，日常短按仍使用原厂总开关。"
@@ -372,7 +375,7 @@ internal class LogsSettingsPage(activity: MainActivity) :
                 return@action
             }
             fun submit(on: Boolean) {
-                val queued = VehicleController.writeAcMaxForValidation(this, epoch, on, entry = "SETTINGS")
+                val queued = VehicleController.writeAcMaxForValidation(this, epoch, on)
                 toastOnce(if (queued) "已排队，请观察原车界面并查看验证报告"
                     else "未提交：验证已结束或车控写入不可用，请查看日志")
             }
