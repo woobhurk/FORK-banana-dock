@@ -186,13 +186,12 @@ class ResidentSettingsPage(activity: MainActivity) : SettingsPage(activity, Main
             return
         }
         val twoCol = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            setPadding(dp(10), dp(4), dp(10), dp(8))
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), dp(4), dp(12), dp(8))
         }
         val (colSys, bodySys) = appListColumn("系统应用")
         val (colUser, bodyUser) = appListColumn("个人应用")
-        twoCol.addView(colSys)
-        twoCol.addView(colUser)
+        twoCol.addView(settingsColumns(this, colSys, colUser, minWidthDp = 500))
 
         val choices = ResidentAppList.choices(items, Prefs.dockHideApps(this))
         lateinit var dialog: AlertDialog
@@ -202,7 +201,9 @@ class ResidentSettingsPage(activity: MainActivity) : SettingsPage(activity, Main
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
-                background = ContextCompat.getDrawable(this@ResidentSettingsPage, R.drawable.bg_field)
+                setBackgroundResource(R.drawable.bg_settings_choice)
+                isSelected = alreadyAdded
+                minimumHeight = dp(48)
                 setPadding(dp(8), dp(6), dp(8), dp(6))
                 layoutParams = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
@@ -225,7 +226,8 @@ class ResidentSettingsPage(activity: MainActivity) : SettingsPage(activity, Main
             })
             row.addView(CheckBox(this).apply {
                 text = "${candidate.label}\n${candidate.pkg}"
-                setTextColor(0xFFEDEFF3.toInt())
+                setTextColor(ContextCompat.getColor(this@ResidentSettingsPage, R.color.settings_text))
+                buttonTintList = ContextCompat.getColorStateList(this@ResidentSettingsPage, R.color.settings_choice_tint)
                 textSize = 14f
                 isChecked = alreadyAdded
                 isClickable = false
@@ -243,7 +245,7 @@ class ResidentSettingsPage(activity: MainActivity) : SettingsPage(activity, Main
             if (body.childCount == 0) {
                 body.addView(TextView(this).apply {
                     text = tip
-                    setTextColor(ContextCompat.getColor(this@ResidentSettingsPage, R.color.text_secondary))
+                    setTextColor(ContextCompat.getColor(this@ResidentSettingsPage, R.color.settings_secondary))
                     textSize = 13f
                     setPadding(dp(6), dp(6), 0, dp(6))
                 })
@@ -259,20 +261,20 @@ class ResidentSettingsPage(activity: MainActivity) : SettingsPage(activity, Main
             .setView(scroll)
             .setNegativeButton("取消", null)
             .show()
-        dialog.window?.setLayout((resources.displayMetrics.widthPixels * 0.7f).toInt(), dp(434))
+        val metrics = resources.displayMetrics
+        val widthFraction = if (metrics.widthPixels < dp(600)) 0.90f else 0.70f
+        val width = (metrics.widthPixels * widthFraction).toInt()
+        dialog.window?.setLayout(width, minOf(dp(434), (metrics.heightPixels * 0.9f).toInt()))
     }
 
     private fun appListColumn(title: String): Pair<LinearLayout, LinearLayout> {
         val column = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            layoutParams = LinearLayout.LayoutParams(
-                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f
-            )
         }
         column.addView(TextView(this).apply {
             text = title
-            setTextColor(0xFFEDEFF3.toInt())
-            textSize = 14f
+            setTextColor(ContextCompat.getColor(this@ResidentSettingsPage, R.color.settings_text))
+            textSize = 16f
             typeface = AppFont.bold(this@ResidentSettingsPage)
             setPadding(dp(4), dp(2), dp(4), dp(6))
         })
@@ -337,8 +339,9 @@ class ResidentSettingsPage(activity: MainActivity) : SettingsPage(activity, Main
         }
     }
 
-    private fun permColor(enabled: Boolean): Int =
-        if (enabled) 0xFF3DDC97.toInt() else ContextCompat.getColor(this, R.color.warn)
+    private fun permColor(enabled: Boolean): Int = ContextCompat.getColor(
+        this, if (enabled) R.color.settings_service_running else R.color.settings_warning
+    )
 
     private fun AlertDialog.applyDockSafe(): AlertDialog {
         if (Prefs.dockAtBottom(this@ResidentSettingsPage)) {

@@ -145,12 +145,12 @@ class FloatingDockSettingsPage(activity: MainActivity) : SettingsPage(activity, 
         findOptionalViewById<TextView>(R.id.settingsRuntimeBadge)?.apply {
             text = if (running) "●  Dock 正在运行" else "●  Dock 未运行"
             setTextColor(ContextCompat.getColor(this@FloatingDockSettingsPage,
-                if (running) R.color.settings_service_running else R.color.warn))
+                if (running) R.color.settings_service_running else R.color.settings_warning))
         }
         findOptionalViewById<TextView>(R.id.settingsNavStatus)?.apply {
             text = if (running) "●  Dock 服务已就绪" else "●  Dock 未运行"
             setTextColor(ContextCompat.getColor(this@FloatingDockSettingsPage,
-                if (running) R.color.settings_service_running else R.color.warn))
+                if (running) R.color.settings_service_running else R.color.settings_warning))
         }
         findViewById<View>(R.id.btnGrantOverlay).visibility = View.VISIBLE
         findViewById<View>(R.id.btnGrantNotif).visibility = View.VISIBLE
@@ -178,8 +178,9 @@ class FloatingDockSettingsPage(activity: MainActivity) : SettingsPage(activity, 
             }
         }
     }
-    private fun permColor(ok: Boolean): Int =
-        if (ok) 0xFF3DDC97.toInt() else ContextCompat.getColor(this, R.color.warn)
+    private fun permColor(ok: Boolean): Int = ContextCompat.getColor(
+        this, if (ok) R.color.settings_service_running else R.color.settings_warning
+    )
 
     private fun openAccessibilitySettings() {
         runCatching {

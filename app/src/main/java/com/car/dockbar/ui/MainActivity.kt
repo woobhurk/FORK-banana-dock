@@ -6,6 +6,7 @@ import android.content.res.Configuration
 import android.os.Bundle
 import android.view.Gravity
 import android.view.View
+import android.view.ViewGroup
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -67,7 +68,7 @@ class MainActivity : AppCompatActivity() {
         // 保留原有的 128 物理像素 Dock 避让距离，不随显示密度变化。
         listOf(R.id.svNav, R.id.svContent).forEach { id ->
             val viewport = findViewById<View>(id)
-            (viewport.layoutParams as LinearLayout.LayoutParams).apply {
+            (viewport.layoutParams as ViewGroup.MarginLayoutParams).apply {
                 bottomMargin = 128
                 viewport.layoutParams = this
             }
@@ -136,36 +137,36 @@ class MainActivity : AppCompatActivity() {
         nav.addView(LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(28), dp(10), dp(12), dp(36))
+            setPadding(dp(12), dp(8), dp(8), dp(22))
             addView(ImageView(this@MainActivity).apply {
                 setImageResource(R.mipmap.ic_launcher)
                 imageTintList = null
                 scaleType = ImageView.ScaleType.FIT_CENTER
                 setPadding(0, 0, 0, 0)
-            }, LinearLayout.LayoutParams(dp(42), dp(42)))
+            }, LinearLayout.LayoutParams(dp(34), dp(34)))
             addView(TextView(this@MainActivity).apply {
                 text = "Banana_Dock"
-                textSize = 20f
-                setTextColor(0xFFF2F4F8.toInt())
+                textSize = 17f
+                setTextColor(ContextCompat.getColor(this@MainActivity, R.color.settings_text))
                 typeface = AppFont.bold(this@MainActivity)
                 maxLines = 1
             }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                marginStart = dp(12)
+                marginStart = dp(8)
             })
         })
         nav.addView(TextView(this).apply {
             text = "个性化设置"
             textSize = 12f
             setTextColor(ContextCompat.getColor(this@MainActivity, R.color.settings_secondary))
-            setPadding(dp(28), 0, dp(12), dp(18))
+            setPadding(dp(12), 0, dp(8), dp(12))
         })
         for (item in pageSpecs) {
             if (item.key == SECTION_LOGS) {
                 nav.addView(View(this).apply {
-                    setBackgroundColor(0xFF3B414D.toInt())
+                    setBackgroundColor(ContextCompat.getColor(this@MainActivity, R.color.settings_outline))
                     importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
                 }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(1)).apply {
-                    setMargins(dp(28), dp(4), dp(28), dp(16))
+                    setMargins(dp(12), dp(5), dp(12), dp(10))
                 })
             }
             val bar = View(this).apply {
@@ -177,39 +178,39 @@ class MainActivity : AppCompatActivity() {
             val icon = ImageView(this).apply {
                 setImageResource(item.icon)
                 scaleType = ImageView.ScaleType.FIT_CENTER
-                layoutParams = LinearLayout.LayoutParams(dp(22), dp(22)).apply {
-                    marginStart = dp(16)
+                layoutParams = LinearLayout.LayoutParams(dp(20), dp(20)).apply {
+                    marginStart = dp(8)
                     gravity = Gravity.CENTER_VERTICAL
                 }
             }
             val label = TextView(this).apply {
                 text = item.label
-                textSize = 18f
-                maxLines = 1
+                textSize = 16f
+                maxLines = 3
                 ellipsize = android.text.TextUtils.TruncateAt.END
                 includeFontPadding = false
                 gravity = Gravity.CENTER_VERTICAL
-                setTextColor(ContextCompat.getColor(this@MainActivity, R.color.nav_idle))
                 layoutParams = LinearLayout.LayoutParams(
                     0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f
                 ).apply {
-                    marginStart = dp(12)
+                    marginStart = dp(6)
                     gravity = Gravity.CENTER_VERTICAL
                 }
             }
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
-                setPadding(0, 0, dp(12), 0)
+                setPadding(0, dp(6), dp(6), dp(6))
                 background = ContextCompat.getDrawable(this@MainActivity, R.drawable.bg_settings_nav_idle)
                 isClickable = true
                 isFocusable = true
+                minimumHeight = dp(52)
                 layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, dp(60)
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
                 ).apply {
-                    marginStart = dp(16)
-                    marginEnd = dp(16)
-                    bottomMargin = dp(12)
+                    marginStart = dp(6)
+                    marginEnd = dp(6)
+                    bottomMargin = dp(6)
                 }
                 setOnClickListener { showPage(item.key) }
                 addView(bar)
@@ -222,25 +223,25 @@ class MainActivity : AppCompatActivity() {
         nav.addView(LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             background = ContextCompat.getDrawable(this@MainActivity, R.drawable.bg_card)
-            setPadding(dp(16), dp(16), dp(16), dp(16))
+            setPadding(dp(10), dp(10), dp(10), dp(10))
             addView(TextView(this@MainActivity).apply {
                 id = R.id.settingsNavStatus
                 text = "●  Dock 未运行"
                 textSize = 14f
-                setTextColor(ContextCompat.getColor(this@MainActivity, R.color.warn))
+                setTextColor(ContextCompat.getColor(this@MainActivity, R.color.settings_warning))
             })
             addView(TextView(this@MainActivity).apply {
                 id = R.id.settingsNavVersion
                 text = "v${Prefs.appVersion(this@MainActivity)}"
-                textSize = 24f
+                textSize = 17f
                 gravity = Gravity.END or Gravity.BOTTOM
                 setTextColor(ContextCompat.getColor(this@MainActivity, R.color.settings_secondary))
-                setPadding(0, dp(12), 0, 0)
+                setPadding(0, dp(6), 0, 0)
             }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT))
         }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
             LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-            setMargins(dp(24), dp(28), dp(24), dp(16))
+            setMargins(dp(8), dp(16), dp(8), dp(12))
         })
     }
 
@@ -250,6 +251,7 @@ class MainActivity : AppCompatActivity() {
         for ((page, row) in navButtons) {
             val on = page == currentPage
             val color = if (on) accent else idle
+            row.container.isSelected = on
             row.container.background = ContextCompat.getDrawable(this,
                 if (on) R.drawable.bg_settings_nav_selected else R.drawable.bg_settings_nav_idle)
             row.bar.setBackgroundColor(if (on) accent else 0x00000000)

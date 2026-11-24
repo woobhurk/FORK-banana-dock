@@ -4,7 +4,6 @@ import android.app.Activity
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
-import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.SeekBar
 import android.widget.TextView
@@ -36,51 +35,26 @@ internal class AppearanceSettingsLayout(activity: Activity) : SettingsPageLayout
         page.removeAllViews()
         page.background = null
         page.setPadding(0, 0, 0, 0)
-        val header = row().apply { gravity = Gravity.CENTER_VERTICAL }
-        page.addView(header, params())
-        val titles = column()
-        header.addView(titles, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        heading(titles, "外观与风格", "背景、比例与显示细节，按你的习惯调整")
         val actions = row().apply {
             gravity = Gravity.CENTER_VERTICAL
-            background = ContextCompat.getDrawable(activity, R.drawable.bg_field)
-            setPadding(dp(16), dp(4), dp(16), dp(4))
+            background = ContextCompat.getDrawable(activity, R.drawable.bg_settings_secondary_button)
+            setPadding(dp(12), 0, dp(12), 0)
         }
         separators.text = "显示分隔线"
         separators.textSize = 16f
-        separators.minHeight = dp(54)
+        separators.minHeight = dp(48)
         separators.switchPadding = dp(12)
-        // 缩放整个控件而非仅缩放文字，并为变换后的边界预留空间。
-        // Android 会通过子控件的逆变换分发触摸事件。
-        val scaledToggle = object : FrameLayout(activity) {
-            override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-                super.onMeasure(widthMeasureSpec, heightMeasureSpec)
-                setMeasuredDimension(
-                    View.resolveSize(kotlin.math.ceil(measuredWidth * 1.2).toInt(), widthMeasureSpec),
-                    View.resolveSize(kotlin.math.ceil(measuredHeight * 1.2).toInt(), heightMeasureSpec))
-            }
-        }
-        separators.pivotX = 0f
-        separators.pivotY = 0f
-        separators.scaleX = 1.2f
-        separators.scaleY = 1.2f
-        scaledToggle.addView(separators, FrameLayout.LayoutParams(
-            ViewGroup.LayoutParams.WRAP_CONTENT, dp(54)))
-        actions.addView(scaledToggle)
-        header.addView(actions, LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(24) })
+        separators.setTextColor(color(R.color.settings_text))
+        actions.addView(separators, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        heading(page, "外观与风格", "背景、比例与显示细节，按你的习惯调整", actions)
 
         val modes = card(page, "背景形态", "四种形态，选择后显示对应参数")
-        add(modes, modeRow, 22)
+        add(modes, modeRow, 18)
 
-        val columns = row()
-        page.addView(columns, params())
         val left = column()
         val right = column()
-        columns.addView(left, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.51f))
-        columns.addView(right, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f).apply {
-            marginStart = dp(22)
-        })
+        page.addView(settingsColumns(activity, left, right, firstWeight = 1.51f), params())
         val sizing = card(left, "尺寸与比例", "分别调整圆角、图标和文字大小")
         scales.forEachIndexed { index, (label, _, _) ->
             if (index > 0) divider(sizing)
@@ -90,22 +64,19 @@ internal class AppearanceSettingsLayout(activity: Activity) : SettingsPageLayout
             value.textSize = 16f
             value.gravity = Gravity.CENTER
             value.setPadding(dp(12), dp(8), dp(12), dp(8))
-            value.setTextColor(color(R.color.settings_text))
+            value.setTextColor(color(R.color.settings_accent))
             value.background = ContextCompat.getDrawable(activity, R.drawable.bg_field)
-            line.addView(value, LinearLayout.LayoutParams(dp(90), ViewGroup.LayoutParams.WRAP_CONTENT))
-            add(sizing, line, 20)
-            seek.minimumHeight = dp(44)
-            add(sizing, seek, 6)
+            line.addView(value, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT))
+            add(sizing, line, 12)
+            seek.contentDescription = label
+            seek.minimumHeight = dp(48)
+            add(sizing, seek, 4)
         }
         val music = card(left, "音乐信息", "滚到开头或结尾后，停顿多久再反向滚动")
         musicHold.setPadding(0, dp(6), 0, dp(6))
         add(music, musicHold, 8)
-        val lighting = card(right, "日夜与透明度", "按当前背景形态显示可用选项").apply {
-            layoutParams = (layoutParams as LinearLayout.LayoutParams).apply {
-                height = 0
-                weight = 1f
-            }
-        }
+        val lighting = card(right, "日夜与透明度", "按当前背景形态显示可用选项")
         add(lighting, followNight, 16)
         divider(lighting)
         add(lighting, overlay, 14)

@@ -1,6 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Theme attributes preserve the existing appearance outside settings. -->
     <attr name="surfaceCardColor" format="color" />
     <attr name="surfaceCardStroke" format="color" />
     <attr name="surfaceCardRadius" format="dimension" />
@@ -10,39 +9,72 @@
     <attr name="primaryButtonRadius" format="dimension" />
     <attr name="primaryButtonText" format="color" />
 
-    <color name="settings_page">@color/bg_page</color>
-    <color name="settings_nav">@color/nav_bg</color>
-    <color name="settings_card">@color/bg_card</color>
-    <color name="settings_field">#2A2E36</color>
-    <color name="settings_accent">@color/accent</color>
-    <color name="settings_on_accent">#FFFFFF</color>
-    <color name="settings_nav_selected">#1B1D22</color>
-    <color name="settings_text">@color/text_primary</color>
-    <color name="settings_secondary">@color/text_secondary</color>
-    <color name="settings_service_running">#3DDC97</color>
+    <color name="settings_page">#FF142022</color>
+    <color name="settings_nav">#FF182527</color>
+    <color name="settings_card">#FF1C2B2D</color>
+    <color name="settings_field">#FF142224</color>
+    <color name="settings_outline">#FF3A5356</color>
+    <color name="settings_control_outline">#FF789494</color>
+    <color name="settings_accent">#FF78DAC7</color>
+    <color name="settings_on_accent">#FF152B28</color>
+    <color name="settings_nav_selected">#FF263A3D</color>
+    <color name="settings_text">#FFEFF8F7</color>
+    <color name="settings_secondary">#FFB1CCCA</color>
+    <color name="settings_service_running">#FFA5E8C3</color>
+    <color name="settings_warning">#FFF3CC8A</color>
+    <color name="settings_error">#FFFFB5AE</color>
+    <color name="settings_ripple">#2478DAC7</color>
 
     <style name="Theme.CarDockBar.Settings" parent="Theme.CarDockBar">
         <item name="colorPrimary">@color/settings_accent</item>
         <item name="colorAccent">@color/settings_accent</item>
         <item name="colorControlActivated">@color/settings_accent</item>
+        <item name="colorControlNormal">@color/settings_secondary</item>
+        <item name="colorControlHighlight">@color/settings_ripple</item>
         <item name="android:colorAccent">@color/settings_accent</item>
+        <item name="android:colorControlActivated">@color/settings_accent</item>
+        <item name="android:colorControlNormal">@color/settings_secondary</item>
+        <item name="alertDialogTheme">@style/ThemeOverlay.CarDockBar.SettingsDialog</item>
+        <item name="android:alertDialogTheme">@style/Theme.CarDockBar.SettingsPlatformDialog</item>
         <item name="android:windowBackground">@color/settings_page</item>
         <item name="android:statusBarColor">@color/settings_page</item>
         <item name="android:navigationBarColor">@color/settings_page</item>
         <item name="android:textColorPrimary">@color/settings_text</item>
         <item name="android:textColorSecondary">@color/settings_secondary</item>
         <item name="surfaceCardColor">@color/settings_card</item>
-        <item name="surfaceCardStroke">@color/stroke_card</item>
-        <item name="surfaceCardRadius">22dp</item>
+        <item name="surfaceCardStroke">@color/settings_outline</item>
+        <item name="surfaceCardRadius">12dp</item>
         <item name="surfaceFieldColor">@color/settings_field</item>
-        <item name="surfaceFieldRadius">12dp</item>
+        <item name="surfaceFieldRadius">8dp</item>
         <item name="primaryButtonColor">@color/settings_accent</item>
-        <item name="primaryButtonRadius">14dp</item>
+        <item name="primaryButtonRadius">8dp</item>
         <item name="primaryButtonText">@color/settings_on_accent</item>
         <item name="android:buttonStyle">@style/Widget.CarDockBar.SettingsButton</item>
         <item name="buttonStyle">@style/Widget.CarDockBar.SettingsButton</item>
         <item name="android:editTextStyle">@style/Widget.CarDockBar.SettingsEditText</item>
         <item name="editTextStyle">@style/Widget.CarDockBar.SettingsEditText</item>
+        <item name="switchStyle">@style/Widget.CarDockBar.SettingsSwitch</item>
+        <item name="checkboxStyle">@style/Widget.CarDockBar.SettingsCheckBox</item>
+        <item name="android:checkboxStyle">@style/Widget.CarDockBar.SettingsCheckBox</item>
+    </style>
+
+    <style name="ThemeOverlay.CarDockBar.SettingsDialog" parent="ThemeOverlay.AppCompat.Dialog.Alert">
+        <item name="colorAccent">@color/settings_accent</item>
+        <item name="colorControlActivated">@color/settings_accent</item>
+        <item name="colorControlNormal">@color/settings_secondary</item>
+        <item name="colorBackgroundFloating">@color/settings_card</item>
+        <item name="android:colorBackgroundFloating">@color/settings_card</item>
+        <item name="android:textColorPrimary">@color/settings_text</item>
+        <item name="android:textColorSecondary">@color/settings_secondary</item>
+    </style>
+
+    <style name="Theme.CarDockBar.SettingsPlatformDialog" parent="android:style/Theme.Material.Dialog.Alert">
+        <item name="android:colorAccent">@color/settings_accent</item>
+        <item name="android:colorControlNormal">@color/settings_secondary</item>
+        <item name="android:colorBackgroundFloating">@color/settings_card</item>
+        <item name="android:textColorPrimary">@color/settings_text</item>
+        <item name="android:textColorSecondary">@color/settings_secondary</item>
+        <item name="android:fontFamily">@font/lynkco_display</item>
     </style>
 
     <style name="Widget.CarDockBar.SettingsButton" parent="Widget.CarDockBar.Button">
@@ -59,11 +91,25 @@
 
     <style name="Widget.CarDockBar.SettingsEditText" parent="Widget.CarDockBar.EditText">
         <item name="android:minHeight">48dp</item>
-        <item name="android:background">@drawable/bg_field</item>
+        <item name="android:background">@drawable/bg_settings_input</item>
         <item name="backgroundTint">@null</item>
         <item name="android:backgroundTint">@null</item>
         <item name="android:padding">12dp</item>
         <item name="android:textColor">@color/settings_text</item>
         <item name="android:textColorHint">@color/settings_secondary</item>
+    </style>
+
+    <style name="Widget.CarDockBar.SettingsSwitch" parent="Widget.CarDockBar.Switch">
+        <item name="android:minHeight">48dp</item>
+        <item name="android:textColor">@color/settings_text</item>
+        <item name="thumbTint">@color/settings_choice_tint</item>
+        <item name="trackTint">@color/settings_switch_track</item>
+    </style>
+
+    <style name="Widget.CarDockBar.SettingsCheckBox" parent="Widget.CarDockBar.CheckBox">
+        <item name="android:minHeight">48dp</item>
+        <item name="android:textColor">@color/settings_text</item>
+        <item name="android:buttonTint">@color/settings_choice_tint</item>
+        <item name="buttonTint">@color/settings_choice_tint</item>
     </style>
 </resources>

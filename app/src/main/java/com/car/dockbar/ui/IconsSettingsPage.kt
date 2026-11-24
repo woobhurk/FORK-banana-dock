@@ -2,9 +2,7 @@ package com.car.dockbar.ui
 
 import android.content.Intent
 import android.content.pm.ApplicationInfo
-import android.graphics.Color
 import android.graphics.drawable.Drawable
-import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
 import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
@@ -59,7 +57,7 @@ class IconsSettingsPage(activity: MainActivity) : SettingsPage(activity, MainAct
         created = true
         root.addView(TextView(this).apply {
             text = "Dock图标设置"
-            setTextColor(0xFFEDEFF3.toInt())
+            setTextColor(ContextCompat.getColor(this@IconsSettingsPage, R.color.settings_text))
             textSize = 16f
             typeface = AppFont.bold(this@IconsSettingsPage)
         })
@@ -79,7 +77,7 @@ class IconsSettingsPage(activity: MainActivity) : SettingsPage(activity, MainAct
 
         tvAppDrawerSummary = TextView(this).apply {
             id = R.id.settingsQuickAppsSummary
-            setTextColor(ContextCompat.getColor(this@IconsSettingsPage, R.color.text_secondary))
+            setTextColor(ContextCompat.getColor(this@IconsSettingsPage, R.color.settings_secondary))
             textSize = 12f
             setPadding(0, dp(10), 0, 0)
         }
@@ -242,12 +240,12 @@ class IconsSettingsPage(activity: MainActivity) : SettingsPage(activity, MainAct
             val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
             grid.addView(row, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { if (rowIndex > 0) topMargin = dp(14) })
+            ).apply { if (rowIndex > 0) topMargin = dp(8) })
             repeat(3) { colIndex ->
                 val slot = rowIndex * 3 + colIndex
                 val app = apps.getOrNull(slot)
                 val tile = FrameLayout(this).apply {
-                    background = ContextCompat.getDrawable(this@IconsSettingsPage, R.drawable.bg_field)
+                    setBackgroundResource(R.drawable.bg_settings_choice)
                     AppDrawerSlotStyle.applyDragOutline(this,
                         ContextCompat.getColor(this@IconsSettingsPage, R.color.settings_accent))
                     isClickable = true
@@ -288,7 +286,7 @@ class IconsSettingsPage(activity: MainActivity) : SettingsPage(activity, MainAct
                 val body = LinearLayout(this).apply {
                     orientation = LinearLayout.VERTICAL
                     gravity = Gravity.CENTER
-                    setPadding(dp(10), dp(12), dp(10), dp(12))
+                    setPadding(dp(4), dp(8), dp(4), dp(8))
                 }
                 tile.addView(body, FrameLayout.LayoutParams(
                     FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
@@ -309,19 +307,19 @@ class IconsSettingsPage(activity: MainActivity) : SettingsPage(activity, MainAct
                     if (app == null) secondary else ContextCompat.getColor(this, R.color.settings_text))
                 body.addView(label, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(7) })
-                if (app != null) tile.addView(TextView(this).apply {
+                if (app != null) tile.addView(Button(this).apply {
                     text = "×"
-                    textSize = 35f
+                    textSize = 22f
                     gravity = Gravity.CENTER
-                    setTextColor(Color.WHITE)
+                    setTextColor(ContextCompat.getColor(this@IconsSettingsPage, R.color.settings_error))
                     includeFontPadding = false
-                    background = GradientDrawable().apply {
-                        shape = GradientDrawable.OVAL
-                        setColor(0xFFE5484D.toInt())
-                    }
+                    minWidth = 0
+                    minHeight = 0
+                    minimumWidth = 0
+                    minimumHeight = 0
+                    setBackgroundResource(R.drawable.bg_settings_nav_idle)
+                    setPadding(0, 0, 0, 0)
                     contentDescription = "清除快捷应用 ${app.label}"
-                    isClickable = true
-                    isFocusable = true
                     setOnClickListener {
                         val current = AppDrawerApps.loadSlots(this@IconsSettingsPage).toMutableList()
                         if (current[slot]?.packageName == app.packageName) {
@@ -330,12 +328,9 @@ class IconsSettingsPage(activity: MainActivity) : SettingsPage(activity, MainAct
                         }
                         refreshAppDrawerSelectionLabel()
                     }
-                }, FrameLayout.LayoutParams(dp(45), dp(45), Gravity.TOP or Gravity.END).apply {
-                    topMargin = dp(4)
-                    marginEnd = dp(4)
-                })
+                }, FrameLayout.LayoutParams(dp(40), dp(40), Gravity.TOP or Gravity.END))
                 row.addView(tile, LinearLayout.LayoutParams(0, dp(98), 1f).apply {
-                    if (colIndex > 0) marginStart = dp(14)
+                    if (colIndex > 0) marginStart = dp(8)
                 })
             }
         }
@@ -394,8 +389,8 @@ class IconsSettingsPage(activity: MainActivity) : SettingsPage(activity, MainAct
             setPadding(dp(10), dp(4), dp(10), dp(8))
         }
         val countLabel = TextView(this).apply {
-            setTextColor(ContextCompat.getColor(this@IconsSettingsPage, R.color.text_secondary))
-            textSize = 12f
+            setTextColor(ContextCompat.getColor(this@IconsSettingsPage, R.color.settings_secondary))
+            textSize = 14f
         }
         list.addView(countLabel, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
@@ -405,27 +400,16 @@ class IconsSettingsPage(activity: MainActivity) : SettingsPage(activity, MainAct
         }
         refreshCount()
 
-        // ★ v1.4.98：左右两栏 —— 左=系统应用，右=个人应用
-        val twoCol = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            )
-        }
-        list.addView(twoCol)
-
-        fun addCategory(title: String, categoryItems: List<AppDrawerCandidate>) {
+        fun appCategory(title: String, categoryItems: List<AppDrawerCandidate>): LinearLayout {
             val (col, body) = appListColumn(title)
-            twoCol.addView(col)
             if (categoryItems.isEmpty()) {
                 body.addView(TextView(this).apply {
                     text = "暂无应用"
                     textSize = 12f
-                    setTextColor(ContextCompat.getColor(this@IconsSettingsPage, R.color.text_secondary))
+                    setTextColor(ContextCompat.getColor(this@IconsSettingsPage, R.color.settings_secondary))
                     setPadding(dp(4), dp(5), 0, dp(5))
                 })
-                return
+                return col
             }
             categoryItems.forEach { candidate ->
                 val row = LinearLayout(this).apply {
@@ -443,8 +427,8 @@ class IconsSettingsPage(activity: MainActivity) : SettingsPage(activity, MainAct
                 })
                 val check = CheckBox(this).apply {
                     text = "${candidate.app.label}\n${candidate.app.packageName}"
-                    textSize = 11f
-                    setTextColor(0xFFEDEFF3.toInt())
+                    textSize = 14f
+                    setTextColor(ContextCompat.getColor(this@IconsSettingsPage, R.color.settings_text))
                     isChecked = candidate.app.packageName in selected
                 }
                 lateinit var listener: android.widget.CompoundButton.OnCheckedChangeListener
@@ -466,10 +450,12 @@ class IconsSettingsPage(activity: MainActivity) : SettingsPage(activity, MainAct
                     LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
                 ).apply { topMargin = dp(3) })
             }
+            return col
         }
-
-        addCategory("系统应用", items.filter { it.isSystem })
-        addCategory("个人应用", items.filterNot { it.isSystem })
+        list.addView(settingsColumns(this,
+            appCategory("系统应用", items.filter { it.isSystem }),
+            appCategory("个人应用", items.filterNot { it.isSystem }),
+            minWidthDp = 500, gapDp = 12))
         val scroll = ScrollView(this).apply {
             isFillViewport = true
             addView(list)
@@ -522,7 +508,7 @@ class IconsSettingsPage(activity: MainActivity) : SettingsPage(activity, MainAct
         }
         col.addView(TextView(this).apply {
             text = title
-            setTextColor(0xFFEDEFF3.toInt())
+            setTextColor(ContextCompat.getColor(this@IconsSettingsPage, R.color.settings_text))
             textSize = 14f
             typeface = AppFont.bold(this@IconsSettingsPage)
             setPadding(dp(4), dp(2), dp(4), dp(6))

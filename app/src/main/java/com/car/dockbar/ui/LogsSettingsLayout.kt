@@ -1,9 +1,7 @@
 package com.car.dockbar.ui
 
 import android.app.Activity
-import android.content.res.ColorStateList
 import android.graphics.Typeface
-import android.graphics.drawable.RippleDrawable
 import android.graphics.drawable.RotateDrawable
 import android.text.TextUtils
 import android.view.Gravity
@@ -28,6 +26,7 @@ internal class LogsSettingsLayout(activity: Activity, page: LinearLayout) : Sett
     val metrics: List<TextView>
 
     init {
+        val runtimeStatus = page.findViewById<TextView>(R.id.tvStatus)
         page.removeAllViews()
         page.background = null
         page.setPadding(0, 0, 0, 0)
@@ -35,7 +34,7 @@ internal class LogsSettingsLayout(activity: Activity, page: LinearLayout) : Sett
 
         val left = column()
         val right = column()
-        page.addView(adaptiveRow(left, right, dp(560), dp(18), equalColumns = true), params())
+        page.addView(settingsColumns(activity, left, right), params())
 
         overview = diagnosticCard(left, "运行概况")
         val firstMetrics = row().apply { isBaselineAligned = false }
@@ -43,9 +42,14 @@ internal class LogsSettingsLayout(activity: Activity, page: LinearLayout) : Sett
         add(overview, firstMetrics, 6)
         add(overview, secondMetrics, 12)
         metrics = listOf("设备标识", "Native 崩溃捕获", "安全等级", "待补传崩溃").mapIndexed { index, label ->
-            val metric = column().apply { if (index % 2 == 1) setPaddingRelative(dp(12), 0, 0, 0) }
+            val metric = column().apply {
+                background = ContextCompat.getDrawable(activity, R.drawable.bg_field)
+                setPadding(dp(8), dp(8), dp(8), dp(8))
+            }
             val metricRow = if (index < 2) firstMetrics else secondMetrics
-            metricRow.addView(metric, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            metricRow.addView(metric, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                if (index % 2 == 1) marginStart = dp(8)
+            })
             add(metric, text(label, 13f, true), 0)
             text("", 16f).apply {
                 maxLines = 2
@@ -53,6 +57,7 @@ internal class LogsSettingsLayout(activity: Activity, page: LinearLayout) : Sett
                 add(metric, this, 6)
             }
         }
+        runtimeStatus?.let { add(overview, it, 12) }
 
         upload = diagnosticCard(left, "日志上传")
         logs = diagnosticCard(left)
@@ -132,8 +137,8 @@ internal class LogsSettingsLayout(activity: Activity, page: LinearLayout) : Sett
 
     private fun diagnosticCard(parent: LinearLayout, title: String? = null): LinearLayout = column().apply {
         background = ContextCompat.getDrawable(activity, R.drawable.bg_card)
-        setPadding(dp(16), dp(14), dp(16), dp(16))
-        parent.addView(this, params(16))
+        setPadding(dp(20), dp(16), dp(20), dp(18))
+        parent.addView(this, params(18))
         if (title != null) sectionHeader(this, title, 21f)
     }
 
@@ -158,15 +163,14 @@ internal class LogsSettingsLayout(activity: Activity, page: LinearLayout) : Sett
         ceil(button.paint.measureText(label)).toInt() + button.compoundPaddingLeft + button.compoundPaddingRight
 
     private fun adaptiveRow(
-        first: View, second: View, horizontalMin: Int, gap: Int, equalColumns: Boolean = false
+        first: View, second: View, horizontalMin: Int, gap: Int
     ): LinearLayout = object : LinearLayout(activity) {
-        private val firstParams = if (equalColumns) params() else actionParams(0)
-        private val secondParams = if (equalColumns) params() else actionParams(0).apply { topMargin = gap }
+        private val secondParams = actionParams(0).apply { topMargin = gap }
 
         init {
             orientation = VERTICAL
             isBaselineAligned = false
-            addView(first, firstParams)
+            addView(first, actionParams(0))
             addView(second, secondParams)
         }
 
@@ -175,17 +179,8 @@ internal class LogsSettingsLayout(activity: Activity, page: LinearLayout) : Sett
             val direction = if (wide) HORIZONTAL else VERTICAL
             if (orientation != direction) {
                 orientation = direction
-                if (equalColumns) {
-                    val width = if (wide) 0 else ViewGroup.LayoutParams.MATCH_PARENT
-                    val weight = if (wide) 1f else 0f
-                    firstParams.width = width
-                    secondParams.width = width
-                    firstParams.weight = weight
-                    secondParams.weight = weight
-                }
                 secondParams.marginStart = if (wide) gap else 0
-                secondParams.marginEnd = 0
-                secondParams.topMargin = if (!wide && !equalColumns) gap else 0
+                secondParams.topMargin = if (wide) 0 else gap
                 secondParams.resolveLayoutDirection(layoutDirection)
             }
             super.onMeasure(widthMeasureSpec, heightMeasureSpec)
@@ -196,14 +191,11 @@ internal class LogsSettingsLayout(activity: Activity, page: LinearLayout) : Sett
         button.textSize = 14f
         button.minWidth = 0
         button.minimumWidth = 0
-        button.minHeight = dp(if (primary) 56 else 48)
+        button.minHeight = dp(48)
         button.minimumHeight = button.minHeight
-        button.background = if (primary) {
-            ContextCompat.getDrawable(activity, R.drawable.bg_button_primary)
-        } else {
-            RippleDrawable(ColorStateList.valueOf(0x24FFFFFF), ContextCompat.getDrawable(activity, R.drawable.bg_field), null)
-        }
+        button.setBackgroundResource(if (primary) R.drawable.bg_button_primary else R.drawable.bg_settings_secondary_button)
         button.setPadding(dp(10), dp(6), dp(10), dp(6))
-        button.setTextColor(color(if (primary) R.color.settings_on_accent else R.color.settings_text))
+        if (primary) button.setTextColor(color(R.color.settings_on_accent))
+        else button.setTextColor(ContextCompat.getColorStateList(activity, R.color.settings_action_text))
     }
 }

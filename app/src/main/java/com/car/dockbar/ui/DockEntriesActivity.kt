@@ -4,7 +4,7 @@ import android.content.ClipData
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ApplicationInfo
-import android.graphics.Color
+import android.content.res.Configuration
 import android.graphics.drawable.Drawable
 import android.os.Bundle
 import android.os.Handler
@@ -30,14 +30,13 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import com.car.dockbar.R
 import com.car.dockbar.dock.DockCatalog
-import com.car.dockbar.model.Builtin
 import com.car.dockbar.model.DockEditorOrder
 import com.car.dockbar.model.DockEntries
 import com.car.dockbar.model.DockEntry
 import com.car.dockbar.util.Logx
 import java.util.concurrent.Executors
 
-/** Drag-only entry editor. The live Dock and quick-app popup retain their own interactions. */
+/** 条目编辑器只用拖动增删和排序，不接管实际 Dock 或快捷应用弹窗的交互。 */
 class DockEntriesActivity : AppCompatActivity() {
     override fun attachBaseContext(newBase: Context) {
         super.attachBaseContext(MainActivity.scaledContext(newBase, previousScale = 1f))
@@ -70,6 +69,7 @@ class DockEntriesActivity : AppCompatActivity() {
     private lateinit var systemTab: Button
     private lateinit var preview: DockEditorPreviewView
     private lateinit var dragHint: TextView
+    private lateinit var arrangePreview: () -> Unit
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -78,18 +78,20 @@ class DockEntriesActivity : AppCompatActivity() {
         entries.addAll(DockEntries.load(this))
         root = FrameLayout(this).apply { setBackgroundColor(color(R.color.settings_page)) }
         val scroll = ScrollView(this).apply { isFillViewport = true }
-        root.addView(scroll, FrameLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT).apply { bottomMargin = 128 })
-        val page = column().apply { setPadding(dp(36), dp(30), dp(36), dp(28)) }
+        val workspace = column()
+        root.addView(workspace, FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT).apply { bottomMargin = DOCK_CLEARANCE_PX })
+        workspace.addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        val page = column().apply { setPadding(dp(20), dp(18), dp(20), dp(18)) }
         scroll.addView(page)
         setContentView(root)
 
         val header = row().apply { gravity = Gravity.CENTER_VERTICAL }
-        page.addView(header, lp())
         header.addView(button("‹") { finish() }.apply {
             textSize = 30f
-            background = ContextCompat.getDrawable(this@DockEntriesActivity, R.drawable.bg_field)
-        }, LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginEnd = dp(20) })
+            setPadding(0, 0, 0, 0)
+            contentDescription = "返回"
+        }, LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginEnd = dp(12) })
         val titles = column()
         header.addView(titles, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         titles.addView(label("Dock 图标管理", 30f, bold = true), lp())
@@ -100,11 +102,11 @@ class DockEntriesActivity : AppCompatActivity() {
             renderPool()
             if (showApps) loadApps()
         }
-        header.addView(appButton, LinearLayout.LayoutParams(dp(240), dp(48)).apply { marginStart = dp(18) })
-        header.addView(button("恢复默认") { confirmReset() }.apply {
-            background = ContextCompat.getDrawable(this@DockEntriesActivity, R.drawable.bg_field)
-            setTextColor(color(R.color.settings_secondary))
-        }, LinearLayout.LayoutParams(dp(130), dp(48)).apply { marginStart = dp(16) })
+        val actions = row()
+        actions.addView(appButton, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.4f))
+        actions.addView(button("恢复默认") { confirmReset() },
+            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = dp(12) })
+        page.addView(settingsColumns(this, header, actions, minWidthDp = 640), lp())
 
         val available = card(page)
         poolTitle = label("可添加控件", 21f, bold = true)
@@ -113,8 +115,13 @@ class DockEntriesActivity : AppCompatActivity() {
         available.addView(poolHint, lp(12))
         search = EditText(this).apply {
             hint = "搜索应用名称或包名"
-            textSize = 14f * 1.3f
+            textSize = 16f
             isSingleLine = true
+            minHeight = dp(48)
+            setBackgroundResource(R.drawable.bg_settings_input)
+            setPadding(dp(14), 0, dp(14), 0)
+            setTextColor(color(R.color.settings_text))
+            setHintTextColor(color(R.color.settings_secondary))
             addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
@@ -128,42 +135,58 @@ class DockEntriesActivity : AppCompatActivity() {
         appTabs = row()
         personalTab = button("个人应用") { systemCategory = false; renderPool() }
         systemTab = button("系统应用") { systemCategory = true; renderPool() }
-        appTabs.addView(personalTab, LinearLayout.LayoutParams(0, dp(44), 1f))
-        appTabs.addView(systemTab, LinearLayout.LayoutParams(0, dp(44), 1f).apply { marginStart = dp(12) })
+        personalTab.setBackgroundResource(R.drawable.bg_settings_choice)
+        systemTab.setBackgroundResource(R.drawable.bg_settings_choice)
+        appTabs.addView(personalTab, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        appTabs.addView(systemTab, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            .apply { marginStart = dp(12) })
         available.addView(appTabs, lp(10))
-        candidateScroll = ScrollView(this).apply { isFillViewport = false }
+        candidateScroll = ScrollView(this).apply { isNestedScrollingEnabled = true }
         pool = column()
         candidateScroll.addView(pool)
-        available.addView(candidateScroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(170)).apply {
-            topMargin = dp(18)
-        })
+        available.addView(candidateScroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+            candidateHeight()).apply { topMargin = dp(12) })
 
         val edit = card(page)
         preview = DockEditorPreviewView(this)
         val previewHeader = row().apply { gravity = Gravity.CENTER_VERTICAL }
-        previewHeader.addView(label("Dock 预览", 21f, bold = true), LinearLayout.LayoutParams(
-            0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        val previewTitle = label("Dock 预览", 21f, bold = true)
         fun backdropLabel() = "模拟前台：${if (preview.lightBackdrop) "亮底" else "暗底"}"
-        val backdrop = Button(this).apply {
-            text = backdropLabel()
-            textSize = 15f * 1.3f
-            typeface = AppFont.bold(this@DockEntriesActivity)
-            background = ContextCompat.getDrawable(this@DockEntriesActivity, R.drawable.bg_field)
-            setTextColor(color(R.color.settings_text))
-            setOnClickListener {
-                preview.lightBackdrop = !preview.lightBackdrop
-                text = backdropLabel()
-                render()
+        val backdrop = button(backdropLabel()) { control ->
+            preview.lightBackdrop = !preview.lightBackdrop
+            control.isSelected = preview.lightBackdrop
+            control.text = backdropLabel()
+            render()
+        }.apply {
+            setBackgroundResource(R.drawable.bg_settings_choice)
+            isSelected = preview.lightBackdrop
+        }
+        previewHeader.addView(previewTitle, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        previewHeader.addView(backdrop, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(8) })
+        edit.addView(previewHeader, lp())
+        val reorderHint = label("长按图标拖动排序；拖出预览并松手移除，内置控件会回到上方", 13f, true)
+        edit.addView(reorderHint, lp(12))
+        edit.addView(preview, lp())
+        dragHint = label("长按上方控件拖入预览添加，第三方应用通过页面顶部单独选择", 13f, true)
+        edit.addView(dragHint, lp(10))
+        arrangePreview = {
+            // 矮屏滚动候选时，放置目标始终留在同一屏。
+            val compact = resources.configuration.screenHeightDp in 1..560
+            val nextParent = if (compact) workspace else page
+            if (edit.parent !== nextParent) {
+                (edit.parent as ViewGroup).removeView(edit)
+                nextParent.addView(edit, lp(if (compact) 0 else 18))
+            }
+            val padding = dp(if (compact) 8 else 20)
+            edit.setPadding(padding, padding, padding, padding)
+            reorderHint.visibility = if (compact) View.GONE else View.VISIBLE
+            preview.layoutParams = preview.layoutParams.apply {
+                height = dp(if (compact) 80 else 154)
+                (this as LinearLayout.LayoutParams).topMargin = dp(if (compact) 4 else 18)
             }
         }
-        previewHeader.addView(backdrop, LinearLayout.LayoutParams(dp(164), dp(44)))
-        edit.addView(previewHeader, lp())
-        edit.addView(label("长按图标拖动排序；拖出预览并松手移除，内置控件会回到上方", 13f, true), lp(12))
-        edit.addView(preview, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(154)).apply {
-            topMargin = dp(18)
-        })
-        dragHint = label("长按上方控件拖入预览添加，第三方应用通过右上角单独选择", 13f, true)
-        edit.addView(dragHint, lp(10))
+        arrangePreview()
 
         preview.onPreviewLongPress = { index, shadow ->
             entries.getOrNull(index)?.let { startDrag(preview, DockEditorDrag(it, true), shadow) }
@@ -192,7 +215,7 @@ class DockEntriesActivity : AppCompatActivity() {
     private fun render() {
         if (destroyed) return
         summary.text = "共 ${entries.size} 项 · 长按拖入添加，预览内排序，拖出松手移除"
-        dragHint.text = "修改在松手后自动保存 · 编辑预览不会触发车控或打开应用"
+        dragHint.text = "松手后自动保存 · 编辑预览仅用于排列"
         dragHint.setTextColor(color(R.color.settings_secondary))
         renderPool()
         preview.render(entries)
@@ -201,10 +224,17 @@ class DockEntriesActivity : AppCompatActivity() {
     private fun renderPool() {
         if (!::pool.isInitialized || destroyed) return
         appButton.text = if (showApps) "返回内置控件" else "＋ 添加第三方应用"
+        appButton.setBackgroundResource(if (showApps) R.drawable.bg_settings_secondary_button else R.drawable.bg_button_primary)
+        if (showApps) {
+            appButton.setTextColor(ContextCompat.getColorStateList(this, R.color.settings_action_text))
+        } else {
+            appButton.setTextColor(color(R.color.settings_on_accent))
+        }
         search.visibility = if (showApps) View.VISIBLE else View.GONE
         appTabs.visibility = if (showApps) View.VISIBLE else View.GONE
-        candidateScroll.layoutParams = (candidateScroll.layoutParams as LinearLayout.LayoutParams).apply {
-            height = dp(if (showApps) 260 else 170)
+        val candidateHeight = candidateHeight()
+        if (candidateScroll.layoutParams.height != candidateHeight) {
+            candidateScroll.layoutParams = candidateScroll.layoutParams.apply { height = candidateHeight }
         }
         val addedApps = entries.filter { it.kind == "app" }.mapTo(HashSet()) { it.action }
         val availableApps = catalog.filter { it.action !in addedApps && (query.isBlank() ||
@@ -213,9 +243,8 @@ class DockEntriesActivity : AppCompatActivity() {
         personalTab.text = "个人应用（${availableApps.size - systemCount}）"
         systemTab.text = "系统应用（$systemCount）"
         listOf(personalTab to !systemCategory, systemTab to systemCategory).forEach { (tab, selected) ->
-            tab.background = ContextCompat.getDrawable(this,
-                if (selected) R.drawable.bg_button_primary else R.drawable.bg_field)
-            tab.setTextColor(color(if (selected) R.color.settings_on_accent else R.color.settings_secondary))
+            tab.isSelected = selected
+            tab.setTextColor(color(if (selected) R.color.settings_accent else R.color.settings_secondary))
         }
         val candidates = if (showApps) {
             availableApps.filter { (it.action in systemPackages) == systemCategory }
@@ -238,15 +267,17 @@ class DockEntriesActivity : AppCompatActivity() {
             pool.addView(label(if (showApps && !catalogLoaded) "正在加载…" else "没有可添加的项目", 14f, true), lp(24))
             return
         }
-        val columns = if (showApps) 6 else
-            ((resources.displayMetrics.widthPixels - dp(130)) / dp(165)).coerceIn(4, 8)
+        val contentWidth = resources.displayMetrics.widthPixels - dp(80)
+        val columns = if (showApps) (contentWidth / dp(104)).coerceIn(2, 6) else
+            (contentWidth / dp(140)).coerceIn(2, 8)
+        val iconWidthLimit = (contentWidth / columns - dp(22)).coerceAtLeast(dp(24))
         val grid = GridLayout(this).apply { columnCount = columns }
         pool.addView(grid, lp())
         candidates.forEachIndexed { index, entry ->
             val tile = column().apply {
                 gravity = Gravity.CENTER
-                setPadding(dp(10), dp(8), dp(10), dp(8))
-                background = ContextCompat.getDrawable(this@DockEntriesActivity, R.drawable.bg_field)
+                setPadding(dp(6), dp(8), dp(6), dp(8))
+                setBackgroundResource(R.drawable.bg_settings_choice)
                 isClickable = true
                 isFocusable = true
                 contentDescription = "可添加：${entry.label}，长按拖入 Dock"
@@ -264,7 +295,7 @@ class DockEntriesActivity : AppCompatActivity() {
                 bindIcon(icon, entry)
                 56
             }
-            tile.addView(icon, LinearLayout.LayoutParams(dp(iconWidth), dp(if (showApps) 56 else 44)))
+            tile.addView(icon, LinearLayout.LayoutParams(minOf(dp(iconWidth), iconWidthLimit), dp(if (showApps) 56 else 44)))
             tile.addView(label(entry.label, if (showApps) 16f else 14f).apply {
                 gravity = Gravity.CENTER
                 maxLines = 1
@@ -282,7 +313,7 @@ class DockEntriesActivity : AppCompatActivity() {
                 setMargins(dp(5), dp(5), dp(5), dp(5))
             })
         }
-        // Keep small icon tiles even when only one or two controls remain.
+        // 末行仍占满全部列，避免只剩一两个候选时图块被拉宽。
         val remainder = candidates.size % columns
         if (remainder != 0) repeat(columns - remainder) { offset ->
             grid.addView(View(this), GridLayout.LayoutParams().apply {
@@ -313,12 +344,12 @@ class DockEntriesActivity : AppCompatActivity() {
 
     private fun updateDragHint(item: DockEditorDrag, inside: Boolean) {
         dragHint.text = when {
-            inside && item.fromPreview -> "松手插入蓝色标记位置：${item.entry.label}"
+            inside && item.fromPreview -> "松手插入标记位置：${item.entry.label}"
             inside -> "松手添加：${item.entry.label}"
             item.fromPreview -> "松手移除：${item.entry.label}"
             else -> "拖入下方 Dock 预览添加；在预览外松手取消"
         }
-        dragHint.setTextColor(color(if (!inside && item.fromPreview) R.color.warn else R.color.settings_accent))
+        dragHint.setTextColor(color(if (!inside && item.fromPreview) R.color.settings_error else R.color.settings_accent))
     }
 
     private fun completeDrop(item: DockEditorDrag, gap: Int?) {
@@ -411,6 +442,12 @@ class DockEntriesActivity : AppCompatActivity() {
         super.onSaveInstanceState(outState)
     }
 
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        arrangePreview()
+        render()
+    }
+
     override fun onDestroy() {
         destroyed = true
         worker.shutdownNow()
@@ -420,26 +457,43 @@ class DockEntriesActivity : AppCompatActivity() {
 
     private fun card(parent: LinearLayout) = column().apply {
         background = ContextCompat.getDrawable(this@DockEntriesActivity, R.drawable.bg_card)
-        setPadding(dp(26), dp(24), dp(26), dp(24))
-        parent.addView(this, lp(22))
+        setPadding(dp(20), dp(20), dp(20), dp(20))
+        parent.addView(this, lp(18))
     }
     private fun column() = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
     private fun row() = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
     private fun label(text: String, size: Float, secondary: Boolean = false, bold: Boolean = false) = TextView(this).apply {
         this.text = text
-        textSize = if (bold) size else size * 1.3f
+        textSize = size
         if (bold) typeface = AppFont.bold(this@DockEntriesActivity)
         includeFontPadding = false
         setTextColor(color(if (secondary) R.color.settings_secondary else R.color.settings_text))
     }
-    private fun button(text: String, action: () -> Unit) = Button(this).apply {
+    private fun button(text: String, action: (Button) -> Unit) = Button(this).apply {
         this.text = text
-        textSize = 15f * 1.3f
-        setOnClickListener { action() }
+        textSize = 15f
+        minimumWidth = 0
+        minWidth = 0
+        minHeight = dp(48)
+        minimumHeight = dp(48)
+        setBackgroundResource(R.drawable.bg_settings_secondary_button)
+        setTextColor(ContextCompat.getColorStateList(this@DockEntriesActivity, R.color.settings_action_text))
+        setPadding(dp(10), dp(6), dp(10), dp(6))
+        setOnClickListener { action(this) }
     }
     private fun lp(top: Int = 0) = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
         ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(top) }
     private fun color(id: Int) = ContextCompat.getColor(this, id)
+    private fun candidateHeight(): Int {
+        // 车机矮屏给下方预览留出空间；候选仍可在自己的区域滚动。
+        val viewport = resources.displayMetrics.heightPixels - DOCK_CLEARANCE_PX
+        val preferred = dp(if (showApps) 260 else 170)
+        return minOf(preferred, (viewport / 3).coerceAtLeast(dp(88)))
+    }
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
     private fun toast(text: String) = Toast.makeText(this, text, Toast.LENGTH_SHORT).show()
+
+    private companion object {
+        const val DOCK_CLEARANCE_PX = 128
+    }
 }

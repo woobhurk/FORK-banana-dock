@@ -19,6 +19,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import com.car.dockbar.media.CabinVolume
+import com.car.dockbar.R
 import com.car.dockbar.model.Builtin
 import com.car.dockbar.model.DockEntry
 import com.car.dockbar.util.Prefs
@@ -144,7 +145,7 @@ internal class DockEditorPreviewView(context: Context) : View(context) {
         gap?.let { index ->
             val imageX = if (index <= 0) 0 else itemRects.getOrNull(index - 1)?.right ?: image.width
             val x = (target.left + imageX.toFloat() / image.width * target.width()).coerceIn(target.left + density, target.right - density)
-            paint.color = 0xFF3D8BFF.toInt()
+            paint.color = context.getColor(R.color.settings_accent)
             paint.strokeWidth = 3 * density
             canvas.drawLine(x, target.top - 5 * density, x, target.bottom + 5 * density, paint)
         }

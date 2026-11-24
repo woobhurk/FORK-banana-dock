@@ -256,7 +256,8 @@ internal class LogsSettingsPage(activity: MainActivity) :
         }
         permissionStatus.setTextColor(ContextCompat.getColor(this, when {
             repairingPermissions -> R.color.settings_secondary
-            retry -> R.color.warn
+            result.state == StartupPermissions.CheckState.FAILED -> R.color.settings_error
+            retry -> R.color.settings_warning
             result.state == StartupPermissions.CheckState.CORE_READY -> R.color.settings_service_running
             else -> R.color.settings_secondary
         }))

@@ -8,9 +8,7 @@ import kotlin.math.roundToInt
  * ★ v3.13.0：Dock 底色渐变规格（**唯一实现**）。
  *
  * ## 为什么单独抽出来
- * 之前 `DockLayout.rebuildShader()` 和设置页的 `GradientPreviewView`
- * 各写了一份 LinearGradient，导致「配置页预览」和「实际 Dock」不一致
- * （v3.12.0 的平段逻辑就只改了一处）。现在两边都调这里，1:1 一致。
+ * `DockLayout.rebuildShader()` 和外观设置里的底色预览共用同一组渐变色标。
  *
  * ## 渐变形状（用户要求）
  * > 「渐变浓度改从最底部开始增加到最高度，而不是只变底部的浓度」

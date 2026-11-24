@@ -93,7 +93,7 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="6dp"
                     android:text="没有通知使用权就读不到媒体会话，音乐卡片会显示「暂无播放」。点下面的按钮，在系统列表里打开 banana_dock。"
-                    android:textColor="@color/warn"
+                    android:textColor="@color/settings_warning"
                     android:textSize="14sp"
                     android:visibility="gone" />
 
@@ -139,7 +139,7 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="6dp"
                     android:text="没开启时，隐藏 Dock 应用黑名单不会生效。"
-                    android:textColor="@color/warn"
+                    android:textColor="@color/settings_warning"
                     android:textSize="14sp"
                     android:visibility="gone" />
 
@@ -177,7 +177,7 @@
                     android:layout_height="wrap_content"
                     android:minHeight="52dp"
                     android:text="使用原厂 Dock"
-                    android:textColor="@color/text_primary"
+                    android:textColor="@color/settings_text"
                     android:textSize="16sp" />
 
                 <TextView
@@ -185,7 +185,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="开关保存你的选择；原厂 Dock 是否已切换以屏幕为准。"
-                    android:textColor="@color/text_secondary"
+                    android:textColor="@color/settings_secondary"
                     android:textSize="14sp" />
             </LinearLayout>
 

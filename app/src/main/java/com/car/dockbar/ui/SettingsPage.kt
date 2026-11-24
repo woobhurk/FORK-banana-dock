@@ -2,6 +2,7 @@ package com.car.dockbar.ui
 
 import android.content.Intent
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.StateListDrawable
 import android.os.Handler
 import android.os.Looper
 import android.text.InputType
@@ -58,19 +59,21 @@ abstract class SettingsPage(protected val activity: MainActivity, val key: Strin
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(0, dp(12), 0, dp(12))
         }
-        row.addView(TextView(this).apply {
+        val sw = SwitchCompat(this).apply {
             text = label
-            setTextColor(0xFFEDEFF3.toInt())
             textSize = 16f
-        }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-        val sw = SwitchCompat(this).apply { isChecked = checked }
+            gravity = Gravity.CENTER_VERTICAL
+            minimumHeight = dp(48)
+            switchPadding = dp(12)
+            isChecked = checked
+        }
         sw.setOnCheckedChangeListener { _, v ->
             onChange(v)
             if (reloadDock) reloadService()
         }
-        row.addView(sw)
+        row.addView(sw, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
         parent.addView(row, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
         ))
@@ -91,13 +94,12 @@ abstract class SettingsPage(protected val activity: MainActivity, val key: Strin
         // ★ v3.13.16：把「标签 + 滑杆」包进一个容器并返回 —— 便于按背景形态整体显隐
         val box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(0, dp(10), 0, dp(10))
+            setPadding(0, dp(4), 0, dp(4))
         }
         val tv = TextView(this).apply {
             text = if (separateValue) format(progress) else "$label：${format(progress)}"
-            setTextColor(0xFF9AA1AE.toInt())
-            textSize = 15f
-            setPadding(0, dp(6), 0, 0)
+            setTextColor(ContextCompat.getColor(this@SettingsPage, R.color.settings_secondary))
+            textSize = 14f
         }
         if (separateValue) {
             box.addView(LinearLayout(this).apply {
@@ -109,6 +111,8 @@ abstract class SettingsPage(protected val activity: MainActivity, val key: Strin
                     setTextColor(ContextCompat.getColor(this@SettingsPage, R.color.settings_text))
                 }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
                 tv.setTextColor(ContextCompat.getColor(this@SettingsPage, R.color.settings_accent))
+                tv.setPadding(dp(8), dp(4), dp(8), dp(4))
+                tv.background = ContextCompat.getDrawable(this@SettingsPage, R.drawable.bg_field)
                 addView(tv)
             })
         } else {
@@ -118,7 +122,8 @@ abstract class SettingsPage(protected val activity: MainActivity, val key: Strin
         val sb = SeekBar(this).apply {
             this.max = max
             this.progress = progress
-            minimumHeight = dp(44)
+            contentDescription = label
+            minimumHeight = dp(48)
         }
         sb.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(s: SeekBar?, p: Int, fromUser: Boolean) {
@@ -148,8 +153,8 @@ abstract class SettingsPage(protected val activity: MainActivity, val key: Strin
     ): EditText {
         val tv = TextView(this).apply {
             text = label
-            setTextColor(0xFF9AA1AE.toInt())
-            textSize = 11f
+            setTextColor(ContextCompat.getColor(this@SettingsPage, R.color.settings_secondary))
+            textSize = 13f
             setPadding(0, dp(8), 0, 0)
         }
         parent.addView(tv, LinearLayout.LayoutParams(
@@ -157,12 +162,9 @@ abstract class SettingsPage(protected val activity: MainActivity, val key: Strin
         ))
         val et = EditText(this).apply {
             setText(value)
-            setTextColor(0xFFEDEFF3.toInt())
-            setHintTextColor(0xFF9AA1AE.toInt())
-            textSize = 12f
-            setPadding(dp(6), dp(4), dp(6), dp(4))
-            background = ContextCompat.getDrawable(this@SettingsPage, R.drawable.bg_field)
+            textSize = 14f
             inputType = InputType.TYPE_CLASS_TEXT
+            isSingleLine = true
         }
         et.setOnFocusChangeListener { _, hasFocus ->
             if (!hasFocus) onCommit(et.text.toString().trim())
@@ -181,35 +183,45 @@ abstract class SettingsPage(protected val activity: MainActivity, val key: Strin
     ) {
         val tv = TextView(this).apply {
             text = "$label：#${Integer.toHexString(current).uppercase()}"
-            setTextColor(0xFF9AA1AE.toInt())
-            textSize = 11f
-            setPadding(0, dp(8), 0, 0)
+            setTextColor(ContextCompat.getColor(this@SettingsPage, R.color.settings_secondary))
+            textSize = 14f
         }
         parent.addView(tv, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
         ))
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        for (c in Prefs.LYRIC_COLOR_PRESETS) {
+        for ((index, preset) in Prefs.LYRIC_COLOR_PRESETS.withIndex()) {
+            val hex = "#${Integer.toHexString(preset).uppercase()}"
             val b = Button(this).apply {
                 minWidth = 0
                 minimumWidth = 0
-                setPadding(dp(4), dp(4), dp(4), dp(4))
-                background = GradientDrawable().apply {
-                    shape = GradientDrawable.RECTANGLE
-                    cornerRadius = dp(6).toFloat()
-                    setColor(c)
-                    setStroke(dp(2), if (c == current)
-                        ContextCompat.getColor(this@SettingsPage, R.color.settings_accent) else 0x33FFFFFF)
+                setPadding(0, 0, 0, 0)
+                contentDescription = "$label：$hex"
+                isSelected = preset == current
+                fun swatch(stroke: Int, color: Int) = GradientDrawable().apply {
+                    cornerRadius = dp(8).toFloat()
+                    setColor(preset)
+                    setStroke(dp(stroke), color)
                 }
-                setOnClickListener {
-                    onPick(c)
-                    tv.text = "$label：#${Integer.toHexString(c).uppercase()}"
+                background = StateListDrawable().apply {
+                    addState(intArrayOf(android.R.attr.state_selected), swatch(3,
+                        ContextCompat.getColor(this@SettingsPage, R.color.settings_accent)))
+                    addState(intArrayOf(), swatch(1,
+                        ContextCompat.getColor(this@SettingsPage, R.color.settings_outline)))
+                }
+                setOnClickListener { chosen ->
+                    onPick(preset)
+                    for (slot in 0 until row.childCount) {
+                        val option = row.getChildAt(slot)
+                        option.isSelected = option === chosen
+                    }
+                    tv.text = "$label：$hex"
                     sendLyricUpdate()
                 }
             }
-            row.addView(b, LinearLayout.LayoutParams(
-                0, dp(28), 1f
-            ).apply { marginStart = dp(4) })
+            row.addView(b, LinearLayout.LayoutParams(0, dp(48), 1f).apply {
+                if (index > 0) marginStart = dp(4)
+            })
         }
         parent.addView(row, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT

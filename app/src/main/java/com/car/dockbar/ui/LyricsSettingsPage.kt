@@ -5,6 +5,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.*
 import androidx.appcompat.app.AlertDialog
+import androidx.appcompat.widget.AppCompatRadioButton
 import androidx.core.content.ContextCompat
 import com.car.dockbar.R
 import com.car.dockbar.media.LyricMonitor
@@ -16,13 +17,11 @@ internal class LyricsSettingsPage(activity: MainActivity) : SettingsPage(activit
     private val onlineRowId = View.generateViewId()
     private var tvLyricStatus: TextView? = null
     private var btnLyricToggle: Button? = null
-    private var lyricSourceButtons: List<Pair<Int, Button>> = emptyList()
     private var lyricMapButtons: List<Pair<Int, Button>> = emptyList()
     override val root: LinearLayout = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
 
     override fun onShown() {
         root.removeAllViews()
-        lyricSourceButtons = emptyList()
         lyricMapButtons = emptyList()
         addLyricSection(root)
         rebuildLyrics(root, 0)
@@ -38,7 +37,6 @@ internal class LyricsSettingsPage(activity: MainActivity) : SettingsPage(activit
 
     private fun color(id: Int) = ContextCompat.getColor(activity, id)
     private fun column() = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
-    private fun row() = LinearLayout(activity).apply { orientation = LinearLayout.HORIZONTAL }
     private fun params(top: Int = 0) = LinearLayout.LayoutParams(
         ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
     ).apply { topMargin = dp(top) }
@@ -65,9 +63,9 @@ internal class LyricsSettingsPage(activity: MainActivity) : SettingsPage(activit
     private fun card(parent: LinearLayout, title: String, description: String? = null): LinearLayout {
         val card = column().apply {
             background = ContextCompat.getDrawable(activity, R.drawable.bg_card)
-            setPadding(dp(26), dp(26), dp(26), dp(26))
+            setPadding(dp(20), dp(20), dp(20), dp(20))
         }
-        parent.addView(card, params(22))
+        parent.addView(card, params(18))
         card.addView(text(title, 21f).apply { typeface = AppFont.bold(activity) }, params())
         if (description != null) card.addView(text(description, 14f, true), params(12))
         return card
@@ -92,8 +90,8 @@ internal class LyricsSettingsPage(activity: MainActivity) : SettingsPage(activit
         // 当前状态一行
         root.addView(TextView(activity).apply {
             text = ""
-            setTextColor(0xFF9AA1AE.toInt())
-            textSize = 11f
+            setTextColor(color(R.color.settings_secondary))
+            textSize = 14f
         }.also { tvLyricStatus = it }, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
         ).apply { topMargin = dp(4) })
@@ -102,6 +100,7 @@ internal class LyricsSettingsPage(activity: MainActivity) : SettingsPage(activit
         root.addView(Button(activity).apply {
             text = if (Prefs.lyricEnabled(activity)) "关闭歌词悬浮窗" else "启动歌词悬浮窗"
             textSize = 13f
+            minHeight = dp(48)
             setTextColor(ContextCompat.getColor(activity, R.color.settings_on_accent))
             background = ContextCompat.getDrawable(activity, R.drawable.bg_button_primary)
             setOnClickListener {
@@ -215,57 +214,43 @@ internal class LyricsSettingsPage(activity: MainActivity) : SettingsPage(activit
 
         root.getChildAt(root.childCount - 1).id = onlineRowId
 
-        // 歌词源 4 选 1
-        root.addView(TextView(activity).apply {
-            text = "歌词源"
-            setTextColor(0xFF9AA1AE.toInt())
-            textSize = 11f
-            setPadding(0, dp(8), 0, 0)
-        }, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-        ))
+        // 保留五种来源的配置值和顺序，每项占一整行以适配窄屏。
+        root.addView(text("歌词源", 14f, true), params(8))
         val srcLabels = listOf("自动", "网易云", "LRCLIB", "自定义", "QQ音乐")
-        val srcRow = LinearLayout(activity).apply { orientation = LinearLayout.HORIZONTAL }
-        val srcButtons = mutableListOf<Pair<Int, Button>>()
-        for ((i, lb) in srcLabels.withIndex()) {
-            val b = Button(activity).apply {
-                text = lb
-                textSize = 12f
-                minWidth = 0
-                minimumWidth = 0
-                setPadding(dp(8), 0, dp(8), 0)
-                setOnClickListener {
-                    Prefs.setLyricSource(activity, i)
-                    updateSourceButtons()
-                    sendLyricUpdate()
-                }
-            }
-            srcButtons += i to b
-            srcRow.addView(b, LinearLayout.LayoutParams(
-                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f
-            ).apply { marginStart = dp(4) })
+        val sourceIds = srcLabels.map { View.generateViewId() }
+        val sources = RadioGroup(activity).apply {
+            orientation = LinearLayout.VERTICAL
+            isSaveEnabled = false
         }
-        lyricSourceButtons = srcButtons
-        updateSourceButtons()
-        root.addView(srcRow, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-        ))
+        srcLabels.forEachIndexed { index, label ->
+            val choice = AppCompatRadioButton(activity).apply {
+                id = sourceIds[index]
+                isSaveEnabled = false
+                text = label
+                textSize = 15f
+                minHeight = dp(48)
+                setTextColor(color(R.color.settings_text))
+                supportButtonTintList = ContextCompat.getColorStateList(context, R.color.settings_choice_tint)
+                setBackgroundResource(R.drawable.bg_settings_choice)
+                setPaddingRelative(dp(10), dp(4), dp(10), dp(4))
+            }
+            sources.addView(choice, RadioGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { if (index > 0) topMargin = dp(6) })
+        }
+        sourceIds.getOrNull(Prefs.lyricSource(activity))?.let { sources.check(it) }
+        sources.setOnCheckedChangeListener { _, checkedId ->
+            val source = sourceIds.indexOf(checkedId)
+            if (source >= 0 && source != Prefs.lyricSource(activity)) {
+                Prefs.setLyricSource(activity, source)
+                sendLyricUpdate()
+            }
+        }
+        root.addView(sources, params())
 
         updateLyricStatus()
     }
 
-    private fun updateSourceButtons() {
-        val cur = Prefs.lyricSource(activity)
-        lyricSourceButtons.forEach { (i, btn) ->
-            val selected = i == cur
-            btn.background = ContextCompat.getDrawable(
-                activity,
-                if (selected) R.drawable.bg_button_primary else R.drawable.bg_field
-            )
-            btn.setTextColor(ContextCompat.getColor(activity,
-                if (selected) R.color.settings_on_accent else R.color.settings_secondary))
-        }
-    }
 
     private fun updateMapButtons() {
         val cur = Prefs.lyricMapMode(activity)
@@ -350,14 +335,9 @@ internal class LyricsSettingsPage(activity: MainActivity) : SettingsPage(activit
         val page = column()
         root.addView(page, params())
         heading(page, "歌词悬浮窗", "管理歌词窗口、显示效果与在线歌词来源")
-        val columns = row()
-        page.addView(columns, params())
         val left = column()
         val right = column()
-        columns.addView(left, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.51f))
-        columns.addView(right, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
-            marginStart = dp(22)
-        })
+        page.addView(settingsColumns(activity, left, right, firstWeight = 1.51f), params())
         var section = card(left, "窗口与运行")
         children.drop(1).forEach { view ->
             when {

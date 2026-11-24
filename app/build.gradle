@@ -15,7 +15,7 @@ android {
         minSdk 28
         targetSdk 34
         versionCode 470
-        versionName "4.7.0"
+        versionName "4.7.0-next"
         resConfigs "zh", "en"
 
         ndk {

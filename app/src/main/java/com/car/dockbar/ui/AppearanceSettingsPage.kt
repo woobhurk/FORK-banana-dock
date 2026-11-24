@@ -1,20 +1,26 @@
 package com.car.dockbar.ui
 
-import android.content.Context
-import android.graphics.Canvas
-import android.graphics.LinearGradient
-import android.graphics.Paint
-import android.graphics.Shader
+import android.content.res.Configuration
+import android.graphics.Color
+import android.graphics.drawable.ColorDrawable
+import android.graphics.drawable.GradientDrawable
+import android.text.SpannableString
+import android.text.Spanned
+import android.text.style.ForegroundColorSpan
+import android.text.style.RelativeSizeSpan
+import android.view.Gravity
 import android.view.View
 import android.widget.LinearLayout
+import android.widget.RadioGroup
 import android.widget.SeekBar
 import android.widget.TextView
+import androidx.appcompat.widget.AppCompatRadioButton
 import androidx.appcompat.widget.SwitchCompat
 import androidx.core.content.ContextCompat
 import com.car.dockbar.R
+import com.car.dockbar.util.GradientSpec
 import com.car.dockbar.util.Logx
 import com.car.dockbar.util.Prefs
-import android.content.res.Configuration
 
 class AppearanceSettingsPage(activity: MainActivity) : SettingsPage(activity, MainActivity.SECTION_APPEARANCE) {
     override val root: LinearLayout get() = findViewById(R.id.cardAppearance)
@@ -22,9 +28,14 @@ class AppearanceSettingsPage(activity: MainActivity) : SettingsPage(activity, Ma
     private lateinit var tvCorner: TextView
     private lateinit var tvIconScale: TextView
     private lateinit var tvTextScale: TextView
-    private var gradientPreview: GradientPreviewView? = null
+    private val solidPreviewFill = ColorDrawable()
+    private val gradientPreviewFill = GradientDrawable().apply {
+        orientation = GradientDrawable.Orientation.TOP_BOTTOM
+    }
+    private val gradientPreview = View(activity).apply {
+        id = R.id.settingsGradientPreview
+    }
     private var bgColorControlRows: List<View> = emptyList()
-    private val backgroundModeTiles = LinkedHashMap<BgMode, BackgroundModeTile>()
     private var blurRadiusRow: View? = null
     override fun create() {
         tvCorner = findViewById(R.id.tvCorner)
@@ -63,22 +74,11 @@ class AppearanceSettingsPage(activity: MainActivity) : SettingsPage(activity, Ma
         addSwitchRow(
             appearance, "底色跟随系统日夜模式",
             Prefs.bgFollowNight(this)
-        ) { Prefs.setBgFollowNight(this, it) }
+        ) {
+            Prefs.setBgFollowNight(this, it)
+            refreshGradientPreview()
+        }
         appearance.getChildAt(appearance.childCount - 1).id = R.id.settingsFollowNightRow
-
-        // （「空调温度」分区已按用户要求从设置页移除：
-        //   双温联动保留在副驾温度弹窗，HI/LO 阈值用车机默认 15.5~28.5℃）
-
-        // --- 底色（形态 + 参数）────────────────
-        appearance.addView(TextView(this).apply {
-            text = "底色"
-            setTextColor(0xFFEDEFF3.toInt())
-            textSize = 13f
-            typeface = AppFont.bold(this@AppearanceSettingsPage)
-            setPadding(0, dp(14), 0, 0)
-        }, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-        ))
 
         // 背景形态四选一；旧「模糊」入口用于透明灰色叠层试验，不采样屏幕。
         addBgModeRow(appearance)
@@ -110,13 +110,7 @@ class AppearanceSettingsPage(activity: MainActivity) : SettingsPage(activity, Ma
         blurRadiusRow?.visibility =
             if (Prefs.bgMode(this) == BgMode.BLUR) View.VISIBLE else View.GONE
 
-        // 实时预览条：按当前配置（含系统深浅色）画一条一模一样的渐变
-        val preview = GradientPreviewView(this).apply {
-            id = R.id.settingsGradientPreview
-            setPadding(0, dp(4), 0, 0)
-        }
-        gradientPreview = preview
-        appearance.addView(preview, LinearLayout.LayoutParams(
+        appearance.addView(gradientPreview, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, dp(56)
         ).apply { topMargin = dp(8) })
 
@@ -142,9 +136,8 @@ class AppearanceSettingsPage(activity: MainActivity) : SettingsPage(activity, Ma
         nightTransparencyRow.id = R.id.settingsNightTransparencyRow
         // ★ v3.13.16：按当前形态显隐相关控件（滑杆/预览条只属于纯色与渐变）
         bgColorControlRows = listOf(dayTransparencyRow, nightTransparencyRow)
-        refreshBgModeButtons(backgroundModeTiles, Prefs.bgMode(this))
-
-
+        refreshBgModeControls(Prefs.bgMode(this))
+        refreshGradientPreview()
     }
     override fun onResume() { refreshGradientPreview() }
     override fun onConfigurationChanged(newConfig: Configuration) { refreshGradientPreview() }
@@ -163,62 +156,120 @@ class AppearanceSettingsPage(activity: MainActivity) : SettingsPage(activity, Ma
         Logx.d("外观配置已保存：图标×${"%.2f".format(0.5f + findViewById<SeekBar>(R.id.sbIconScale).progress / 100f)} 文字×${"%.2f".format(0.5f + findViewById<SeekBar>(R.id.sbTextScale).progress / 100f)}（反色按背景自动）")
     }
     private fun refreshGradientPreview() {
-        val solid = Prefs.bgSolidMode(this)
-        gradientPreview?.update(
-            if (solid) Prefs.solidBgColor(this) else 0,
-            if (solid) null else Prefs.currentGradientColors(this)
-        )
-    }
-    private fun refreshBgModeButtons(buttons: Map<BgMode, BackgroundModeTile>, selected: BgMode) {
-        for ((mode, b) in buttons) {
-            b.isSelected = mode == selected
+        val fill = when (Prefs.bgMode(this)) {
+            BgMode.SOLID -> solidPreviewFill.apply { color = Prefs.solidBgColor(this@AppearanceSettingsPage) }
+            BgMode.GRADIENT -> gradientPreviewFill.apply {
+                colors = GradientSpec.verticalRampColors(Prefs.currentGradientColors(this@AppearanceSettingsPage))
+            }
+            BgMode.TRANSPARENT, BgMode.BLUR -> return
         }
+        if (gradientPreview.background !== fill) gradientPreview.background = fill
+    }
+    private fun refreshBgModeControls(selected: BgMode) {
         // 纯色 / 渐变显示日夜透明度；现有试验参数只在「模糊」入口下显示。
         val showColorControls = selected == BgMode.SOLID || selected == BgMode.GRADIENT
         for (row in bgColorControlRows) {
             row.visibility = if (showColorControls) View.VISIBLE else View.GONE
         }
-        gradientPreview?.visibility = if (showColorControls) View.VISIBLE else View.GONE
+        gradientPreview.visibility = if (showColorControls) View.VISIBLE else View.GONE
         blurRadiusRow?.visibility = if (selected == BgMode.BLUR) View.VISIBLE else View.GONE
     }
     private fun addBgModeRow(parent: LinearLayout) {
-        val row = LinearLayout(this).apply {
-            id = R.id.settingsBgModeRow
-            orientation = LinearLayout.HORIZONTAL
-        }
-        val buttons = backgroundModeTiles.apply { clear() }
-        BgMode.values().forEach { m ->
-            val b = BackgroundModeTile(this, m).apply {
-                setOnClickListener {
-                    Prefs.setBgMode(this@AppearanceSettingsPage, m)
-                    refreshBgModeButtons(buttons, m)
-                    refreshGradientPreview()
-                    reloadService()
+        val group = object : RadioGroup(this) {
+            override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+                // 按内容区宽度和字体缩放切换，避免四等分后挤压说明。
+                val wide = MeasureSpec.getSize(widthMeasureSpec) >=
+                    dp(500) * resources.configuration.fontScale.coerceAtLeast(1f)
+                val target = if (wide) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL
+                if (orientation != target) {
+                    orientation = target
+                    for (index in 0 until childCount) {
+                        val choice = getChildAt(index) as AppCompatRadioButton
+                        val swatch = choice.compoundDrawablesRelative[if (wide) 2 else 1]
+                        choice.gravity = Gravity.CENTER_VERTICAL or if (wide) Gravity.CENTER_HORIZONTAL else Gravity.START
+                        choice.setCompoundDrawablesRelative(null, if (wide) swatch else null,
+                            if (wide) null else swatch, null)
+                        (choice.layoutParams as RadioGroup.LayoutParams).apply {
+                            width = if (wide) 0 else LinearLayout.LayoutParams.MATCH_PARENT
+                            weight = if (wide) 1f else 0f
+                            marginStart = if (wide && index > 0) dp(8) else 0
+                            topMargin = if (!wide && index > 0) dp(8) else 0
+                            resolveLayoutDirection(layoutDirection)
+                        }
+                    }
                 }
+                super.onMeasure(widthMeasureSpec, heightMeasureSpec)
             }
-            buttons[m] = b
-            row.addView(b, LinearLayout.LayoutParams(
-                0, dp(142), 1f
-            ).apply { if (buttons.size > 1) marginStart = dp(16) })
+        }.apply {
+            id = R.id.settingsBgModeRow
+            orientation = LinearLayout.VERTICAL
+            isSaveEnabled = false
         }
-        parent.addView(row, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-        ))
-        refreshBgModeButtons(buttons, Prefs.bgMode(this))
+        val choices = BgMode.values().associateBy { View.generateViewId() }
+        for ((index, entry) in choices.entries.withIndex()) {
+            val (buttonId, mode) = entry
+            val caption = when (mode) {
+                BgMode.SOLID -> "统一底色"
+                BgMode.TRANSPARENT -> "不绘制底色"
+                BgMode.GRADIENT -> "上下渐变"
+                BgMode.BLUR -> "（测试中）"
+            }
+            val choice = AppCompatRadioButton(this).apply {
+                id = buttonId
+                isSaveEnabled = false
+                text = SpannableString("${mode.label}\n$caption").apply {
+                    val start = mode.label.length + 1
+                    setSpan(RelativeSizeSpan(0.83f), start, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                    setSpan(ForegroundColorSpan(ContextCompat.getColor(context, R.color.settings_secondary)),
+                        start, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                }
+                textSize = 16f
+                gravity = Gravity.CENTER_VERTICAL or Gravity.START
+                setTextColor(ContextCompat.getColor(context, R.color.settings_text))
+                supportButtonTintList = ContextCompat.getColorStateList(context, R.color.settings_choice_tint)
+                setBackgroundResource(R.drawable.bg_settings_choice)
+                setPaddingRelative(dp(8), dp(10), dp(8), dp(10))
+                minHeight = dp(48)
+                compoundDrawablePadding = dp(5)
+                setCompoundDrawablesRelative(null, null, modeSwatch(mode), null)
+            }
+            group.addView(choice, RadioGroup.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { if (index > 0) topMargin = dp(8) })
+        }
+        val selected = Prefs.bgMode(this)
+        group.check(choices.entries.first { it.value == selected }.key)
+        group.setOnCheckedChangeListener { _, checkedId ->
+            val mode = choices[checkedId] ?: return@setOnCheckedChangeListener
+            if (mode != Prefs.bgMode(this)) {
+                Prefs.setBgMode(this, mode)
+                refreshBgModeControls(mode)
+                refreshGradientPreview()
+                reloadService()
+            }
+        }
+        parent.addView(group, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
     }
-    private class GradientPreviewView(ctx: Context) : View(ctx) {
-        private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-        private var shader: Shader? = null
-        private var colors: IntArray? = null
-        private var solidColor: Int? = null
-        fun update(solidColor: Int, colors: IntArray?) { this.solidColor = solidColor; this.colors = colors; shader = null; invalidate() }
-        override fun onDraw(canvas: Canvas) {
-            val w = width.toFloat(); val h = height.toFloat(); val solid = solidColor
-            if (solid != null) { paint.shader = null; paint.color = solid; canvas.drawRect(0f, 0f, w, h, paint); return }
-            val cs = colors
-            if (cs == null || cs.size < 2) { paint.shader = null; paint.color = 0x59000000; canvas.drawRect(0f, 0f, w, h, paint); return }
-            if (shader == null && w > 0f && h > 0f) { val ramp = com.car.dockbar.util.GradientSpec.verticalRampColors(cs); shader = LinearGradient(0f, 0f, 0f, h, ramp, com.car.dockbar.util.GradientSpec.rampPositions(ramp.size), Shader.TileMode.CLAMP) }
-            paint.shader = shader; canvas.drawRect(0f, 0f, w, h, paint)
+
+    // 静态样块示意四种形态，实际颜色与透明度由下方预览显示。
+    private fun modeSwatch(mode: BgMode): GradientDrawable = GradientDrawable().apply {
+        val field = ContextCompat.getColor(this@AppearanceSettingsPage, R.color.settings_field)
+        val outline = ContextCompat.getColor(this@AppearanceSettingsPage, R.color.settings_control_outline)
+        cornerRadius = dp(6).toFloat()
+        setStroke(dp(1), outline)
+        when (mode) {
+            BgMode.SOLID -> setColor(0xFFD8E2E1.toInt())
+            BgMode.TRANSPARENT -> {
+                setColor(Color.TRANSPARENT)
+                setStroke(dp(1), outline, dp(4).toFloat(), dp(3).toFloat())
+            }
+            BgMode.GRADIENT -> {
+                orientation = GradientDrawable.Orientation.TOP_BOTTOM
+                colors = intArrayOf(field, 0xFFD8E2E1.toInt())
+            }
+            BgMode.BLUR -> setColor(0xFF687374.toInt())
         }
+        setBounds(0, 0, dp(68), dp(34))
     }
 }

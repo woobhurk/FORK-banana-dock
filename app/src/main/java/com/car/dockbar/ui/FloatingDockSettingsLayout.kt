@@ -34,28 +34,20 @@ internal class FloatingDockSettingsLayout(activity: Activity) : SettingsPageLayo
         page.removeAllViews()
         page.background = null
         page.setPadding(0, 0, 0, 0)
-        val header = row().apply { gravity = Gravity.CENTER_VERTICAL }
-        page.addView(header, params())
-        val title = column()
-        header.addView(title, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        heading(title, "悬浮 Dock 栏", "设置窗口尺寸、显示行为与运行权限")
-        header.addView(text("●  Dock 未运行", 14f).apply {
+        val badge = text("●  Dock 未运行", 14f).apply {
             id = R.id.settingsRuntimeBadge
-            setTextColor(color(R.color.warn))
+            setTextColor(color(R.color.settings_warning))
             background = ContextCompat.getDrawable(activity, R.drawable.bg_settings_nav_selected)
-            setPadding(dp(20), dp(13), dp(20), dp(13))
-        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-        val columns = row()
-        page.addView(columns, params(4))
+            setPadding(dp(12), dp(9), dp(12), dp(9))
+        }
+        heading(page, "悬浮 Dock 栏", "设置窗口尺寸、显示行为与运行权限", badge)
         val left = column()
         val right = column()
-        columns.addView(left, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.89f))
-        columns.addView(right, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f).apply {
-            marginStart = dp(22)
-        })
+        page.addView(settingsColumns(activity, left, right, firstWeight = 1.45f), params())
 
         val geometry = card(left, "布局与位置", "调整后点击“应用布局”保存并生效")
         dimensions.orientation = LinearLayout.HORIZONTAL
+        dimensions.gravity = Gravity.BOTTOM
         for (i in 0 until dimensions.childCount) {
             val field = dimensions.getChildAt(i) as? LinearLayout ?: continue
             (field.getChildAt(0) as? TextView)?.apply {
@@ -63,37 +55,33 @@ internal class FloatingDockSettingsLayout(activity: Activity) : SettingsPageLayo
                 setTextColor(color(R.color.settings_secondary))
             }
             (field.getChildAt(1) as? EditText)?.apply {
-                textSize = 28f
-                minHeight = dp(60)
-                setPadding(dp(18), dp(12), dp(18), dp(12))
-                background = ContextCompat.getDrawable(activity, R.drawable.bg_field)
-                (layoutParams as? LinearLayout.LayoutParams)?.topMargin = dp(12)
+                textSize = 20f
+                minHeight = dp(48)
+                setPadding(dp(8), dp(8), dp(8), dp(8))
+                setTextColor(color(R.color.settings_text))
+                setHintTextColor(color(R.color.settings_secondary))
+                background = ContextCompat.getDrawable(activity, R.drawable.bg_settings_input)
+                (layoutParams as? LinearLayout.LayoutParams)?.topMargin = dp(6)
             }
         }
         add(geometry, dimensions, 16)
         add(geometry, screenHeight, 0) // 保留隐藏的旧版配置项，供 saveWindow() 使用。
-        geometry.addView(text("推荐尺寸 1920 × 128 px", 14f, true), params(22))
-        val runtime = card(right, "运行与权限", "管理悬浮栏所需的运行权限").apply {
-            minimumHeight = dp(340)
-            // 随左栏拉伸，使此卡片底部与显示行为卡片的底部对齐。
-            layoutParams = (layoutParams as LinearLayout.LayoutParams).apply {
-                height = 0
-                weight = 1f
-            }
-        }
+        geometry.addView(text("推荐尺寸 1920 × 128 px", 13f, true), params(12))
+        val runtime = card(right, "运行与权限", "管理悬浮栏所需的运行权限")
         enabled.text = "启用悬浮 Dock"
-        enabled.textSize = 18f
-        enabled.minHeight = dp(52)
-        add(runtime, enabled)
+        enabled.textSize = 16f
+        enabled.minHeight = dp(48)
+        add(runtime, enabled, 8)
         divider(runtime)
         // 将详细诊断信息保留在诊断页，避免撑大运行概况卡片。
         val diagnostics = activity.findViewById<LinearLayout>(R.id.cardLogs)
         status.textSize = 14f
         status.setLineSpacing(dp(6).toFloat(), 1f)
+        status.setTextColor(color(R.color.settings_secondary))
         add(diagnostics, status, 14)
 
-        val access = runtime
-        permissions.forEach { permission ->
+        permissions.forEachIndexed { index, permission ->
+            if (index > 0) divider(runtime)
             permission.background = null
             permission.setPadding(0, 0, 0, 0)
             val label = permission.getChildAt(0) as TextView
@@ -101,9 +89,9 @@ internal class FloatingDockSettingsLayout(activity: Activity) : SettingsPageLayo
             val permissionHeader = row().apply { gravity = Gravity.CENTER_VERTICAL }
             take(label)
             take(value)
-            label.textSize = 16f
+            label.textSize = 15f
             label.setTextColor(color(R.color.settings_text))
-            value.textSize = 20f
+            value.textSize = 14f
             value.typeface = AppFont.bold(activity)
             permissionHeader.addView(label, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
             permissionHeader.addView(value, LinearLayout.LayoutParams(
@@ -112,42 +100,46 @@ internal class FloatingDockSettingsLayout(activity: Activity) : SettingsPageLayo
             for (i in 0 until permission.childCount) {
                 (permission.getChildAt(i) as? Button)?.apply {
                     textSize = 14f
-                    minHeight = dp(44)
-                    background = ContextCompat.getDrawable(activity, R.drawable.bg_settings_permission_button)
-                    setTextColor(color(R.color.settings_on_accent))
+                    minHeight = dp(48)
+                    background = ContextCompat.getDrawable(activity, R.drawable.bg_settings_secondary_button)
+                    setTextColor(ContextCompat.getColorStateList(activity, R.color.settings_action_text))
+                    (layoutParams as LinearLayout.LayoutParams).width = ViewGroup.LayoutParams.WRAP_CONTENT
                 }
             }
-            add(access, permission, 18)
+            add(runtime, permission, if (index == 0) 4 else 0)
         }
 
         val actions = row().apply { gravity = Gravity.CENTER_VERTICAL }
-        page.addView(actions, params(24))
-        actions.addView(text("尺寸调整后，点击“应用布局”生效", 13f, true),
-            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        val tip = text("尺寸调整后，点击“应用布局”生效", 13f, true)
+        page.addView(settingsColumns(activity, tip, actions, minWidthDp = 520,
+            gapDp = 12, wrapSecond = true).apply { gravity = Gravity.CENTER_VERTICAL }, params(18))
         actions.addView(Button(activity).apply {
             text = "恢复默认"
-            textSize = 15f
-            background = ContextCompat.getDrawable(activity, R.drawable.bg_settings_nav_idle)
-            setTextColor(color(R.color.settings_secondary))
+            textSize = 14f
+            background = ContextCompat.getDrawable(activity, R.drawable.bg_settings_secondary_button)
+            setTextColor(ContextCompat.getColorStateList(activity, R.color.settings_action_text))
             setOnClickListener {
                 // 仅重置这些输入框，仍需点击“应用布局”才会保存。
                 width.setText("1920")
                 activity.findViewById<EditText>(R.id.etHeight).setText("128")
                 activity.findViewById<EditText>(R.id.etMargin).setText("0")
             }
-        }, LinearLayout.LayoutParams(dp(136), dp(54)).apply { marginEnd = dp(24) })
-        actions.addView(take(apply), LinearLayout.LayoutParams(dp(303), dp(54)))
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            marginEnd = dp(8)
+        })
+        actions.addView(take(apply), LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
 
         val behavior = card(left, "显示与唤出", "调整上滑唤出与临时显示行为")
         side.removeAllViews()
         side.background = null
         side.setPadding(0, 0, 0, 0)
-        interaction.forEach { add(side, it, 12) }
-        add(behavior, side, 10)
+        interaction.forEach { add(side, it, 6) }
+        add(behavior, side, 8)
         divider(behavior)
         simulate.text = "模拟模式 · 不连接车控"
         simulate.textSize = 16f
-        simulate.minHeight = dp(52)
-        add(behavior, simulate, 12)
+        simulate.minHeight = dp(48)
+        add(behavior, simulate, 4)
     }
 }
