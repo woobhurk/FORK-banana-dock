@@ -239,12 +239,12 @@ class TemperaturePopup(
             orientation = LinearLayout.VERTICAL
         }
         if (isDriver) {
-            btnDefrostFront = funcBtn(R.drawable.ic_popup_defrost_front, "前挡加热") {
+            btnDefrostFront = funcBtn(R.drawable.ic_defrost, "前挡加热") {
                 VehicleController.toggleDefrostFront(ctx)
                 resetTimer()
             }
             btnDefrostRear = funcBtn(
-                R.drawable.ic_popup_defrost_rear, "后挡加热"
+                R.drawable.ic_rear_defrost, "后挡加热"
             ) {
                 VehicleController.toggleDefrostRear(ctx)
                 resetTimer()
