@@ -2,13 +2,9 @@
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="54dp"
     android:height="54dp"
-    android:viewportWidth="54"
-    android:viewportHeight="54">
-    <group
-        android:translateX="-5"
-        android:translateY="-5">
-        <path
-            android:fillColor="#FFFFFFFF"
-            android:pathData="M15 9q0-4.4 4-2.2l33 21q5.7 3.6 0 7.2l-33 21q-4 2.5-4-2.2Z" />
-    </group>
+    android:viewportWidth="64"
+    android:viewportHeight="64">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M10 8Q10 0 17 4.3l36.3 22.4q8.2 5.3 0 10.6L17 59.7Q10 64 10 56Z" />
 </vector>

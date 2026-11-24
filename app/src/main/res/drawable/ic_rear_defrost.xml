@@ -5,49 +5,11 @@
     android:viewportWidth="64"
     android:viewportHeight="64">
     <!-- 留出热流穿过玻璃的间隙，不绘制底色。 -->
-    <group>
-        <clip-path android:pathData="M0,0H64V64H0Z M17.4,14V29H46.8V14Z" />
-        <path
-            android:strokeColor="#FFFFFFFF"
-            android:strokeWidth="4.3"
-            android:strokeLineCap="round"
-            android:strokeLineJoin="round"
-            android:pathData="M10.5 23.5H53.5Q57 23.5 57 27v21q0 3.5-3.5 3.5h-43Q7 51.5 7 48V27q0-3.5 3.5-3.5Z" />
-    </group>
     <path
-        android:strokeColor="#FFFFFFFF"
-        android:strokeWidth="3.3"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:pathData="M22 40q-3-3.7 0-7.8t0-7.8q-2-3 0-6.4" />
-    <path
-        android:strokeColor="#FFFFFFFF"
-        android:strokeWidth="3.3"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:pathData="M18.1 21.5 22 17.4 26 21.5" />
-    <path
-        android:strokeColor="#FFFFFFFF"
-        android:strokeWidth="3.3"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:pathData="M32 40q-3-3.7 0-7.8t0-7.8q-2-3 0-6.4" />
-    <path
-        android:strokeColor="#FFFFFFFF"
-        android:strokeWidth="3.3"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:pathData="M28.1 21.5 32 17.4 36 21.5" />
-    <path
-        android:strokeColor="#FFFFFFFF"
-        android:strokeWidth="3.3"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:pathData="M42 40q-3-3.7 0-7.8t0-7.8q-2-3 0-6.4" />
-    <path
-        android:strokeColor="#FFFFFFFF"
-        android:strokeWidth="3.3"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:pathData="M38.1 21.5 42 17.4 46 21.5" />
+        android:fillColor="#FFFFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M8.5 14.8H55.5a4.5 4.5 0 0 1 4.5 4.5V49.3a4.5 4.5 0 0 1-4.5 4.5H8.5a4.5 4.5 0 0 1-4.5-4.5V19.3a4.5 4.5 0 0 1 4.5-4.5Z
+            M19.8 22.5l-4.7 6.59h2.9c0 1.95-.8 3.05-1.4 4.27-1.4 2.56-1.6 5.25.1 8.3a1.65 2.01 0 0 0 2.8-2.07c-1-1.71-.8-2.56.3-4.52 1-1.71 1.8-3.42 1.8-5.98h2.9Z
+            M32 22.5l-4.7 6.59h2.9c0 1.95-.8 3.05-1.4 4.27-1.4 2.56-1.6 5.25.1 8.3a1.65 2.01 0 0 0 2.8-2.07c-1-1.71-.8-2.56.3-4.52 1-1.71 1.8-3.42 1.8-5.98h2.9Z
+            M44.2 22.5l-4.7 6.59h2.9c0 1.95-.8 3.05-1.4 4.27-1.4 2.56-1.6 5.25.1 8.3a1.65 2.01 0 0 0 2.8-2.07c-1-1.71-.8-2.56.3-4.52 1-1.71 1.8-3.42 1.8-5.98h2.9Z" />
 </vector>
