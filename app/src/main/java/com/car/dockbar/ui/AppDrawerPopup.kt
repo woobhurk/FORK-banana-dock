@@ -36,6 +36,9 @@ class AppDrawerPopup(
     }
 
     private val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+    private val dismissal = DockPopupChrome.AnimatedDismissal(windowManager) {
+        Logx.e("快捷应用面板：移除失败", it)
+    }
     private var content: LinearLayout? = null
     var isShowing: Boolean = false
         private set
@@ -65,6 +68,7 @@ class AppDrawerPopup(
             dismiss()
             return
         }
+        dismissal.finish()
         val placement = DockPopupChrome.placement(context, anchor)
         scale = placement.scale(2f, widthDp = WIDTH_DP, heightDp = 190)
         val view = buildContent()
@@ -72,15 +76,24 @@ class AppDrawerPopup(
         view.setOnTouchListener { _, ev -> DockPopupChrome.onOutsideTouch(ev) { dismiss() } }
         val params = placement.params(view, dp(WIDTH_DP))
         runCatching {
+            view.alpha = 0f
             windowManager.addView(view, params)
             content = view
             isShowing = true
+            DockPopupChrome.fadeIn(view)
         }.onFailure {
             Logx.e("应用面板显示失败：${it.javaClass.simpleName} ${it.message}", it)
         }
     }
 
-    fun dismiss() {
+    fun dismiss() = dismiss(animated = true)
+
+    internal fun destroy() {
+        dismissal.finish()
+        dismiss(animated = false)
+    }
+
+    private fun dismiss(animated: Boolean) {
         val view = content ?: return
         content = null
         isShowing = false
@@ -88,7 +101,7 @@ class AppDrawerPopup(
         dragTo = -1
         gridHost = null
         for (i in slotViews.indices) slotViews[i] = null
-        runCatching { windowManager.removeView(view) }
+        dismissal.dismiss(view, animated)
         onDismissed?.invoke()
     }
 

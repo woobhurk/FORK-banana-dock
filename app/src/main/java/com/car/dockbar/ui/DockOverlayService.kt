@@ -566,7 +566,7 @@ class DockOverlayService : Service() {
         hvacPop = null
         airDirPop?.destroy()
         airDirPop = null
-        appDrawerPop?.dismiss()
+        appDrawerPop?.destroy()
         appDrawerPop = null
         airQualityPop?.destroy()
         airQualityPop = null

@@ -180,7 +180,7 @@ class HvacControlPopup(private val ctx: Context) {
         card.setOnTouchListener { _, ev -> DockPopupChrome.onOutsideTouch(ev) { hide() } }
         card.alpha = 0f
         wm?.addView(card, p)
-        card.animate().alpha(1f).setDuration(180L).start()
+        DockPopupChrome.fadeIn(card)
 
         // 订阅车控状态，实时刷新数值
         VehicleController.addListener(listener)
@@ -214,7 +214,7 @@ class HvacControlPopup(private val ctx: Context) {
         main.removeCallbacks(dismissRunnable)
         val box = content ?: return
         VehicleController.removeListener(listener)
-        box.animate().alpha(0f).setDuration(180L).withEndAction {
+        DockPopupChrome.fadeOut(box) {
             runCatching { wm?.removeViewImmediate(box) }
                 .onFailure { Logx.e("HvacControl：移除失败", it) }
             if (content === box) {
@@ -222,7 +222,7 @@ class HvacControlPopup(private val ctx: Context) {
                 params = null
             }
             onDismissed?.invoke()
-        }.start()
+        }
     }
 
     /** 服务销毁时调用，立刻清掉窗口，避免泄漏 */

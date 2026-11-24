@@ -337,7 +337,7 @@ class TemperaturePopup(
         card.setOnTouchListener { _, ev -> DockPopupChrome.onOutsideTouch(ev) { hide() } }
         card.alpha = 0f
         wm?.addView(card, p)
-        card.animate().alpha(1f).setDuration(180L).start()
+        DockPopupChrome.fadeIn(card)
 
         VehicleController.addListener(listener)
         render(VehicleController.state)
@@ -568,11 +568,11 @@ class TemperaturePopup(
         params = null
         acMaxButton = null
         VehicleController.removeListener(listener)
-        box.animate().alpha(0f).setDuration(180L).withEndAction {
+        DockPopupChrome.fadeOut(box) {
             runCatching { wm?.removeViewImmediate(box) }
                 .onFailure { Logx.e("温度弹窗：移除失败", it) }
             onDismissed?.invoke()
-        }.start()
+        }
     }
 
     fun destroy() {

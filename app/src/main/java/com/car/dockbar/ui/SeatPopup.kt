@@ -230,7 +230,7 @@ class SeatPopup(private val ctx: Context) {
         card.setOnTouchListener { _, ev -> DockPopupChrome.onOutsideTouch(ev) { hide() } }
         card.alpha = 0f
         wm?.addView(card, p)
-        card.animate().alpha(1f).setDuration(180L).start()
+        DockPopupChrome.fadeIn(card)
 
         VehicleController.addListener(listener)
         // ★ 打开时先读一次当前座椅记忆位置，让对应按钮保持高亮
@@ -306,11 +306,11 @@ class SeatPopup(private val ctx: Context) {
         content = null
         params = null
         VehicleController.removeListener(listener)
-        box.animate().alpha(0f).setDuration(180L).withEndAction {
+        DockPopupChrome.fadeOut(box) {
             runCatching { wm?.removeViewImmediate(box) }
                 .onFailure { Logx.e("座椅弹窗：移除失败", it) }
             onDismissed?.invoke()
-        }.start()
+        }
     }
 
     fun destroy() {

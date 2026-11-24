@@ -113,7 +113,7 @@ class AirDirectionPopup(private val ctx: Context) {
         card.setOnTouchListener { _, ev -> DockPopupChrome.onOutsideTouch(ev) { hide() } }
         card.alpha = 0f
         wm?.addView(card, p)
-        card.animate().alpha(1f).setDuration(180L).start()
+        DockPopupChrome.fadeIn(card)
 
         VehicleController.addListener(listener)
         render(VehicleController.state.airDirection)
@@ -146,11 +146,11 @@ class AirDirectionPopup(private val ctx: Context) {
         content = null
         params = null
         VehicleController.removeListener(listener)
-        box.animate().alpha(0f).setDuration(180L).withEndAction {
+        DockPopupChrome.fadeOut(box) {
             runCatching { wm?.removeViewImmediate(box) }
                 .onFailure { Logx.e("AirDirection：移除失败", it) }
             onDismissed?.invoke()
-        }.start()
+        }
     }
 
     fun destroy() {

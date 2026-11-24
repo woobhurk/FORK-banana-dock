@@ -73,12 +73,12 @@ class VolumePopup(private val ctx: Context) {
         main.removeCallbacks(refreshRunnable)
         VolumeEvents.removeListener(volumeListener)
         val box = content ?: return
-        box.animate().alpha(0f).setDuration(180L).withEndAction {
+        DockPopupChrome.fadeOut(box) {
             runCatching { wm?.removeViewImmediate(box) }
                 .onFailure { Logx.e("音量面板：移除失败", it) }
             if (content === box) content = null
             onDismissed?.invoke()
-        }.start()
+        }
     }
 
     fun destroy() {
@@ -110,7 +110,7 @@ class VolumePopup(private val ctx: Context) {
         card.setOnTouchListener { _, ev -> DockPopupChrome.onOutsideTouch(ev) { hide() } }
         card.alpha = 0f
         wm?.addView(card, p)
-        card.animate().alpha(1f).setDuration(180L).start()
+        DockPopupChrome.fadeIn(card)
         render()
         main.postDelayed(refreshRunnable, 500L)
         resetTimer()

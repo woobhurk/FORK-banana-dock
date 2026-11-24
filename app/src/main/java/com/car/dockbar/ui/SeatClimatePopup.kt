@@ -27,7 +27,10 @@ class SeatClimatePopup(private val ctx: Context) {
     private val main = Handler(Looper.getMainLooper())
     private val dismissRunnable = Runnable { hide() }
     private val choices = ArrayList<Choice>(14)
-    private var wm: WindowManager? = null
+    private val wm = ctx.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+    private val dismissal = DockPopupChrome.AnimatedDismissal(wm) {
+        Logx.e("座椅加热／通风弹窗：移除失败", it)
+    }
     private var content: LinearLayout? = null
     private var destroyed = false
     private var scale = 2f
@@ -46,8 +49,9 @@ class SeatClimatePopup(private val ctx: Context) {
                 resetTimer()
                 return@post
             }
+            dismissal.finish()
             runCatching { buildAndShow(anchor) }.onFailure {
-                hide()
+                hide(animated = false)
                 choices.clear()
                 Logx.e("座椅加热／通风弹窗：添加失败", it)
             }
@@ -57,8 +61,6 @@ class SeatClimatePopup(private val ctx: Context) {
     private fun buildAndShow(anchor: View?) {
         val placement = DockPopupChrome.placement(ctx, anchor)
         scale = placement.scale(2f, widthDp = 152, heightDp = 408)
-        val manager = ctx.getSystemService(Context.WINDOW_SERVICE) as WindowManager
-        wm = manager
         choices.clear()
         val card = DockPopupStyle.card(ctx, scale, "座椅加热／通风")
         val columns = LinearLayout(ctx).apply {
@@ -71,9 +73,9 @@ class SeatClimatePopup(private val ctx: Context) {
         card.setOnTouchListener { _, event -> DockPopupChrome.onOutsideTouch(event) { hide() } }
         val params = placement.params(card)
         card.alpha = 0f
-        manager.addView(card, params)
+        wm.addView(card, params)
         content = card
-        card.animate().alpha(1f).setDuration(180L).start()
+        DockPopupChrome.fadeIn(card)
         VehicleController.addListener(listener)
         VehicleController.setSeatClimatePopupVisible(ctx, true)
         resetTimer()
@@ -155,7 +157,9 @@ class SeatClimatePopup(private val ctx: Context) {
         }
     }
 
-    fun hide() {
+    fun hide() = hide(animated = true)
+
+    private fun hide(animated: Boolean) {
         // 同时取消尚未执行的显示和自动关闭任务。
         main.removeCallbacksAndMessages(null)
         val card = content ?: return
@@ -163,17 +167,15 @@ class SeatClimatePopup(private val ctx: Context) {
         choices.clear()
         VehicleController.removeListener(listener)
         VehicleController.setSeatClimatePopupVisible(ctx, false)
-        card.animate().cancel()
-        runCatching { wm?.removeViewImmediate(card) }
-            .onFailure { Logx.e("座椅加热／通风弹窗：移除失败", it) }
+        dismissal.dismiss(card, animated)
         onDismissed?.invoke()
     }
 
     fun destroy() {
         destroyed = true
         onDismissed = null
-        hide()
-        wm = null
+        dismissal.finish()
+        hide(animated = false)
     }
 
     private fun resetTimer() {

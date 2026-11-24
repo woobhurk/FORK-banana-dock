@@ -22,6 +22,8 @@ import com.car.dockbar.util.Prefs
  */
 object DockPopupChrome {
 
+    private const val FADE_DURATION_MS = 180L
+
     /**
      * 被「点外面」关掉后，片刻之内的 show() 一律忽略。
      *
@@ -58,6 +60,59 @@ object DockPopupChrome {
 
     private fun noteOutsideDismiss() {
         lastOutsideDismissAt = SystemClock.elapsedRealtime()
+    }
+
+    internal fun fadeIn(view: View) {
+        view.animate().alpha(1f).setDuration(FADE_DURATION_MS).start()
+    }
+
+    internal fun fadeOut(view: View, onEnd: Runnable) {
+        view.animate().alpha(0f).setDuration(FADE_DURATION_MS).withEndAction(onEnd).start()
+    }
+
+    /** 关闭时立即解除交互，重开或销毁时可提前移除正在淡出的窗口。 */
+    internal class AnimatedDismissal(
+        private val manager: WindowManager,
+        private val onRemoveFailure: (Throwable) -> Unit
+    ) {
+        private var closingView: View? = null
+
+        fun dismiss(view: View, animated: Boolean) {
+            finish()
+            if (!animated || !releaseInput(view)) {
+                view.animate().cancel()
+                remove(view)
+                return
+            }
+
+            closingView = view
+            fadeOut(view) {
+                if (closingView === view) {
+                    closingView = null
+                    remove(view)
+                }
+            }
+        }
+
+        fun finish() {
+            val view = closingView ?: return
+            closingView = null
+            view.animate().cancel()
+            remove(view)
+        }
+
+        private fun releaseInput(view: View): Boolean {
+            val params = view.layoutParams as WindowManager.LayoutParams
+            params.flags = (params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE) and
+                WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH.inv()
+            view.setOnTouchListener(null)
+            view.cancelPendingInputEvents()
+            return runCatching { manager.updateViewLayout(view, params) }.isSuccess
+        }
+
+        private fun remove(view: View) {
+            runCatching { manager.removeViewImmediate(view) }.onFailure(onRemoveFailure)
+        }
     }
 
     /** 同一次打开共享锚点与可用区域，避免窗口靠边规则和内容缩放各算一套。 */
