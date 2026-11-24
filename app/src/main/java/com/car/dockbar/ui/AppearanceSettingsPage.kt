@@ -22,9 +22,9 @@ import com.car.dockbar.util.GradientSpec
 import com.car.dockbar.util.Logx
 import com.car.dockbar.util.Prefs
 
-class AppearanceSettingsPage(activity: MainActivity) : SettingsPage(activity, MainActivity.SECTION_APPEARANCE) {
-    override val root: LinearLayout get() = findViewById(R.id.cardAppearance)
-    override fun buildLayout() { AppearanceSettingsLayout(activity).rebuild() }
+class AppearanceSettingsPage(activity: MainActivity, root: LinearLayout) :
+    SettingsPage(activity, MainActivity.SECTION_APPEARANCE, root) {
+    override fun buildLayout() { AppearanceSettingsLayout(activity).rebuild(root) }
     private lateinit var tvCorner: TextView
     private lateinit var tvIconScale: TextView
     private lateinit var tvTextScale: TextView
@@ -140,6 +140,7 @@ class AppearanceSettingsPage(activity: MainActivity) : SettingsPage(activity, Ma
         refreshGradientPreview()
     }
     override fun onResume() { refreshGradientPreview() }
+    override fun onShown() { refreshGradientPreview() }
     override fun onConfigurationChanged(newConfig: Configuration) { refreshGradientPreview() }
     private fun refreshAppearanceLabels() {
         tvCorner.text = "${findViewById<SeekBar>(R.id.sbCorner).progress} px"

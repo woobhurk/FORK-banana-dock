@@ -37,6 +37,14 @@
             android:textSize="12sp" />
     </LinearLayout>
 
+    <TextView
+        android:id="@+id/tvStatus"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:lineSpacingExtra="6dp"
+        android:textColor="@color/settings_secondary"
+        android:textSize="14sp" />
+
     <com.car.dockbar.ui.LogTailScrollView
         android:id="@+id/svLog"
         android:layout_width="match_parent"

@@ -1,41 +1,51 @@
 package com.car.dockbar.ui
 
 import android.content.res.Configuration
+import android.view.View
+import android.view.ViewGroup
 
 /**
  * 供 MainActivity 双栏容器使用的有序普通页面注册表。
  * 各页面自行管理控件与生命周期；宿主只负责页面选择和事件分发。
  */
-class SettingsPageRegistry(
-    private val pages: List<SettingsPage>
+internal class SettingsPageRegistry(
+    private val content: ViewGroup,
+    private val factories: Map<String, () -> SettingsPage>,
 ) {
-    private val byKey = pages.associateBy { it.key }
+    private val created = mutableMapOf<String, SettingsPage>()
     private var current: SettingsPage? = null
 
-    fun createAll() {
-        pages.forEach { it.create() }
-        pages.forEach { it.buildLayout() }
+    fun requirePage(key: String): SettingsPage = created.getOrPut(key) {
+        factories.getValue(key).invoke().also { page ->
+            page.root.visibility = View.GONE
+            page.create()
+            page.buildLayout()
+            content.addView(page.root)
+        }
     }
 
-    fun page(key: String): SettingsPage? = byKey[key]
+    fun createdPage(key: String): SettingsPage? = created[key]
 
-    fun show(key: String): SettingsPage? {
-        val next = byKey[key] ?: byKey[MainActivity.SECTION_OVERLAY] ?: return null
+    fun show(key: String): SettingsPage {
+        val next = requirePage(if (key in factories) key else MainActivity.SECTION_OVERLAY)
+        if (next !== current) current?.root?.visibility = View.GONE
+        next.root.visibility = View.VISIBLE
         current = next
         next.onShown()
         return next
     }
 
     fun onResume() {
-        pages.forEach { it.onResume() }
+        current?.onResume()
     }
 
     fun onConfigurationChanged(newConfig: Configuration) {
-        pages.forEach { it.onConfigurationChanged(newConfig) }
+        created.values.forEach { it.onConfigurationChanged(newConfig) }
     }
 
     fun onDestroy() {
-        pages.forEach { it.onDestroy() }
+        created.values.forEach { it.onDestroy() }
+        created.clear()
         current = null
     }
 }

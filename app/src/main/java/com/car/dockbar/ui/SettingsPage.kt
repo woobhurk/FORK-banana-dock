@@ -16,28 +16,26 @@ import android.widget.TextView
 import androidx.appcompat.widget.SwitchCompat
 import androidx.core.content.ContextCompat
 import com.car.dockbar.R
-import com.car.dockbar.util.IntentLauncher
-import com.car.dockbar.util.Logx
 import com.car.dockbar.util.Prefs
-import android.provider.Settings
 import android.content.res.Configuration
 import android.content.ContextWrapper
 import android.view.LayoutInflater
 
 /** 单个普通设置页面的生命周期管理基类。 */
-abstract class SettingsPage(protected val activity: MainActivity, val key: String) : ContextWrapper(activity) {
-    abstract val root: View
+abstract class SettingsPage(
+    protected val activity: MainActivity,
+    val key: String,
+    val root: LinearLayout,
+) : ContextWrapper(activity) {
     protected val main = Handler(Looper.getMainLooper())
     protected val layoutInflater: LayoutInflater get() = activity.layoutInflater
     protected val currentFocus: View? get() = activity.currentFocus
-    protected fun <T : View> findViewById(id: Int): T = activity.findViewById(id)
-    protected fun <T : View> findOptionalViewById(id: Int): T? = activity.findViewById(id)
+    protected fun <T : View> findViewById(id: Int): T = root.findViewById(id)
     open fun create() {}
     open fun buildLayout() {}
     open fun onShown() {}
     open fun onResume() {}
     open fun onConfigurationChanged(newConfig: Configuration) {}
-    protected open fun onServiceStateChanged() {}
     open fun onDestroy() { main.removeCallbacksAndMessages(null) }
     private var lastToastMs = 0L
 
@@ -233,12 +231,6 @@ abstract class SettingsPage(protected val activity: MainActivity, val key: Strin
             sendBroadcast(Intent(DockOverlayService.ACTION_RELOAD).setPackage(packageName))
         }
     }
-    protected fun stopServiceNow() {
-        runCatching {
-            startService(Intent(this, DockOverlayService::class.java).setAction(DockOverlayService.ACTION_STOP))
-        }
-        main.postDelayed({ onServiceStateChanged() }, 500)
-    }
 
     protected fun sendLyricUpdate() {
         runCatching {
@@ -251,58 +243,5 @@ abstract class SettingsPage(protected val activity: MainActivity, val key: Strin
         if (now - lastToastMs < 4000) return
         lastToastMs = now
         runCatching { android.widget.Toast.makeText(this, msg, android.widget.Toast.LENGTH_LONG).show() }
-    }
-
-    protected fun ensureServiceStarted() {
-        if (!Prefs.overlayEnabled(this)) return
-        if (!Settings.canDrawOverlays(this)) {
-            Logx.e("悬浮窗权限未授予 → Dock 不会显示。请点「授权悬浮窗权限」，打开后回到本页会自动出现")
-            toastOnce("请先授予悬浮窗权限，回来后 Dock 会自动出现")
-            return
-        }
-
-        if (DockOverlayService.alive) {
-            // 服务在跑就不再无条件重挂：
-            //   attached=false 也可能是「空闲自动隐藏」把 Dock 正常淡出了，
-            //   旧实现在这里一律 reload，导致一进主界面 Dock 就被强行拉回来，
-            //   与「空闲自动隐藏」功能互相打架。
-            if (!DockOverlayService.attached) {
-                Logx.d("服务在运行但悬浮窗未挂载，重试挂载…")
-                reloadService()
-            }
-            return
-        }
-        startService()
-    }
-
-    protected fun startService() {
-        Logx.d("启动 Dock 服务")
-        runCatching {
-            ContextCompat.startForegroundService(
-                this,
-                Intent(this, DockOverlayService::class.java).setAction(DockOverlayService.ACTION_START)
-            )
-        }.onFailure { Logx.e("启动失败", it) }
-        main.postDelayed({ onServiceStateChanged() }, 800)
-    }
-
-    protected fun stopLyricNow() {
-        LyricWindows.stop(this)
-        main.postDelayed({ onServiceStateChanged() }, 500)
-    }
-
-    protected fun ensureLyricStarted(): Boolean {
-        if (!Settings.canDrawOverlays(this)) {
-            Logx.e("歌词悬浮窗：没有悬浮窗权限")
-            toastOnce("请先授予悬浮窗权限，回来后会自动出现")
-            IntentLauncher.requestOverlayPermission(this)
-            return false
-        }
-        if (!LyricWindows.start(this)) {
-            toastOnce("启动失败，详情看日志")
-            return false
-        }
-        main.postDelayed({ onServiceStateChanged() }, 800)
-        return true
     }
 }

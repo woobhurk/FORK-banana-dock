@@ -14,16 +14,15 @@ import com.car.dockbar.model.DockEntries
 
 
 internal class IconsSettingsLayout(activity: Activity) : SettingsPageLayout(activity) {
-    fun rebuild() {
-        val page = activity.findViewById<LinearLayout>(R.id.settingsDockEntriesPage)
-        val manage = activity.findViewById<Button>(R.id.settingsManageDockEntries)
-        val summary = activity.findViewById<TextView>(R.id.settingsQuickAppsSummary)
-        val manageApps = activity.findViewById<Button>(R.id.settingsManageQuickApps)
-        val grid = activity.findViewById<View>(R.id.settingsQuickAppsGrid)
-        val fade = activity.findViewById<View>(R.id.settingsFadeDurationRow)
-        val longPress = activity.findViewById<View>(R.id.settingsLongPressDelayRow)
-        val auto = activity.findViewById<View>(R.id.settingsAutoFanRow)
-        val targets = activity.findViewById<EditText>(R.id.etSettingsPkg).parent as View
+    fun rebuild(page: LinearLayout) {
+        val manage = page.findViewById<Button>(R.id.settingsManageDockEntries)
+        val summary = page.findViewById<TextView>(R.id.settingsQuickAppsSummary)
+        val manageApps = page.findViewById<Button>(R.id.settingsManageQuickApps)
+        val grid = page.findViewById<View>(R.id.settingsQuickAppsGrid)
+        val fade = page.findViewById<View>(R.id.settingsFadeDurationRow)
+        val longPress = page.findViewById<View>(R.id.settingsLongPressDelayRow)
+        val auto = page.findViewById<View>(R.id.settingsAutoFanRow)
+        val targets = page.findViewById<EditText>(R.id.etSettingsPkg).parent as View
         take(targets)
         listOf(manage, summary, manageApps, grid, fade, longPress, auto).forEach { take(it) }
         page.removeAllViews()

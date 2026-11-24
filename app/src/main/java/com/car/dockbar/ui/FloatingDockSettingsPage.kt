@@ -10,22 +10,16 @@ import androidx.appcompat.widget.SwitchCompat
 import androidx.core.content.ContextCompat
 import com.car.dockbar.R
 import com.car.dockbar.media.MediaBridge
+import com.car.dockbar.util.AccessibilityKeep
 import com.car.dockbar.util.IntentLauncher
 import com.car.dockbar.util.Logx
 import com.car.dockbar.util.Prefs
-import com.car.dockbar.vehicle.VehicleController
 import android.provider.Settings
 
-class FloatingDockSettingsPage(activity: MainActivity) : SettingsPage(activity, MainActivity.SECTION_OVERLAY) {
-    override val root: LinearLayout get() = findViewById(R.id.cardOverlay)
-    override fun buildLayout() { FloatingDockSettingsLayout(activity).rebuild() }
-    override fun onServiceStateChanged() { updateStatus() }
-    override fun onShown() { refreshDockSwitches() }
-    override fun onDestroy() {
-        DockOverlayService.removeDockSelectionListener(refreshDockUi)
-        super.onDestroy()
-    }
-    private lateinit var tvStatus: TextView
+class FloatingDockSettingsPage(activity: MainActivity, root: LinearLayout) :
+    SettingsPage(activity, MainActivity.SECTION_OVERLAY, root) {
+    override fun buildLayout() { FloatingDockSettingsLayout(activity).rebuild(root) }
+    override fun onShown() { refreshStatus() }
     private lateinit var tvOverlayPerm: TextView
     private lateinit var tvNotifPerm: TextView
     private lateinit var tvNotifHint: TextView
@@ -33,13 +27,11 @@ class FloatingDockSettingsPage(activity: MainActivity) : SettingsPage(activity, 
     private lateinit var originalDockSwitch: SwitchCompat
     private lateinit var originalDockResult: TextView
     private var updatingDockSwitches = false
-    private val refreshDockUi: () -> Unit = {
+    internal fun refreshStatus() {
         refreshDockSwitches()
         updateStatus()
     }
-    private var notifWasOk = false
     override fun create() {
-        tvStatus = findViewById(R.id.tvStatus)
         tvOverlayPerm = findViewById(R.id.tvOverlayPerm)
         tvNotifPerm = findViewById(R.id.tvNotifPerm)
         tvNotifHint = findViewById(R.id.tvNotifHint)
@@ -60,17 +52,16 @@ class FloatingDockSettingsPage(activity: MainActivity) : SettingsPage(activity, 
                 DockOverlayService.requestDockSelection(this, useOriginal = true)
             } else {
                 Prefs.setOverlayEnabled(this, checked)
-                if (checked) startService() else stopServiceNow()
+                if (checked) activity.runtime.startDock() else activity.runtime.stopDock()
             }
         }
         originalDockSwitch.setOnCheckedChangeListener { _, checked ->
             if (!updatingDockSwitches) DockOverlayService.requestDockSelection(this, checked)
         }
-        DockOverlayService.addDockSelectionListener(refreshDockUi)
 
         findViewById<Button>(R.id.btnApplyWindow).setOnClickListener {
             saveWindow()
-            ensureServiceStarted()
+            activity.runtime.ensureDockStarted()
             reloadService()
             main.postDelayed({ updateStatus() }, 800)
         }
@@ -89,26 +80,6 @@ class FloatingDockSettingsPage(activity: MainActivity) : SettingsPage(activity, 
             { "%d 秒".format(it) },
             onChange = { Prefs.setSwipeShowDockMs(this, it * 1000L) }
         )
-
-        Thread {
-            runCatching { VehicleController.init(this) }
-                .onFailure { Logx.e("车控初始化异常", it) }
-            runCatching { MediaBridge.refresh(this) }
-            main.post { updateStatus() }
-        }.start()
-        updateStatus()
-    }
-    override fun onResume() {
-        refreshDockSwitches()
-        ensureServiceStarted()
-        val notifOk = MediaBridge.hasPermission(this)
-        if (notifOk && !notifWasOk) {
-            Logx.d("检测到通知使用权刚被授予 → 立即重绑媒体会话")
-            runCatching { MediaBridge.rebind(this) }
-        }
-        notifWasOk = notifOk
-        updateStatus()
-        main.postDelayed({ updateStatus(); ensureServiceStarted() }, 1500)
     }
 
     private fun refreshDockSwitches() {
@@ -139,16 +110,9 @@ class FloatingDockSettingsPage(activity: MainActivity) : SettingsPage(activity, 
     private fun updateStatus() {
         val overlayOk = Settings.canDrawOverlays(this)
         val notifOk = MediaBridge.hasPermission(this)
-        val st = VehicleController.state
         val running = DockOverlayService.alive
-        val mounted = DockOverlayService.attached
-        findOptionalViewById<TextView>(R.id.settingsRuntimeBadge)?.apply {
+        findViewById<TextView>(R.id.settingsRuntimeBadge).apply {
             text = if (running) "●  Dock 正在运行" else "●  Dock 未运行"
-            setTextColor(ContextCompat.getColor(this@FloatingDockSettingsPage,
-                if (running) R.color.settings_service_running else R.color.settings_warning))
-        }
-        findOptionalViewById<TextView>(R.id.settingsNavStatus)?.apply {
-            text = if (running) "●  Dock 服务已就绪" else "●  Dock 未运行"
             setTextColor(ContextCompat.getColor(this@FloatingDockSettingsPage,
                 if (running) R.color.settings_service_running else R.color.settings_warning))
         }
@@ -160,23 +124,12 @@ class FloatingDockSettingsPage(activity: MainActivity) : SettingsPage(activity, 
         tvNotifPerm.text = if (notifOk) "已授权" else "未授权"
         tvNotifPerm.setTextColor(permColor(notifOk))
         tvNotifHint.visibility = if (notifOk) View.GONE else View.VISIBLE
-
-        tvStatus.text = buildString {
-            append("服务：").append(
-                when {
-                    running && mounted -> "运行中，悬浮窗已显示"
-                    running && DockOverlayService.hiddenByApp ->
-                        "运行中，悬浮窗已隐藏（当前应用在「隐藏 Dock 名单」里，属正常）"
-                    running -> "运行中，但悬浮窗没挂上"
-                    else -> "未运行"
-                }
-            )
-            append("\n车控：").append(if (st.connected) "已连接" else "未连接")
-            append("    模式：").append(if (Prefs.simulate(this@FloatingDockSettingsPage)) "模拟" else "真实")
-            if (DockOverlayService.lastError.isNotBlank()) {
-                append("\n").append(DockOverlayService.lastError)
-            }
+        val accessibility = AccessibilityKeep.isEnabled(this)
+        findViewById<TextView>(R.id.tvAccPerm).apply {
+            text = if (accessibility) "已授权" else "未授权"
+            setTextColor(permColor(accessibility))
         }
+        findViewById<View>(R.id.tvAccHint).visibility = if (accessibility) View.GONE else View.VISIBLE
     }
     private fun permColor(ok: Boolean): Int = ContextCompat.getColor(
         this, if (ok) R.color.settings_service_running else R.color.settings_warning

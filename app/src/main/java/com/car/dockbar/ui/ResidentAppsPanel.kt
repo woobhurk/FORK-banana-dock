@@ -31,8 +31,9 @@ internal class ResidentAppsPanel(
     private val personalCount = text("", 13f, true)
     private val systemBody = column()
     private val personalBody = column()
-    private var currentPackages = emptyList<String>()
+    private var currentPackages: List<String>? = null
     private var currentSystems = emptySet<String>()
+    private var wasLoading = false
     private var searchQuery = ""
     private var rerender: (() -> Unit)? = null
 
@@ -130,24 +131,29 @@ internal class ResidentAppsPanel(
     }
 
     fun render(
-        apps: List<ResidentAppItem>, blacklist: Set<String>,
+        apps: List<ResidentAppItem>, blacklist: Set<String>, loading: Boolean,
         bindIcon: (String, ImageView) -> Unit,
         onRemove: (String) -> Unit
     ) {
-        rerender = { render(apps, blacklist, bindIcon, onRemove) }
+        rerender = { render(apps, blacklist, loading, bindIcon, onRemove) }
         val visible = ResidentAppList.blacklistedApps(apps, blacklist, searchQuery)
         val packages = visible.map { it.pkg }
         val systems = visible.filter { it.system }.mapTo(HashSet()) { it.pkg }
-        val rebuild = packages != currentPackages || systems != currentSystems || tiles.isEmpty()
+        val rebuild = packages != currentPackages || systems != currentSystems || wasLoading != loading
         if (rebuild) {
             currentPackages = packages
             currentSystems = systems
+            wasLoading = loading
             tiles.clear()
             fun populate(body: LinearLayout, list: List<ResidentAppItem>) {
                 body.removeAllViews()
                 if (list.isEmpty()) {
-                    body.addView(text(if (searchQuery.isBlank()) "暂无黑名单应用" else "没有匹配的黑名单应用", 14f, true).apply { gravity = Gravity.CENTER },
-                        lp(30))
+                    val message = when {
+                        loading -> "正在读取黑名单应用…"
+                        searchQuery.isBlank() -> "暂无黑名单应用"
+                        else -> "没有匹配的黑名单应用"
+                    }
+                    body.addView(text(message, 14f, true).apply { gravity = Gravity.CENTER }, lp(30))
                     return
                 }
                 val rows = maxOf(4, (list.size + 4) / 5)
@@ -167,15 +173,17 @@ internal class ResidentAppsPanel(
                     }
                 }
             }
-            populate(systemBody, visible.filter { it.system })
-            populate(personalBody, visible.filterNot { it.system })
+            val (systemApps, personalApps) = visible.partition { it.system }
+            populate(systemBody, systemApps)
+            populate(personalBody, personalApps)
         } else {
             // 后台补全应用名称时，仅更新标签，保留当前滚动位置。
             apps.forEach { tiles[it.pkg]?.updateLabel(it.label) }
         }
-        selectedCount.text = "黑名单共 ${apps.count { it.pkg in blacklist }} 个应用"
-        systemCount.text = "${visible.count { it.system }} 个应用"
-        personalCount.text = "${visible.count { !it.system }} 个应用"
+        selectedCount.text = if (loading) "正在读取黑名单应用…" else "黑名单共 ${apps.size} 个应用"
+        val systemSize = visible.count { it.system }
+        systemCount.text = "$systemSize 个应用"
+        personalCount.text = "${visible.size - systemSize} 个应用"
     }
 
     private fun column() = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }

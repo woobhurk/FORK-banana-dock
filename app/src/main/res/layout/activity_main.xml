@@ -52,17 +52,6 @@
         android:paddingEnd="28dp"
         android:paddingBottom="24dp"
         android:paddingTop="22dp">
-
-        <include layout="@layout/settings_page_overlay" />
-        <include layout="@layout/settings_page_appearance" />
-        <include layout="@layout/settings_icon_targets" />
-        <include layout="@layout/settings_page_logs" />
-        <include layout="@layout/settings_legacy_links" />
-        <include layout="@layout/settings_page_resident" />
-
-        <View
-            android:layout_width="match_parent"
-            android:layout_height="24dp" />
     </LinearLayout>
     </ScrollView>
 </com.car.dockbar.ui.SettingsHostLayout>

@@ -11,9 +11,11 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import com.car.dockbar.R
+import com.car.dockbar.util.CrashHandler
 import com.car.dockbar.util.Logx
 import com.car.dockbar.util.Prefs
 
@@ -21,6 +23,7 @@ import com.car.dockbar.util.Prefs
 class MainActivity : AppCompatActivity() {
     companion object {
         private const val UI_SCALE = 0.9f
+        private const val STATE_SECTION = "settings_section"
         const val EXTRA_SECTION = "section"
         const val SECTION_OVERLAY = "overlay"
         const val SECTION_APPEARANCE = "appearance"
@@ -41,22 +44,29 @@ class MainActivity : AppCompatActivity() {
         val key: String,
         val label: String,
         val icon: Int,
-        val factory: (MainActivity) -> SettingsPage
+        val layout: Int,
+        val factory: (MainActivity, LinearLayout) -> SettingsPage,
     )
 
     /** 在此注册或移除页面；控件与行为由各页面自身的控制器管理。 */
     private val pageSpecs = listOf(
-        PageSpec(SECTION_OVERLAY, "悬浮 Dock 栏", R.drawable.ic_nav_dock, ::FloatingDockSettingsPage),
-        PageSpec(SECTION_APPEARANCE, "外观与风格", R.drawable.ic_nav_home, ::AppearanceSettingsPage),
-        PageSpec(SECTION_ICONS, "Dock 图标管理", R.drawable.ic_nav_grid, ::IconsSettingsPage),
-        PageSpec(SECTION_LYRIC, "歌词悬浮窗", R.drawable.ic_nav_doc, ::LyricsSettingsPage),
-        PageSpec(SECTION_APPS, "隐藏 Dock 应用", R.drawable.ic_nav_list, ::ResidentSettingsPage),
-        PageSpec(SECTION_LOGS, "诊断与日志", R.drawable.ic_nav_pulse, ::LogsSettingsPage)
+        PageSpec(SECTION_OVERLAY, "悬浮 Dock 栏", R.drawable.ic_nav_dock, R.layout.settings_page_overlay, ::FloatingDockSettingsPage),
+        PageSpec(SECTION_APPEARANCE, "外观与风格", R.drawable.ic_nav_home, R.layout.settings_page_appearance, ::AppearanceSettingsPage),
+        PageSpec(SECTION_ICONS, "Dock 图标管理", R.drawable.ic_nav_grid, 0, ::IconsSettingsPage),
+        PageSpec(SECTION_LYRIC, "歌词悬浮窗", R.drawable.ic_nav_doc, 0, ::LyricsSettingsPage),
+        PageSpec(SECTION_APPS, "隐藏 Dock 应用", R.drawable.ic_nav_list, R.layout.settings_page_resident, ::ResidentSettingsPage),
+        PageSpec(SECTION_LOGS, "诊断与日志", R.drawable.ic_nav_pulse, R.layout.settings_page_logs, ::LogsSettingsPage),
     )
     private class NavRow(val container: View, val bar: View, val icon: ImageView, val label: TextView)
     private val navButtons = LinkedHashMap<String, NavRow>()
     private lateinit var pages: SettingsPageRegistry
     private var currentPage = SECTION_OVERLAY
+    internal val runtime = SettingsRuntime(this, ::refreshRuntimeStatus)
+    internal var settingsCrashReport: String? = null
+    internal val diagnosticExport = registerForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
+        val page = if (uri != null) pages.requirePage(SECTION_LOGS) else pages.createdPage(SECTION_LOGS)
+        (page as? LogsSettingsPage)?.onExportResult(uri)
+    }
 
     override fun attachBaseContext(newBase: Context) {
         super.attachBaseContext(scaledContext(newBase))
@@ -74,29 +84,42 @@ class MainActivity : AppCompatActivity() {
             }
         }
         val content = findViewById<LinearLayout>(R.id.llRoot)
-        val controllers = pageSpecs.map { it.factory(this) }
-        controllers.forEach { page ->
-            if (page.root.parent == null) content.addView(page.root,
-                LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(12) })
-        }
-        pages = SettingsPageRegistry(controllers)
-        pages.createAll()
+        pages = SettingsPageRegistry(content, pageSpecs.associate { spec ->
+            spec.key to {
+                val root = if (spec.layout != 0) {
+                    layoutInflater.inflate(spec.layout, content, false) as LinearLayout
+                } else LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+                    ).apply { topMargin = dp(12) }
+                }
+                spec.factory(this, root)
+            }
+        })
         buildNav()
-        mapOf(R.id.btnOpenApps to SECTION_APPS, R.id.btnOpenLyric to SECTION_LYRIC,
-            R.id.btnOpenLog to SECTION_LOGS).forEach { (id, key) ->
-            findViewById<View>(id).setOnClickListener { showPage(key) }
+        settingsCrashReport = CrashHandler.read(this)?.also { crash ->
+            CrashHandler.archiveForExport(this, crash)
+            CrashHandler.clear(this, clearExportArchive = false)
+            Logx.e("检测到上次闪退，已归档 Java 堆栈")
         }
-        val target = intent?.getStringExtra(EXTRA_SECTION)
-        showPage(target?.takeUnless { it.isBlank() } ?: SECTION_OVERLAY)
-        if (intent?.getBooleanExtra(EXTRA_PICK_APP_DRAWER, false) == true && target.isNullOrBlank()) {
-            (pages.page(SECTION_ICONS) as? IconsSettingsPage)?.requestAppDrawerPicker()
+        val target = intent?.getStringExtra(EXTRA_SECTION)?.takeUnless { it.isBlank() }
+        showPage(savedInstanceState?.getString(STATE_SECTION) ?: target ?: SECTION_OVERLAY)
+        if (savedInstanceState == null && target == null && intent?.getBooleanExtra(EXTRA_PICK_APP_DRAWER, false) == true) {
+            (pages.requirePage(SECTION_ICONS) as IconsSettingsPage).requestAppDrawerPicker()
         }
+        runtime.start()
     }
 
     override fun onResume() {
         super.onResume()
+        runtime.onResume()
         if (::pages.isInitialized) pages.onResume()
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putString(STATE_SECTION, currentPage)
+        super.onSaveInstanceState(outState)
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
@@ -105,6 +128,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        runtime.onDestroy()
         if (::pages.isInitialized) pages.onDestroy()
         super.onDestroy()
     }
@@ -115,12 +139,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showPage(key: String) {
-        val page = pages.page(key) ?: pages.page(SECTION_OVERLAY) ?: return
+        val page = pages.show(key)
         currentPage = page.key
-        val content = findViewById<LinearLayout>(R.id.llRoot)
-        for (i in 0 until content.childCount) content.getChildAt(i).visibility = View.GONE
-        page.root.visibility = View.VISIBLE
-        pages.show(page.key)
         val label = pageSpecs.first { it.key == currentPage }.label
         title = "设置 · $label"
         updateNavSelection()
@@ -128,6 +148,17 @@ class MainActivity : AppCompatActivity() {
             findViewById<ScrollView>(R.id.svContent).scrollTo(0, 0)
         }
         Logx.d("设置页：切到「$label」")
+    }
+
+    private fun refreshRuntimeStatus() {
+        val running = DockOverlayService.alive
+        val status = findViewById<TextView>(R.id.settingsNavStatus)
+        status.text = if (running) "●  Dock 服务已就绪" else "●  Dock 未运行"
+        status.setTextColor(ContextCompat.getColor(this,
+            if (running) R.color.settings_service_running else R.color.settings_warning))
+        (pages.createdPage(SECTION_OVERLAY) as? FloatingDockSettingsPage)?.refreshStatus()
+        (pages.createdPage(SECTION_LYRIC) as? LyricsSettingsPage)?.refreshStatus()
+        (pages.createdPage(SECTION_LOGS) as? LogsSettingsPage)?.refreshRuntimeStatus()
     }
 
     private fun buildNav() {

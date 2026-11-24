@@ -28,7 +28,8 @@ import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
 /** 负责图标卡片、启动目标及快捷应用交互，不处理其他设置页面。 */
-class IconsSettingsPage(activity: MainActivity) : SettingsPage(activity, MainActivity.SECTION_ICONS) {
+class IconsSettingsPage(activity: MainActivity, root: LinearLayout) :
+    SettingsPage(activity, MainActivity.SECTION_ICONS, root) {
     companion object {
         // 隐藏 Dock 应用页也需要加载图标；后续引入共享的已安装应用目录管理类时，
         // 可将这些辅助方法迁入其中，无需宿主提供回调。
@@ -36,25 +37,18 @@ class IconsSettingsPage(activity: MainActivity) : SettingsPage(activity, MainAct
         private val iconExecutor: ExecutorService = Executors.newSingleThreadExecutor()
     }
 
-    override val root = LinearLayout(this).apply {
-        id = R.id.settingsDockEntriesPage
-        orientation = LinearLayout.VERTICAL
-        background = ContextCompat.getDrawable(this@IconsSettingsPage, R.drawable.bg_card)
-        setPadding(dp(14), dp(14), dp(14), dp(14))
-    }
-    private var created = false
     private var destroyed = false
     private var tvAppDrawerSummary: TextView? = null
     private var btnAppDrawerSelection: Button? = null
     private var quickAppsGrid: LinearLayout? = null
-    private var targets: LinearLayout? = null
     private val dialogs = mutableSetOf<AlertDialog>()
 
     private data class AppDrawerCandidate(val app: AppDrawerApp, val isSystem: Boolean)
 
     override fun create() {
-        if (created) return
-        created = true
+        root.id = R.id.settingsDockEntriesPage
+        root.background = ContextCompat.getDrawable(this, R.drawable.bg_card)
+        root.setPadding(dp(14), dp(14), dp(14), dp(14))
         root.addView(TextView(this).apply {
             text = "Dock图标设置"
             setTextColor(ContextCompat.getColor(this@IconsSettingsPage, R.color.settings_text))
@@ -135,13 +129,7 @@ class IconsSettingsPage(activity: MainActivity) : SettingsPage(activity, MainAct
             separateValue = true
         )
         root.getChildAt(root.childCount - 1).id = R.id.settingsAutoFanRow
-        // 原样复用已有的静态控件，禁止在此再次加载 activity_main 布局。
-        // 旧版启动目标卡片在 XML 中隐藏，这里有意保留其可见性状态。
-        targets = activity.findViewById<EditText>(R.id.etSettingsPkg).parent as LinearLayout
-        targets?.let { card ->
-            (card.parent as? ViewGroup)?.removeView(card)
-            root.addView(card)
-        }
+        layoutInflater.inflate(R.layout.settings_icon_targets, root, true)
         loadTargets()
         root.findViewById<Button>(R.id.btnApplyEntries).setOnClickListener {
             saveTargets()
@@ -149,18 +137,18 @@ class IconsSettingsPage(activity: MainActivity) : SettingsPage(activity, MainAct
         }
     }
 
-    override fun buildLayout() { IconsSettingsLayout(activity).rebuild() }
+    override fun buildLayout() { IconsSettingsLayout(activity).rebuild(root) }
+
+    override fun onShown() = onResume()
 
     override fun onResume() {
-        if (!created || destroyed) return
+        if (destroyed) return
         refreshAppDrawerSelectionLabel()
-        root.findViewById<TextView>(R.id.settingsEntryCount)?.text =
-            "已添加 ${DockEntries.load(this).size} 项"
+        findViewById<TextView>(R.id.settingsEntryCount).text = "已添加 ${DockEntries.load(this).size} 项"
     }
 
     /** 响应 EXTRA_PICK_APP_DRAWER 的入口，无需在宿主中暴露选择器回调。 */
     fun requestAppDrawerPicker() {
-        if (!created) create()
         main.postDelayed({ if (!destroyed) chooseAppDrawerApps() }, 300)
     }
 

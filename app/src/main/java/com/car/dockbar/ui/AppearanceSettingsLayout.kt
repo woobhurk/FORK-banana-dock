@@ -13,22 +13,21 @@ import com.car.dockbar.R
 
 
 internal class AppearanceSettingsLayout(activity: Activity) : SettingsPageLayout(activity) {
-    fun rebuild() {
-        val page = activity.findViewById<LinearLayout>(R.id.cardAppearance)
-        val separators = activity.findViewById<SwitchCompat>(R.id.swSeparators)
-        val modeRow = activity.findViewById<View>(R.id.settingsBgModeRow)
-        val followNight = activity.findViewById<View>(R.id.settingsFollowNightRow)
-        val day = activity.findViewById<View>(R.id.settingsDayTransparencyRow)
-        val night = activity.findViewById<View>(R.id.settingsNightTransparencyRow)
-        val overlay = activity.findViewById<View>(R.id.settingsOverlayControls)
-        val preview = activity.findViewById<View>(R.id.settingsGradientPreview)
-        val musicHold = activity.findViewById<View>(R.id.settingsMusicScrollHoldRow)
+    fun rebuild(page: LinearLayout) {
+        val separators = page.findViewById<SwitchCompat>(R.id.swSeparators)
+        val modeRow = page.findViewById<View>(R.id.settingsBgModeRow)
+        val followNight = page.findViewById<View>(R.id.settingsFollowNightRow)
+        val day = page.findViewById<View>(R.id.settingsDayTransparencyRow)
+        val night = page.findViewById<View>(R.id.settingsNightTransparencyRow)
+        val overlay = page.findViewById<View>(R.id.settingsOverlayControls)
+        val preview = page.findViewById<View>(R.id.settingsGradientPreview)
+        val musicHold = page.findViewById<View>(R.id.settingsMusicScrollHoldRow)
         val scales = listOf(
             Triple("圆角半径", R.id.tvCorner, R.id.sbCorner),
             Triple("图标缩放", R.id.tvIconScale, R.id.sbIconScale),
             Triple("文字缩放", R.id.tvTextScale, R.id.sbTextScale))
         val scaleViews = scales.map { (_, valueId, seekId) ->
-            activity.findViewById<TextView>(valueId) to activity.findViewById<SeekBar>(seekId)
+            page.findViewById<TextView>(valueId) to page.findViewById<SeekBar>(seekId)
         }
         (listOf(separators, modeRow, followNight, day, night, overlay, preview, musicHold) +
             scaleViews.flatMap { listOf(it.first, it.second) }).forEach { take(it) }

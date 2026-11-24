@@ -12,28 +12,23 @@ import com.car.dockbar.media.LyricMonitor
 import com.car.dockbar.util.Logx
 import com.car.dockbar.util.Prefs
 
-internal class LyricsSettingsPage(activity: MainActivity) : SettingsPage(activity, MainActivity.SECTION_LYRIC) {
+internal class LyricsSettingsPage(activity: MainActivity, root: LinearLayout) :
+    SettingsPage(activity, MainActivity.SECTION_LYRIC, root) {
     private val appearanceHeadingId = View.generateViewId()
     private val onlineRowId = View.generateViewId()
     private var tvLyricStatus: TextView? = null
     private var btnLyricToggle: Button? = null
     private var lyricMapButtons: List<Pair<Int, Button>> = emptyList()
-    override val root: LinearLayout = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
 
-    override fun onShown() {
-        root.removeAllViews()
-        lyricMapButtons = emptyList()
+    override fun buildLayout() {
         addLyricSection(root)
         rebuildLyrics(root, 0)
-        updateLyricStatus()
     }
 
-    override fun onResume() {
-        if (Prefs.lyricEnabled(activity) && !LyricOverlayService.alive) ensureLyricStarted()
-        updateLyricStatus()
-    }
-    override fun onServiceStateChanged() { updateLyricStatus() }
+    override fun onShown() = refreshStatus()
+    override fun onResume() = refreshStatus()
 
+    internal fun refreshStatus() = updateLyricStatus()
 
     private fun color(id: Int) = ContextCompat.getColor(activity, id)
     private fun column() = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
@@ -106,12 +101,12 @@ internal class LyricsSettingsPage(activity: MainActivity) : SettingsPage(activit
             setOnClickListener {
                 if (Prefs.lyricEnabled(activity)) {
                     Prefs.setLyricEnabled(activity, false)
-                    stopLyricNow()
+                    activity.runtime.stopLyrics()
                     text = "启动歌词悬浮窗"
                     Logx.d("歌词悬浮窗已关闭")
                 } else {
                     Prefs.setLyricEnabled(activity, true)
-                    if (ensureLyricStarted()) text = "关闭歌词悬浮窗"
+                    if (activity.runtime.ensureLyricsStarted()) text = "关闭歌词悬浮窗"
                 }
                 updateLyricStatus()
             }

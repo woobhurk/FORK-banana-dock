@@ -14,19 +14,17 @@ import com.car.dockbar.R
 
 
 internal class FloatingDockSettingsLayout(activity: Activity) : SettingsPageLayout(activity) {
-    fun rebuild() {
-        val page = activity.findViewById<LinearLayout>(R.id.cardOverlay)
-        val side = activity.findViewById<LinearLayout>(R.id.colOverlaySide)
-        val width = activity.findViewById<EditText>(R.id.etWidth)
+    fun rebuild(page: LinearLayout) {
+        val side = page.findViewById<LinearLayout>(R.id.colOverlaySide)
+        val width = page.findViewById<EditText>(R.id.etWidth)
         val dimensions = width.parent.parent as LinearLayout
-        val enabled = activity.findViewById<SwitchCompat>(R.id.swEnabled)
-        val simulate = activity.findViewById<SwitchCompat>(R.id.swSimulate)
-        val status = activity.findViewById<TextView>(R.id.tvStatus)
-        val apply = activity.findViewById<Button>(R.id.btnApplyWindow)
-        val screenHeight = activity.findViewById<EditText>(R.id.etScreenH)
+        val enabled = page.findViewById<SwitchCompat>(R.id.swEnabled)
+        val simulate = page.findViewById<SwitchCompat>(R.id.swSimulate)
+        val apply = page.findViewById<Button>(R.id.btnApplyWindow)
+        val screenHeight = page.findViewById<EditText>(R.id.etScreenH)
         val permissionIds = listOf(R.id.tvOverlayPerm, R.id.tvNotifPerm, R.id.tvAccPerm)
-        val permissions = permissionIds.map { activity.findViewById<TextView>(it).parent as LinearLayout }
-        val known = setOf<View>(enabled, simulate, status, dimensions, apply, screenHeight)
+        val permissions = permissionIds.map { page.findViewById<TextView>(it).parent as LinearLayout }
+        val known = setOf<View>(enabled, simulate, dimensions, apply, screenHeight)
         val interaction = (0 until side.childCount).map { side.getChildAt(it) }.filter { it !in known }
 
         // 清空旧版“左侧权限、右侧表单”布局前，先将控件从原父容器中移除。
@@ -73,13 +71,6 @@ internal class FloatingDockSettingsLayout(activity: Activity) : SettingsPageLayo
         enabled.minHeight = dp(48)
         add(runtime, enabled, 8)
         divider(runtime)
-        // 将详细诊断信息保留在诊断页，避免撑大运行概况卡片。
-        val diagnostics = activity.findViewById<LinearLayout>(R.id.cardLogs)
-        status.textSize = 14f
-        status.setLineSpacing(dp(6).toFloat(), 1f)
-        status.setTextColor(color(R.color.settings_secondary))
-        add(diagnostics, status, 14)
-
         permissions.forEachIndexed { index, permission ->
             if (index > 0) divider(runtime)
             permission.background = null
@@ -121,8 +112,8 @@ internal class FloatingDockSettingsLayout(activity: Activity) : SettingsPageLayo
             setOnClickListener {
                 // 仅重置这些输入框，仍需点击“应用布局”才会保存。
                 width.setText("1920")
-                activity.findViewById<EditText>(R.id.etHeight).setText("128")
-                activity.findViewById<EditText>(R.id.etMargin).setText("0")
+                page.findViewById<EditText>(R.id.etHeight).setText("128")
+                page.findViewById<EditText>(R.id.etMargin).setText("0")
             }
         }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
             marginEnd = dp(8)

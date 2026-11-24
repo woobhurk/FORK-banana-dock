@@ -4,14 +4,13 @@ import android.app.AlertDialog
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.net.Uri
 import android.view.View
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
-import androidx.activity.result.ActivityResultLauncher
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.widget.SwitchCompat
 import androidx.core.content.ContextCompat
 import androidx.core.view.isVisible
@@ -37,14 +36,11 @@ import com.car.dockbar.vehicle.HvacValidationMode
 /**
  * 管理诊断、车控保护和运行日志设置。
  *
- * 卡片由 activity_main.xml 中引入的 [R.id.cardLogs] 提供。本页面管理其中的控件，
- * 包括 Logx 订阅和有容量上限的显示缓冲区。
- * MainActivity 仅负责创建、显示本页面及转发生命周期事件。
+ * 页面首次进入时创建，包括 Logx 订阅和有容量上限的显示缓冲区。
+ * 文档结果由宿主注册，进入本页时才创建日志控件。
  */
-internal class LogsSettingsPage(activity: MainActivity) :
-    SettingsPage(activity, MainActivity.SECTION_LOGS) {
-
-    override val root: LinearLayout = findViewById(R.id.cardLogs)
+internal class LogsSettingsPage(activity: MainActivity, root: LinearLayout) :
+    SettingsPage(activity, MainActivity.SECTION_LOGS, root) {
 
     private lateinit var layout: LogsSettingsLayout
     private lateinit var tvLog: TextView
@@ -65,7 +61,6 @@ internal class LogsSettingsPage(activity: MainActivity) :
     private var repairingPermissions = false
     private var refreshValidation: (() -> Unit)? = null
     private val validationExpiry = Runnable { refreshValidation?.invoke() }
-    private var exportLauncher: ActivityResultLauncher<String>? = null
     private var exportRunning = false
     private var exportButton: Button? = null
 
@@ -89,12 +84,6 @@ internal class LogsSettingsPage(activity: MainActivity) :
     }
 
     override fun create() {
-        if (exportLauncher != null) return
-        exportLauncher = activity.registerForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
-            if (uri == null) {
-                exportButton?.let { setActionEnabled(it, true) }
-            } else startExport(uri)
-        }
         tvLog = findViewById(R.id.tvLog)
         svLog = findViewById(R.id.svLog)
     }
@@ -114,14 +103,7 @@ internal class LogsSettingsPage(activity: MainActivity) :
         Logx.snapshot().forEach(::appendLog)
         appendLog("—— 打开配置页 ——")
 
-        // 启动判据仍按原语义清除；导出专用归档不参与熔断和上传判定。
-        val crash = CrashHandler.read(this)
-        if (crash != null) {
-            appendLog("⚠⚠ 上次闪退堆栈：\n$crash")
-            CrashHandler.archiveForExport(this, crash)
-            CrashHandler.clear(this, clearExportArchive = false)
-            Logx.e("检测到上次闪退，已把堆栈显示在下方日志区")
-        }
+        activity.settingsCrashReport?.let { appendLog("⚠⚠ 上次闪退堆栈：\n$it") }
         refreshPage()
     }
 
@@ -133,9 +115,12 @@ internal class LogsSettingsPage(activity: MainActivity) :
         synchronized(callbackLock) { destroyed = true }
         Logx.removeListener(logListener)
         super.onDestroy()
-        exportLauncher = null
         refreshValidation = null
         scrollPending = false
+    }
+
+    internal fun onExportResult(uri: Uri?) {
+        if (uri == null) exportButton?.let { setActionEnabled(it, true) } else startExport(uri)
     }
 
     /** 页面销毁后，后台任务不得再向旧页面的更新队列添加任务。 */
@@ -166,7 +151,25 @@ internal class LogsSettingsPage(activity: MainActivity) :
         }
     }
 
+    internal fun refreshRuntimeStatus() {
+        val running = DockOverlayService.alive
+        val service = when {
+            running && DockOverlayService.attached -> "运行中，悬浮窗已显示"
+            running && DockOverlayService.hiddenByApp -> "运行中，悬浮窗已隐藏（当前应用在「隐藏 Dock 名单」里，属正常）"
+            running -> "运行中，但悬浮窗没挂上"
+            else -> "未运行"
+        }
+        findViewById<TextView>(R.id.tvStatus).text = buildString {
+            append("服务：").append(service)
+            append("\n车控：").append(if (VehicleController.state.connected) "已连接" else "未连接")
+            append("    模式：").append(if (Prefs.simulate(this@LogsSettingsPage)) "模拟" else "真实")
+            val error = DockOverlayService.lastError
+            if (error.isNotBlank()) append('\n').append(error)
+        }
+    }
+
     private fun refreshOverview() {
+        refreshRuntimeStatus()
         val level = Prefs.safeLevel(this)
         val metrics = layout.metrics
         metrics[0].text = LogUploader.deviceId(this)
@@ -519,6 +522,7 @@ internal class LogsSettingsPage(activity: MainActivity) :
                 .setPositiveButton("清除记录") { _, _ ->
                     LogUploader.clearCrashEvidence(this)
                     CrashHandler.clear(this)
+                    activity.settingsCrashReport = null
                     Logx.d("崩溃取证已清除")
                     refreshOverview()
                 }
@@ -598,8 +602,7 @@ internal class LogsSettingsPage(activity: MainActivity) :
                 .setPositiveButton("选择保存位置") { _, _ ->
                     val name = "banana-dock-diagnostics-${SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())}.zip"
                     try {
-                        val launcher = exportLauncher ?: throw IllegalStateException("文档保存器尚未就绪")
-                        launcher.launch(name)
+                        activity.diagnosticExport.launch(name)
                     } catch (e: Exception) {
                         setActionEnabled(btn, true)
                         Logx.e("无法打开日志保存位置", e)
@@ -616,7 +619,7 @@ internal class LogsSettingsPage(activity: MainActivity) :
         }
     }
 
-    private fun startExport(uri: android.net.Uri) {
+    private fun startExport(uri: Uri) {
         if (exportRunning) return
         exportRunning = true
         val appContext = applicationContext

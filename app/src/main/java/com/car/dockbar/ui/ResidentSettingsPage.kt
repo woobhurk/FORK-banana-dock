@@ -1,301 +1,273 @@
 package com.car.dockbar.ui
 
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ApplicationInfo
+import android.content.pm.PackageManager
 import android.graphics.drawable.Drawable
 import android.provider.Settings
-import android.view.Gravity
-import android.view.View
+import android.util.LruCache
 import android.widget.Button
-import android.widget.CheckBox
 import android.widget.ImageView
 import android.widget.LinearLayout
-import android.widget.ScrollView
-import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import androidx.core.content.ContextCompat
+import androidx.recyclerview.widget.ConcatAdapter
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 import com.car.dockbar.R
 import com.car.dockbar.util.AccessibilityKeep
 import com.car.dockbar.util.Logx
 import com.car.dockbar.util.Prefs
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.Future
 
-/**
- * 管理隐藏 Dock 应用设置页面及已安装应用目录。
- *
- * 本页面仅将 Activity 作为上下文使用，不依赖宿主回调，
- * 因而由设置页面控制器承载时，黑名单规则仍可独立使用。
- */
-class ResidentSettingsPage(activity: MainActivity) : SettingsPage(activity, MainActivity.SECTION_APPS) {
-    override val root: LinearLayout
-        get() = findViewById(R.id.cardDockApps) ?: error("cardDockApps is not bound")
-
-    private val iconCache = HashMap<String, Drawable?>()
-    private val iconExecutor: ExecutorService = Executors.newSingleThreadExecutor {
-        Thread(it, "resident-app-icons").apply { isDaemon = true }
+/** 显示已保存的隐藏应用，按需读取添加弹窗所用的完整目录。 */
+class ResidentSettingsPage(activity: MainActivity, root: LinearLayout) :
+    SettingsPage(activity, MainActivity.SECTION_APPS, root) {
+    private val iconCache = LruCache<String, Drawable.ConstantState>(96)
+    private val metadataExecutor = Executors.newSingleThreadExecutor { task ->
+        Thread(task, "resident-app-metadata").apply { isDaemon = true }
     }
-
-    @Volatile
-    private var systemPkgCache: Set<String>? = null
-    @Volatile
-    private var residentInstalledApps: List<ResidentAppItem> = emptyList()
-    @Volatile
-    private var residentCatalogLoading = false
-    @Volatile
+    private val iconExecutor: ExecutorService = Executors.newSingleThreadExecutor { task ->
+        Thread(task, "resident-app-icons").apply { isDaemon = true }
+    }
+    private lateinit var panel: ResidentAppsPanel
+    private var requestedBlacklist: Set<String>? = null
+    private var blacklistTask: Future<*>? = null
+    private var blacklistedApps = emptyList<ResidentAppItem>()
+    private var catalog: List<ResidentAppItem>? = null
+    private var catalogLoading = false
+    private var packageRevision = 0
+    private val iconRevisions = mutableMapOf<String, Int>()
+    private var dialog: AlertDialog? = null
+    private var loadingCatalog = false
     private var destroyed = false
 
-    private var residentAppsPanel: ResidentAppsPanel? = null
+    private val packagesChanged = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            val pkg = intent.data?.schemeSpecificPart ?: return
+            packageRevision++
+            catalog = null
+            iconRevisions[pkg] = packageRevision
+            iconCache.remove(pkg)
+            if (requestedBlacklist?.contains(pkg) == true) {
+                requestedBlacklist = null
+                blacklistedApps = blacklistedApps.filterNot { it.pkg == pkg }
+                if (root.isShown) refreshBlacklist()
+            }
+        }
+    }
 
     override fun create() {
-        val page = root
         val host = findViewById<LinearLayout>(R.id.llDockApps)
         val addButton = findViewById<Button>(R.id.btnAddApp)
         val detectionButton = findViewById<Button>(R.id.btnGrantAccessibility)
-        residentAppsPanel = ResidentAppsPanel(activity, page, host, addButton, detectionButton)
+        panel = ResidentAppsPanel(activity, root, host, addButton, detectionButton)
         addButton.setOnClickListener { pickInstalledAppForDockList() }
         detectionButton.setOnClickListener { openAccessibilitySettings() }
-        findOptionalViewById<Button>(R.id.btnGrantAccessibilityDock)?.setOnClickListener {
-            openAccessibilitySettings()
-        }
-        prewarmSystemPkgs()
-        renderDockAppList()
+        ContextCompat.registerReceiver(activity, packagesChanged, IntentFilter().apply {
+            addAction(Intent.ACTION_PACKAGE_ADDED)
+            addAction(Intent.ACTION_PACKAGE_REMOVED)
+            addAction(Intent.ACTION_PACKAGE_CHANGED)
+            addAction(Intent.ACTION_PACKAGE_REPLACED)
+            addDataScheme("package")
+        }, ContextCompat.RECEIVER_NOT_EXPORTED)
     }
 
+    override fun onShown() = refreshPage()
 
-    override fun onShown() {
-        prewarmSystemPkgs()
-        renderDockAppList()
-        refreshAccStatus()
-    }
+    override fun onResume() = refreshPage()
 
-    override fun onResume() {
-        refreshAccStatus()
-        prewarmSystemPkgs(force = true)
+    private fun refreshPage() {
+        refreshBlacklist()
+        panel.setDetection(AccessibilityKeep.isEnabled(this))
     }
 
     override fun onDestroy() {
         destroyed = true
+        activity.unregisterReceiver(packagesChanged)
+        dialog?.dismiss()
+        metadataExecutor.shutdownNow()
         iconExecutor.shutdownNow()
         super.onDestroy()
     }
 
-    private fun prewarmSystemPkgs(force: Boolean = false) {
-        if (residentCatalogLoading || (!force && systemPkgCache != null)) return
-        residentCatalogLoading = true
-        Thread {
-            val installed = runCatching { packageManager.getInstalledApplications(0) }
-                .getOrDefault(emptyList())
+    private fun refreshBlacklist() {
+        val blacklist = Prefs.dockHideApps(this)
+        if (requestedBlacklist == blacklist) return
+        requestedBlacklist = blacklist
+        blacklistTask?.cancel(false)
+        if (blacklist.isEmpty()) {
+            blacklistedApps = emptyList()
+            renderBlacklist(blacklist, loading = false)
+            return
+        }
+
+        renderBlacklist(blacklist, loading = true)
+        val pm = packageManager
+        blacklistTask = metadataExecutor.submit {
             val nameOrder = AppDisplayNameOrder.comparator()
-            residentInstalledApps = installed.distinctBy { it.packageName }.map { info ->
-                ResidentAppItem(
-                    info.packageName,
-                    runCatching { packageManager.getApplicationLabel(info).toString() }
-                        .getOrDefault(info.packageName),
-                    (info.flags and ApplicationInfo.FLAG_SYSTEM) != 0
-                )
-            }.sortedWith(Comparator { left, right ->
+            val apps = blacklist.mapNotNull { pkg ->
+                val info = try {
+                    pm.getApplicationInfo(pkg, 0)
+                } catch (_: PackageManager.NameNotFoundException) {
+                    return@mapNotNull null
+                } catch (error: Exception) {
+                    Logx.e("读取黑名单应用失败：$pkg", error)
+                    return@mapNotNull null
+                }
+                appItem(pm, info)
+            }.sortedWith { left, right ->
                 val label = nameOrder.compare(left.label, right.label)
                 if (label != 0) label else left.pkg.compareTo(right.pkg)
-            })
-            systemPkgCache = installed
-                .filter { (it.flags and ApplicationInfo.FLAG_SYSTEM) != 0 }
-                .mapTo(HashSet()) { it.packageName }
-            residentCatalogLoading = false
+            }
             main.post {
-                if (!destroyed) renderDockAppList()
-            }
-        }.apply {
-            isDaemon = true
-            name = "resident-app-catalog"
-        }.start()
-    }
-
-    /**
-     * 在不阻塞主线程的情况下加载单个已安装应用图标，缓存与线程池由本页面管理。
-     * 后续若将图标加载集中管理，图标设置页应复用相同的辅助接口约定。
-     */
-    private fun loadAppIconAsync(pkg: String, image: ImageView) {
-        synchronized(iconCache) {
-            if (iconCache.containsKey(pkg)) {
-                iconCache[pkg]?.let(image::setImageDrawable)
-                return
-            }
-        }
-        image.tag = pkg
-        runCatching {
-            iconExecutor.execute {
-                val drawable = runCatching { packageManager.getApplicationIcon(pkg) }.getOrNull()
-                synchronized(iconCache) { iconCache[pkg] = drawable }
-                main.post {
-                    if (!destroyed && image.tag == pkg && drawable != null) {
-                        image.setImageDrawable(drawable)
-                    }
+                if (!destroyed && requestedBlacklist === blacklist) {
+                    blacklistedApps = apps
+                    renderBlacklist(blacklist, loading = false)
                 }
             }
-        }.onFailure { Logx.e("隐藏 Dock 应用图标加载失败", it) }
+        }
     }
 
-    private fun renderDockAppList() {
-        val panel = residentAppsPanel ?: return
-        val blacklist = Prefs.dockHideApps(this)
-        panel.render(residentInstalledApps, blacklist, ::loadAppIconAsync) { pkg ->
-            val updated = Prefs.dockHideApps(this).toMutableSet()
-            updated.remove(pkg)
+    private fun loadAppIconAsync(pkg: String, image: ImageView) {
+        image.tag = pkg
+        val cached = iconCache.get(pkg)
+        if (cached != null) {
+            image.setImageDrawable(cached.newDrawable(resources))
+            return
+        }
+        image.setImageResource(R.drawable.ic_car)
+        val revision = iconRevisions[pkg]
+        val pm = packageManager
+        iconExecutor.execute {
+            val drawable = runCatching { pm.getApplicationIcon(pkg) }.getOrNull() ?: return@execute
+            main.post {
+                if (!destroyed && revision == iconRevisions[pkg]) {
+                    drawable.constantState?.let { iconCache.put(pkg, it) }
+                    if (image.tag == pkg) image.setImageDrawable(drawable)
+                }
+            }
+        }
+    }
+
+    private fun renderBlacklist(blacklist: Set<String>, loading: Boolean) {
+        panel.render(blacklistedApps, blacklist, loading, ::loadAppIconAsync) { pkg ->
+            val updated = Prefs.dockHideApps(this) - pkg
             Prefs.setDockHideApps(this, updated)
             notifyAppsChanged()
-            renderDockAppList()
+            refreshBlacklist()
             Logx.d("已从 Dock 黑名单删除：$pkg → 默认显示")
         }
-        refreshAccStatus()
     }
 
     private fun pickInstalledAppForDockList() {
-        val loading = AlertDialog.Builder(this)
+        if (dialog != null) return
+        catalog?.let { showInstalledAppPicker(it); return }
+        showDialog(AlertDialog.Builder(this)
             .setTitle("正在读取已安装应用…")
-            .setCancelable(true)
-            .create()
-        loading.show()
-        loading.applyDockSafe()
-        Thread {
-            val pm = packageManager
-            val items = runCatching {
+            .setNegativeButton("取消", null)
+            .create(), waitingForCatalog = true).applyDockSafe()
+        loadCatalog()
+    }
+
+    private fun loadCatalog() {
+        if (catalogLoading) return
+        catalogLoading = true
+        val revision = packageRevision
+        val pm = packageManager
+        metadataExecutor.execute {
+            val result = runCatching {
                 pm.getInstalledApplications(0).asSequence()
-                    .map { info ->
-                        ResidentAppItem(
-                            pkg = info.packageName,
-                            label = runCatching { pm.getApplicationLabel(info).toString() }
-                                .getOrDefault(info.packageName),
-                            system = (info.flags and ApplicationInfo.FLAG_SYSTEM) != 0
-                        )
-                    }
-                    .distinctBy { it.pkg }
+                    .distinctBy { it.packageName }
+                    .map { appItem(pm, it) }
                     .sortedBy { it.label.lowercase() }
                     .toList()
-            }.getOrDefault(emptyList())
-            main.post {
-                runCatching { loading.dismiss() }
-                if (!destroyed) showInstalledAppPicker(items)
             }
-        }.start()
+            main.post {
+                if (destroyed) return@post
+                catalogLoading = false
+                if (revision != packageRevision) {
+                    if (loadingCatalog) loadCatalog()
+                    return@post
+                }
+                catalog = result.getOrNull()
+                if (loadingCatalog) {
+                    dialog?.dismiss()
+                    result.onSuccess(::showInstalledAppPicker).onFailure {
+                        Logx.e("读取已安装应用失败", it)
+                        toastOnce("没有读到已安装应用")
+                    }
+                }
+            }
+        }
     }
+
+    private fun appItem(pm: PackageManager, info: ApplicationInfo) = ResidentAppItem(
+        info.packageName,
+        runCatching { pm.getApplicationLabel(info).toString() }.getOrDefault(info.packageName),
+        (info.flags and ApplicationInfo.FLAG_SYSTEM) != 0,
+    )
 
     private fun showInstalledAppPicker(items: List<ResidentAppItem>) {
         if (items.isEmpty()) {
             toastOnce("没有读到已安装应用")
             return
         }
-        val twoCol = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(12), dp(4), dp(12), dp(8))
-        }
-        val (colSys, bodySys) = appListColumn("系统应用")
-        val (colUser, bodyUser) = appListColumn("个人应用")
-        twoCol.addView(settingsColumns(this, colSys, colUser, minWidthDp = 500))
-
         val choices = ResidentAppList.choices(items, Prefs.dockHideApps(this))
-        lateinit var dialog: AlertDialog
-        fun addRow(choice: ResidentAppChoice, body: LinearLayout) {
-            val candidate = choice.app
-            val alreadyAdded = choice.selected
-            val row = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                setBackgroundResource(R.drawable.bg_settings_choice)
-                isSelected = alreadyAdded
-                minimumHeight = dp(48)
-                setPadding(dp(8), dp(6), dp(8), dp(6))
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                ).apply { topMargin = dp(4) }
-                isFocusable = true
-                contentDescription = "${candidate.label}，${candidate.pkg}，${if (alreadyAdded) "已加入黑名单" else "点击加入黑名单"}"
-                if (!alreadyAdded) {
-                    setOnClickListener {
-                        runCatching { dialog.dismiss() }
-                        addDockListApp(candidate.pkg, candidate.label)
-                    }
-                }
-            }
-            row.addView(ImageView(this).apply {
-                layoutParams = LinearLayout.LayoutParams(dp(34), dp(34))
-                scaleType = ImageView.ScaleType.FIT_CENTER
-                setImageResource(R.drawable.ic_car)
-                loadAppIconAsync(candidate.pkg, this)
-            })
-            row.addView(CheckBox(this).apply {
-                text = "${candidate.label}\n${candidate.pkg}"
-                setTextColor(ContextCompat.getColor(this@ResidentSettingsPage, R.color.settings_text))
-                buttonTintList = ContextCompat.getColorStateList(this@ResidentSettingsPage, R.color.settings_choice_tint)
-                textSize = 14f
-                isChecked = alreadyAdded
-                isClickable = false
-                isFocusable = false
-                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-                setPadding(dp(8), 0, 0, 0)
-                layoutParams = LinearLayout.LayoutParams(
-                    0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f
-                )
-            })
-            body.addView(row)
+        val (systemApps, personalApps) = choices.partition { it.app.system }
+        val metrics = resources.displayMetrics
+        val width = (metrics.widthPixels * if (metrics.widthPixels < dp(600)) 0.90f else 0.70f).toInt()
+        val select: (ResidentAppItem) -> Unit = { app ->
+            dialog?.dismiss()
+            addDockListApp(app)
         }
-        choices.forEach { addRow(it, if (it.app.system) bodySys else bodyUser) }
-        listOf(bodySys to "（无系统应用）", bodyUser to "（无个人应用）").forEach { (body, tip) ->
-            if (body.childCount == 0) {
-                body.addView(TextView(this).apply {
-                    text = tip
-                    setTextColor(ContextCompat.getColor(this@ResidentSettingsPage, R.color.settings_secondary))
-                    textSize = 13f
-                    setPadding(dp(6), dp(6), 0, dp(6))
+        val system = ResidentAppPickerAdapter("系统应用", "无系统应用", systemApps, ::loadAppIconAsync, select)
+        val personal = ResidentAppPickerAdapter("个人应用", "无个人应用", personalApps, ::loadAppIconAsync, select)
+        fun list(rows: RecyclerView.Adapter<*>) = RecyclerView(this).apply {
+            layoutManager = LinearLayoutManager(context)
+            adapter = rows
+        }
+        val content = if (width >= dp(540)) {
+            LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                addView(list(system), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f))
+                addView(list(personal), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f).apply {
+                    marginStart = dp(12)
                 })
             }
-        }
-
-        val scroll = ScrollView(this).apply {
-            isFillViewport = true
-            addView(twoCol)
-        }
-        dialog = AlertDialog.Builder(this)
+        } else list(ConcatAdapter(system, personal))
+        showDialog(AlertDialog.Builder(this)
             .setTitle("选择要添加的应用")
-            .setView(scroll)
+            .setView(content)
             .setNegativeButton("取消", null)
-            .show()
-        val metrics = resources.displayMetrics
-        val widthFraction = if (metrics.widthPixels < dp(600)) 0.90f else 0.70f
-        val width = (metrics.widthPixels * widthFraction).toInt()
-        dialog.window?.setLayout(width, minOf(dp(434), (metrics.heightPixels * 0.9f).toInt()))
+            .create()).window?.setLayout(width, minOf(dp(434), (metrics.heightPixels * 0.9f).toInt()))
     }
 
-    private fun appListColumn(title: String): Pair<LinearLayout, LinearLayout> {
-        val column = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
+    private fun showDialog(window: AlertDialog, waitingForCatalog: Boolean = false): AlertDialog {
+        dialog = window
+        loadingCatalog = waitingForCatalog
+        window.setOnDismissListener {
+            if (dialog === window) {
+                dialog = null
+                loadingCatalog = false
+            }
         }
-        column.addView(TextView(this).apply {
-            text = title
-            setTextColor(ContextCompat.getColor(this@ResidentSettingsPage, R.color.settings_text))
-            textSize = 16f
-            typeface = AppFont.bold(this@ResidentSettingsPage)
-            setPadding(dp(4), dp(2), dp(4), dp(6))
-        })
-        val body = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            )
-        }
-        column.addView(body)
-        return column to body
+        window.show()
+        return window
     }
 
-    private fun addDockListApp(pkg: String, label: String) {
-        val blacklist = Prefs.dockHideApps(this).toMutableSet()
-        if (!blacklist.add(pkg)) return
-        Prefs.setDockHideApps(this, blacklist)
+    private fun addDockListApp(app: ResidentAppItem) {
+        val blacklist = Prefs.dockHideApps(this)
+        if (app.pkg in blacklist) return
+        Prefs.setDockHideApps(this, blacklist + app.pkg)
         notifyAppsChanged()
-        renderDockAppList()
-        Logx.d("已加入 Dock 黑名单：$label（$pkg）→ 隐藏")
+        refreshBlacklist()
+        Logx.d("已加入 Dock 黑名单：${app.label}（${app.pkg}）→ 隐藏")
     }
 
     private fun notifyAppsChanged() {
@@ -310,38 +282,6 @@ class ResidentSettingsPage(activity: MainActivity) : SettingsPage(activity, Main
         }.onFailure { Logx.e("打开无障碍设置失败", it) }
     }
 
-    private fun refreshAccStatus() {
-        AccessibilityKeep.restore(this)
-        val enabled = AccessibilityKeep.isEnabled(this)
-        residentAppsPanel?.setDetection(enabled)
-        val current = ForegroundTracker.currentPackage
-        val state = if (enabled) "已开启" else "未开启"
-        val tail = if (enabled) {
-            if (current != null) "（当前前台：$current）" else ""
-        } else {
-            " —— 名单需先开启无障碍才生效"
-        }
-        findOptionalViewById<TextView>(R.id.tvAccPerm)?.apply {
-            text = if (enabled) "已授权" else "未授权"
-            setTextColor(permColor(enabled))
-        }
-        findOptionalViewById<View>(R.id.btnGrantAccessibilityDock)?.visibility = View.VISIBLE
-        findOptionalViewById<TextView>(R.id.tvAccHint)?.visibility = if (enabled) View.GONE else View.VISIBLE
-        findOptionalViewById<TextView>(R.id.tvAccStatus)?.text = android.text.SpannableStringBuilder().apply {
-            append("前台应用检测：")
-            val start = length
-            append(state)
-            setSpan(
-                android.text.style.TypefaceSpan(AppFont.bold(this@ResidentSettingsPage)),
-                start, length, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
-            )
-            append(tail)
-        }
-    }
-
-    private fun permColor(enabled: Boolean): Int = ContextCompat.getColor(
-        this, if (enabled) R.color.settings_service_running else R.color.settings_warning
-    )
 
     private fun AlertDialog.applyDockSafe(): AlertDialog {
         if (Prefs.dockAtBottom(this@ResidentSettingsPage)) {
