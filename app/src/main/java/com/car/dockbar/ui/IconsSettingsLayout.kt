@@ -31,7 +31,7 @@ internal class IconsSettingsLayout(activity: Activity) : SettingsPageLayout(acti
         heading(page, "Dock 图标管理", "管理快捷入口、排列顺序与交互设置")
         val left = column()
         val right = column()
-        page.addView(settingsColumns(activity, left, right, firstWeight = 1.51f), params())
+        page.addView(settingsColumns(activity, left, right), params())
         val entries = card(left, "Dock 图标", "添加、删除图标，长按拖动调整排列顺序")
         val entryHeader = row().apply { gravity = Gravity.CENTER_VERTICAL }
         entryHeader.addView(take(entries.getChildAt(0)), LinearLayout.LayoutParams(

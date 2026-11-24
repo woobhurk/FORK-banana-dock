@@ -13,6 +13,8 @@ import android.view.View
 import android.view.WindowManager
 import android.widget.LinearLayout
 import android.widget.TextView
+import androidx.core.content.ContextCompat
+import com.car.dockbar.R
 import com.car.dockbar.util.Logx
 import com.car.dockbar.util.Prefs
 import com.car.dockbar.vehicle.VehicleController
@@ -326,7 +328,7 @@ class HvacControlPopup(private val ctx: Context) {
     }
 
     private fun divider(): View = View(ctx).apply {
-        setBackgroundColor(0x1FFFFFFF.toInt())
+        setBackgroundColor(ContextCompat.getColor(ctx, R.color.settings_outline))
         layoutParams = LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, dp(1)
         ).apply { topMargin = dp(6); bottomMargin = dp(6) }

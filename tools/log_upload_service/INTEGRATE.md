@@ -1,6 +1,6 @@
 # 接入指南：让其它应用也用这个日志服务器
 
-面向**其它 Android 应用**（或任何能发 HTTP POST 的程序）。**本项目（banana_dock / com.car.dockbar）
+面向**其它 Android 应用**（或任何能发 HTTP POST 的程序）。**本项目（Banana Dock / com.car.dockbar）
 本身不需要改任何代码** —— 它的日志仍然照旧落在服务端 `logs/` 根目录，两者互不影响。
 
 ---
@@ -173,7 +173,7 @@ curl "https://.../apps"
 **Q：服务端要改吗？**
 A：本次已改好并部署。其它应用直接带 `appId` 即可，不用为每个应用改服务端。
 
-**Q：本项目（banana_dock）的日志会乱吗？**
+**Q：Banana Dock 的日志会乱吗？**
 A：不会。它不带 `appId`，行为与改造前完全一致，历史日志也原样保留。
 
 **Q：appId 能改吗？**

@@ -41,7 +41,7 @@ internal class FloatingDockSettingsLayout(activity: Activity) : SettingsPageLayo
         heading(page, "悬浮 Dock 栏", "设置窗口尺寸、显示行为与运行权限", badge)
         val left = column()
         val right = column()
-        page.addView(settingsColumns(activity, left, right, firstWeight = 1.45f), params())
+        page.addView(settingsColumns(activity, left, right), params())
 
         val geometry = card(left, "布局与位置", "调整后点击“应用布局”保存并生效")
         dimensions.orientation = LinearLayout.HORIZONTAL

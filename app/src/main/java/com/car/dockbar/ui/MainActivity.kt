@@ -3,10 +3,12 @@ package com.car.dockbar.ui
 import android.content.Context
 import android.content.res.ColorStateList
 import android.content.res.Configuration
+import android.graphics.Outline
 import android.os.Bundle
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.view.ViewOutlineProvider
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -174,9 +176,16 @@ class MainActivity : AppCompatActivity() {
                 imageTintList = null
                 scaleType = ImageView.ScaleType.FIT_CENTER
                 setPadding(0, 0, 0, 0)
+                val radius = resources.getDimension(R.dimen.compact_surface_radius)
+                outlineProvider = object : ViewOutlineProvider() {
+                    override fun getOutline(view: View, outline: Outline) {
+                        outline.setRoundRect(0, 0, view.width, view.height, radius)
+                    }
+                }
+                clipToOutline = true
             }, LinearLayout.LayoutParams(dp(34), dp(34)))
             addView(TextView(this@MainActivity).apply {
-                text = "Banana_Dock"
+                text = getString(R.string.app_name)
                 textSize = 17f
                 setTextColor(ContextCompat.getColor(this@MainActivity, R.color.settings_text))
                 typeface = AppFont.bold(this@MainActivity)

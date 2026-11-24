@@ -333,7 +333,7 @@ class DockMusicView @JvmOverloads constructor(
 
     // 专辑图：原 0.80× 缩到 0.7×（即 0.56× 栏高），左移腾出空间给歌曲信息
     private val albumSize = (barHeightPx * 0.80f * 0.7f).toInt().coerceAtLeast(8)
-    private val albumRadius = albumSize * 0.16f
+    private val albumRadius = resources.getDimension(R.dimen.compact_surface_radius).coerceAtMost(albumSize * 0.16f)
     private val albumPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private val albumMatrix = Matrix()
     private val albumPlaceholder = (context.getDrawable(R.drawable.bg_album)!!.mutate() as GradientDrawable).apply {

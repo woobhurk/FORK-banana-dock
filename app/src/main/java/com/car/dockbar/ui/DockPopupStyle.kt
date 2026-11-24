@@ -15,18 +15,19 @@ import com.car.dockbar.R
 import com.car.dockbar.dock.DockMetrics
 import com.car.dockbar.util.Prefs
 
-/** 深色弹窗独立于主栏与设置主题；只共享外壳、标题和控件的视觉状态。 */
+/** Dock 弹窗共用青绿深色外壳、标题和控件状态，不随主栏反色。 */
 internal object DockPopupStyle {
     val text = 0xFFF2F4F8.toInt()
     val secondary = 0xFFA6AEBB.toInt()
     val unknown = 0xFFEAC58A.toInt()
-    private val defaultAccent = 0xFF4EA1FF.toInt()
 
     fun dp(context: Context, scale: Float, value: Int): Int =
         (value * scale * context.resources.displayMetrics.density).toInt()
 
     fun iconSizePx(context: Context, availablePx: Int): Int =
         DockMetrics.iconSizePx(context).coerceAtMost(availablePx.coerceAtLeast(1))
+
+    fun controlRadius(context: Context, scale: Float): Int = dp(context, minOf(scale, 1f), 8)
 
     fun card(context: Context, scale: Float, title: String) = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
@@ -38,7 +39,7 @@ internal object DockPopupStyle {
         addView(TextView(context).apply {
             text = title
             setTextColor(DockPopupStyle.text)
-            textSize = 16f * minOf(scale, 2f)
+            textSize = 22f * minOf(scale, 1f)
             typeface = AppFont.bold(context)
             gravity = Gravity.START or Gravity.CENTER_VERTICAL
             includeFontPadding = false
@@ -49,26 +50,30 @@ internal object DockPopupStyle {
     }
 
     fun accent(context: Context): Int {
-        val color = ColorUtils.setAlphaComponent(Prefs.accentColor(context), 255)
-        val surface = ContextCompat.getColor(context, R.color.dock_popup_surface)
-        return if (ColorUtils.calculateContrast(color, surface) >= 3.0) color else defaultAccent
+        val fallback = ContextCompat.getColor(context, R.color.settings_accent)
+        val color = ColorUtils.setAlphaComponent(Prefs.accentColor(context, fallback), 255)
+        val surface = ContextCompat.getColor(context, R.color.settings_card)
+        return if (ColorUtils.calculateContrast(color, surface) >= 3.0) color else fallback
     }
 
     fun selectedText(accent: Int): Int = ColorUtils.blendARGB(accent, Color.WHITE, 0.35f)
 
     fun selectedSurface(context: Context, scale: Float, accent: Int): GradientDrawable =
-        shape(dp(context, scale, 6), ColorUtils.setAlphaComponent(accent, 22)).apply {
-            setStroke(dp(context, scale, 1).coerceAtLeast(1), accent)
+        shape(controlRadius(context, scale), ColorUtils.setAlphaComponent(accent, 22)).apply {
+            setStroke(dp(context, 1f, 1).coerceAtLeast(1), accent)
         }
 
     fun controlBackground(context: Context, scale: Float, selectionAccent: Int? = accent(context)): RippleDrawable {
-        val mask = shape(dp(context, scale, 6), Color.WHITE)
-        val content = selectionAccent?.let { accent ->
-            StateListDrawable().apply {
-                addState(intArrayOf(android.R.attr.state_selected), selectedSurface(context, scale, accent))
-            }
+        val radius = controlRadius(context, scale)
+        val idle = shape(radius, ContextCompat.getColor(context, R.color.settings_field)).apply {
+            setStroke(dp(context, 1f, 1).coerceAtLeast(1), ContextCompat.getColor(context, R.color.settings_outline))
         }
-        return RippleDrawable(ColorStateList.valueOf(0x38FFFFFF), content, mask)
+        val content = if (selectionAccent == null) idle else StateListDrawable().apply {
+            addState(intArrayOf(android.R.attr.state_selected), selectedSurface(context, scale, selectionAccent))
+            addState(intArrayOf(), idle)
+        }
+        val ripple = ContextCompat.getColor(context, R.color.settings_ripple)
+        return RippleDrawable(ColorStateList.valueOf(ripple), content, shape(radius, Color.WHITE))
     }
 
     private fun shape(radius: Int, fill: Int) = GradientDrawable().apply {

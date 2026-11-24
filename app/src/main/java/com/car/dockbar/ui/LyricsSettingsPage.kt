@@ -332,7 +332,7 @@ internal class LyricsSettingsPage(activity: MainActivity, root: LinearLayout) :
         heading(page, "歌词悬浮窗", "管理歌词窗口、显示效果与在线歌词来源")
         val left = column()
         val right = column()
-        page.addView(settingsColumns(activity, left, right, firstWeight = 1.51f), params())
+        page.addView(settingsColumns(activity, left, right), params())
         var section = card(left, "窗口与运行")
         children.drop(1).forEach { view ->
             when {

@@ -45,7 +45,7 @@
         <item name="surfaceCardStroke">@color/settings_outline</item>
         <item name="surfaceCardRadius">12dp</item>
         <item name="surfaceFieldColor">@color/settings_field</item>
-        <item name="surfaceFieldRadius">8dp</item>
+        <item name="surfaceFieldRadius">@dimen/compact_surface_radius</item>
         <item name="primaryButtonColor">@color/settings_accent</item>
         <item name="primaryButtonRadius">8dp</item>
         <item name="primaryButtonText">@color/settings_on_accent</item>

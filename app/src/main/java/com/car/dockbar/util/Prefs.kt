@@ -96,7 +96,7 @@ object Prefs {
     fun setTextScale(ctx: Context, v: Float) = sp(ctx).edit().putFloat("text_scale", v).apply()
 
     /** 强调色（激活态，如内循环开启 / 通风开启） */
-    fun accentColor(ctx: Context) = sp(ctx).getInt("accent_color", 0xFF4EA1FF.toInt())
+    fun accentColor(ctx: Context, fallback: Int = 0xFF4EA1FF.toInt()) = sp(ctx).getInt("accent_color", fallback)
     fun setAccentColor(ctx: Context, v: Int) = sp(ctx).edit().putInt("accent_color", v).apply()
 
     // ---------------- 行为 ----------------

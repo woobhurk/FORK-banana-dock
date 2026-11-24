@@ -1,5 +1,6 @@
 package com.car.dockbar.ui
 
+import android.text.TextUtils
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -20,7 +21,13 @@ internal class ResidentAppPickerAdapter(
     private val select: (ResidentAppItem) -> Unit,
 ) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
     private class LabelHolder(val label: TextView) : RecyclerView.ViewHolder(label)
-    private class AppHolder(val row: View, val icon: ImageView, val check: CheckBox) : RecyclerView.ViewHolder(row)
+    private class AppHolder(
+        val row: View,
+        val icon: ImageView,
+        val name: TextView,
+        val pkg: TextView,
+        val check: CheckBox,
+    ) : RecyclerView.ViewHolder(row)
 
     override fun getItemCount() = 1 + choices.size.coerceAtLeast(1)
 
@@ -31,7 +38,7 @@ internal class ResidentAppPickerAdapter(
         fun dp(value: Int) = (value * context.resources.displayMetrics.density).toInt()
         if (viewType == 0) {
             return LabelHolder(TextView(context).apply {
-                setPadding(dp(8), dp(6), dp(8), dp(6))
+                setPadding(0, dp(6), 0, dp(4))
             })
         }
         val row = LinearLayout(context).apply {
@@ -44,18 +51,33 @@ internal class ResidentAppPickerAdapter(
             isFocusable = true
         }
         val icon = ImageView(context).apply { scaleType = ImageView.ScaleType.FIT_CENTER }
-        row.addView(icon, LinearLayout.LayoutParams(dp(34), dp(34)))
+        row.addView(icon, LinearLayout.LayoutParams(dp(30), dp(30)))
+        fun label(size: Float, color: Int) = TextView(context).apply {
+            textSize = size
+            setTextColor(ContextCompat.getColor(context, color))
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+            includeFontPadding = false
+        }
+        val name = label(14f, R.color.settings_text)
+        val pkg = label(11f, R.color.settings_secondary)
+        row.addView(LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(name)
+            addView(pkg)
+        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+            marginStart = dp(8)
+            marginEnd = dp(8)
+        })
         val check = CheckBox(context).apply {
-            textSize = 14f
-            setTextColor(ContextCompat.getColor(context, R.color.settings_text))
             buttonTintList = ContextCompat.getColorStateList(context, R.color.settings_choice_tint)
             isClickable = false
             isFocusable = false
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-            setPadding(dp(8), 0, 0, 0)
+            setPadding(0, 0, 0, 0)
         }
-        row.addView(check, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        return AppHolder(row, icon, check).also { holder ->
+        row.addView(check, LinearLayout.LayoutParams(dp(32), dp(32)))
+        return AppHolder(row, icon, name, pkg, check).also { holder ->
             row.setOnClickListener {
                 val choice = choices.getOrNull(holder.bindingAdapterPosition - 1)
                 if (choice != null && !choice.selected) select(choice.app)
@@ -68,7 +90,7 @@ internal class ResidentAppPickerAdapter(
             is LabelHolder -> with(holder.label) {
                 val heading = position == 0
                 text = if (heading) title else emptyLabel
-                textSize = if (heading) 16f else 13f
+                textSize = if (heading) 14f else 13f
                 typeface = if (heading) AppFont.bold(context) else AppFont.regular(context)
                 setTextColor(ContextCompat.getColor(context,
                     if (heading) R.color.settings_text else R.color.settings_secondary))
@@ -77,7 +99,8 @@ internal class ResidentAppPickerAdapter(
             is AppHolder -> {
                 val choice = choices[position - 1]
                 val app = choice.app
-                holder.check.text = "${app.label}\n${app.pkg}"
+                holder.name.text = app.label
+                holder.pkg.text = app.pkg
                 holder.check.isChecked = choice.selected
                 holder.row.isSelected = choice.selected
                 holder.row.isClickable = !choice.selected

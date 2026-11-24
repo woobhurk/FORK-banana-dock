@@ -10,6 +10,7 @@ import android.graphics.drawable.Drawable
 import android.provider.Settings
 import android.util.LruCache
 import android.widget.Button
+import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import androidx.appcompat.app.AlertDialog
@@ -222,6 +223,7 @@ class ResidentSettingsPage(activity: MainActivity, root: LinearLayout) :
         val (systemApps, personalApps) = choices.partition { it.app.system }
         val metrics = resources.displayMetrics
         val width = (metrics.widthPixels * if (metrics.widthPixels < dp(600)) 0.90f else 0.70f).toInt()
+        val twoColumns = width >= dp(540)
         val select: (ResidentAppItem) -> Unit = { app ->
             dialog?.dismiss()
             addDockListApp(app)
@@ -232,20 +234,26 @@ class ResidentSettingsPage(activity: MainActivity, root: LinearLayout) :
             layoutManager = LinearLayoutManager(context)
             adapter = rows
         }
-        val content = if (width >= dp(540)) {
+        val lists = if (twoColumns) {
             LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 addView(list(system), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f))
                 addView(list(personal), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f).apply {
-                    marginStart = dp(12)
+                    marginStart = dp(16)
                 })
             }
         } else list(ConcatAdapter(system, personal))
-        showDialog(AlertDialog.Builder(this)
-            .setTitle("选择要添加的应用")
-            .setView(content)
-            .setNegativeButton("取消", null)
-            .create()).window?.setLayout(width, minOf(dp(434), (metrics.heightPixels * 0.9f).toInt()))
+        val content = activity.layoutInflater.inflate(R.layout.dialog_resident_app_picker, null) as LinearLayout
+        val inset = dp(if (twoColumns) 24 else 16)
+        content.setPaddingRelative(inset, content.paddingTop, inset, content.paddingBottom)
+        content.findViewById<FrameLayout>(R.id.residentPickerLists).addView(lists,
+            FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+        val picker = AlertDialog.Builder(this).setView(content).create()
+        content.findViewById<Button>(R.id.residentPickerCancel).setOnClickListener { picker.dismiss() }
+        showDialog(picker).window?.apply {
+            setBackgroundDrawable(ContextCompat.getDrawable(this@ResidentSettingsPage, R.drawable.bg_card))
+            setLayout(width, minOf(dp(434), (metrics.heightPixels * 0.9f).toInt()))
+        }
     }
 
     private fun showDialog(window: AlertDialog, waitingForCatalog: Boolean = false): AlertDialog {

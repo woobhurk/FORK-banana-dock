@@ -5,7 +5,7 @@
         <item name="surfaceCardStroke">#2A2E36</item>
         <item name="surfaceCardRadius">14dp</item>
         <item name="surfaceFieldColor">#2A2E36</item>
-        <item name="surfaceFieldRadius">8dp</item>
+        <item name="surfaceFieldRadius">@dimen/compact_surface_radius</item>
         <item name="primaryButtonColor">#3D8BFF</item>
         <item name="primaryButtonRadius">8dp</item>
         <item name="primaryButtonText">#FFFFFF</item>

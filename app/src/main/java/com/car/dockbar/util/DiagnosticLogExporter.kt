@@ -3,6 +3,7 @@ package com.car.dockbar.util
 import android.content.Context
 import android.net.Uri
 import android.os.Build
+import com.car.dockbar.R
 import com.car.dockbar.vehicle.HvacChannelEvidence
 import com.car.dockbar.vehicle.HvacDiagnostics
 import java.io.BufferedOutputStream
@@ -77,7 +78,7 @@ internal object DiagnosticLogExporter {
     private fun buildMetadata(
         context: Context, stamp: String, coverage: Coverage, hasEvicted: Boolean?, missing: List<String>
     ): String = buildString {
-        appendLine("Banana_Dock 诊断与运行日志导出")
+        appendLine("${context.getString(R.string.app_name)} 诊断与运行日志导出")
         appendLine("生成时间：$stamp")
         appendLine("包名：${context.packageName}")
         appendLine("版本：${appVersion(context)}")

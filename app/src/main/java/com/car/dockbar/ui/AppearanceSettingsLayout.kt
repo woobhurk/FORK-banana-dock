@@ -53,7 +53,7 @@ internal class AppearanceSettingsLayout(activity: Activity) : SettingsPageLayout
 
         val left = column()
         val right = column()
-        page.addView(settingsColumns(activity, left, right, firstWeight = 1.51f), params())
+        page.addView(settingsColumns(activity, left, right), params())
         val sizing = card(left, "尺寸与比例", "分别调整圆角、图标和文字大小")
         scales.forEachIndexed { index, (label, _, _) ->
             if (index > 0) divider(sizing)

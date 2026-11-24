@@ -2,7 +2,6 @@ package com.car.dockbar.ui
 
 import android.content.Context
 import android.graphics.Canvas
-import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
 import android.os.Handler
@@ -15,6 +14,7 @@ import android.view.WindowManager
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.ImageView
+import androidx.core.content.ContextCompat
 import androidx.core.graphics.ColorUtils
 import com.car.dockbar.R
 import com.car.dockbar.media.CabinVolume
@@ -234,20 +234,22 @@ class VolumePopup(private val ctx: Context) {
                 invalidate()
             }
 
-        private val track = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF353B45.toInt() }
+        private val track = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = ContextCompat.getColor(context, R.color.settings_field)
+        }
         private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            val tint = ColorUtils.blendARGB(DockPopupStyle.accent(context), 0xFF093668.toInt(), 0.5f)
-            color = if (ColorUtils.calculateContrast(Color.WHITE, tint) >= 4.5) tint else 0xFF276AB1.toInt()
+            // 与空轨混色，保证浅色数字在不同强调色下均可读。
+            color = ColorUtils.blendARGB(track.color, DockPopupStyle.accent(context), 0.32f)
         }
         private val num = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.WHITE
+            color = DockPopupStyle.text
             textAlign = Paint.Align.CENTER
             typeface = AppFont.bold(context)
         }
         private val rect = RectF()
 
         override fun onDraw(canvas: Canvas) {
-            val r = dp(8).toFloat()
+            val r = DockPopupStyle.controlRadius(context, scale).toFloat()
             rect.set(0f, 0f, width.toFloat(), height.toFloat())
             canvas.drawRoundRect(rect, r, r, track)
             val span = (value.toFloat() / max.toFloat()).coerceIn(0f, 1f)

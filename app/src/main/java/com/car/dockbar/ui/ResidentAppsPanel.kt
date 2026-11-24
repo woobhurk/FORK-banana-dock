@@ -2,6 +2,7 @@ package com.car.dockbar.ui
 
 import android.app.Activity
 import android.content.Context
+import android.graphics.drawable.InsetDrawable
 import android.text.Editable
 import android.text.TextWatcher
 import android.view.Gravity
@@ -105,20 +106,26 @@ internal class ResidentAppsPanel(
             heading.addView(count)
             group.addView(heading)
             group.addView(text(description, 13f, true), lp(12))
-            val scroll = ScrollView(activity).apply {
+            val maxHeight = dp(520)
+            val scroll = object : ScrollView(activity) {
+                override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+                    val height = if (MeasureSpec.getMode(heightMeasureSpec) == MeasureSpec.UNSPECIFIED) {
+                        maxHeight
+                    } else {
+                        minOf(MeasureSpec.getSize(heightMeasureSpec), maxHeight)
+                    }
+                    super.onMeasure(widthMeasureSpec, MeasureSpec.makeMeasureSpec(height, MeasureSpec.AT_MOST))
+                }
+            }.apply {
                 this.id = id
-                isFillViewport = true
                 isNestedScrollingEnabled = true
                 addView(body)
             }
-            // 默认显示四行，每行五个应用，额外条目在各分组内独立滚动。
-            group.addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
-                dp(4 * CELL_HEIGHT + 3 * ROW_GAP)).apply { topMargin = dp(18) })
+            group.addView(scroll, lp(18))
             return group
         }
         val system = createGroup("系统应用", "系统预装与车机内置应用", systemCount, systemBody, R.id.settingsResidentSystemScroll)
         val personal = createGroup("个人应用", "自行安装的导航、音乐与其他应用", personalCount, personalBody, R.id.settingsResidentPersonalScroll)
-        // 双列各预留约 280dp 的净宽，让每组五个删除按钮都有自己的触控区。
         host.addView(settingsColumns(activity, system, personal, minWidthDp = 660), lp())
         selectedCount.id = R.id.settingsResidentSelectedCount
     }
@@ -156,21 +163,13 @@ internal class ResidentAppsPanel(
                     body.addView(text(message, 14f, true).apply { gravity = Gravity.CENTER }, lp(30))
                     return
                 }
-                val rows = maxOf(4, (list.size + 4) / 5)
-                repeat(rows) { rowIndex ->
-                    val row = LinearLayout(activity).apply { orientation = LinearLayout.HORIZONTAL }
-                    body.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
-                        dp(CELL_HEIGHT)).apply { if (rowIndex > 0) topMargin = dp(ROW_GAP) })
-                    repeat(5) { col ->
-                        val app = list.getOrNull(rowIndex * 5 + col)
-                        val view = if (app == null) View(activity) else ResidentAppTile(activity, app) {
-                            onRemove(app.pkg)
-                        }.also { tile ->
-                            tiles[app.pkg] = tile
-                            bindIcon(app.pkg, tile.icon)
-                        }
-                        row.addView(view, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
-                    }
+                val grid = ResidentAppGrid(activity)
+                body.addView(grid, lp())
+                for (app in list) {
+                    val tile = ResidentAppTile(activity, app) { onRemove(app.pkg) }
+                    tiles[app.pkg] = tile
+                    bindIcon(app.pkg, tile.icon)
+                    grid.addView(tile)
                 }
             }
             val (systemApps, personalApps) = visible.partition { it.system }
@@ -201,8 +200,63 @@ internal class ResidentAppsPanel(
         ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(top) }
     private fun color(id: Int) = ContextCompat.getColor(activity, id)
     private fun dp(n: Int) = (n * activity.resources.displayMetrics.density).toInt()
+}
 
-    companion object { private const val CELL_HEIGHT = 136; private const val ROW_GAP = 8 }
+/** 每组按净宽排列卡片，末行沿用同样的列宽，不拉伸剩余卡片。 */
+private class ResidentAppGrid(context: Context) : ViewGroup(context) {
+    private val density = resources.displayMetrics.density
+    private val gap = (8 * density).toInt()
+    private val minTileWidth = (64 * density).toInt()
+    private val maxTileWidth = (112 * density).toInt()
+    private val fourColumnWidth = (300 * density).toInt()
+    private val fiveColumnWidth = (450 * density).toInt()
+    private var columns = 1
+
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        val width = MeasureSpec.getSize(widthMeasureSpec)
+        val maxColumns = when {
+            width >= fiveColumnWidth -> 5
+            width >= fourColumnWidth -> 4
+            else -> 3
+        }
+        columns = ((width + gap) / (minTileWidth + gap)).coerceIn(1, maxColumns)
+        val cellWidth = minOf(maxTileWidth, (width - gap * (columns - 1)) / columns)
+        val widthSpec = MeasureSpec.makeMeasureSpec(cellWidth, MeasureSpec.EXACTLY)
+        val naturalHeight = MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED)
+        var height = 0
+        for (start in 0 until childCount step columns) {
+            val end = minOf(start + columns, childCount)
+            var rowHeight = 0
+            for (index in start until end) {
+                val tile = getChildAt(index)
+                tile.measure(widthSpec, naturalHeight)
+                rowHeight = maxOf(rowHeight, tile.measuredHeight)
+            }
+            val rowSpec = MeasureSpec.makeMeasureSpec(rowHeight, MeasureSpec.EXACTLY)
+            for (index in start until end) {
+                val tile = getChildAt(index)
+                if (tile.measuredHeight != rowHeight) tile.measure(widthSpec, rowSpec)
+            }
+            if (start != 0) height += gap
+            height += rowHeight
+        }
+        setMeasuredDimension(width, resolveSize(height, heightMeasureSpec))
+    }
+
+    override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
+        var y = 0
+        for (start in 0 until childCount step columns) {
+            val end = minOf(start + columns, childCount)
+            val rowHeight = getChildAt(start).measuredHeight
+            var x = 0
+            for (index in start until end) {
+                val tile = getChildAt(index)
+                tile.layout(x, y, x + tile.measuredWidth, y + rowHeight)
+                x += tile.measuredWidth + gap
+            }
+            y += rowHeight + gap
+        }
+    }
 }
 
 private class ResidentAppTile(
@@ -217,7 +271,7 @@ private class ResidentAppTile(
     }
     private val name = TextView(context).apply {
         text = app.label
-        textSize = 13f
+        textSize = 12f
         gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
         maxLines = 2
         ellipsize = android.text.TextUtils.TruncateAt.END
@@ -229,20 +283,25 @@ private class ResidentAppTile(
         textSize = 12f
         minWidth = dp(56)
         minimumWidth = dp(56)
+        val inset = dp(4)
+        background = InsetDrawable(ContextCompat.getDrawable(context, R.drawable.bg_settings_secondary_button),
+            0, inset, 0, inset)
         setPadding(0, 0, 0, 0)
-        setBackgroundResource(R.drawable.bg_settings_secondary_button)
         setTextColor(ContextCompat.getColor(context, R.color.settings_error))
         setOnClickListener { onRemove() }
     }
 
     init {
         orientation = VERTICAL
-        gravity = Gravity.CENTER
+        gravity = Gravity.CENTER_HORIZONTAL
+        val inset = dp(8)
+        setPadding(inset, inset, inset, inset)
         background = ContextCompat.getDrawable(context, R.drawable.bg_field)
-        addView(icon, LayoutParams(LayoutParams.MATCH_PARENT, dp(45)))
-        addView(name, LayoutParams(LayoutParams.MATCH_PARENT, dp(32)).apply { topMargin = dp(4) })
-        // WRAP_CONTENT 由格子的实测宽度限制，窄于 56dp 时仍留在本格内。
-        addView(removeButton, LayoutParams(LayoutParams.WRAP_CONTENT, dp(48)).apply { topMargin = dp(4) })
+        addView(icon, LayoutParams(dp(38), dp(38)))
+        addView(name, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT, 1f).apply {
+            topMargin = dp(3)
+        })
+        addView(removeButton, LayoutParams(LayoutParams.WRAP_CONTENT, dp(44)).apply { topMargin = dp(3) })
         updateDescription()
     }
 
