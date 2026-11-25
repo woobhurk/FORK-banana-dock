@@ -1,7 +1,6 @@
-# CarDockBar 日志接收服务（线上部署版）
+# 日志接收服务
 
-接收车机 App（`com.car.dockbar` 的 `LogUploader`）POST 上来的 JSON 日志，
-按天落盘 `logs/YYYY-MM-DD.jsonl`，可在浏览器直接查看、下载。
+服务使用 Python 标准库接收 JSON 日志。带有效 `appId` 的记录写入 `logs/<appId>/YYYY-MM-DD.jsonl`，其余写入 `logs/YYYY-MM-DD.jsonl`。Banana Dock 上传时省略 `appId`。
 
 ## 本地运行
 
@@ -13,35 +12,30 @@ PORT=8080 python server.py
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| POST | 任意路径（如 `/upload`） | 接收日志，返回 `{"ok": true, "saved": "..."}` |
-| GET | `/` | 迷你查看页（30 秒自动刷新） |
-| GET | `/health` | 健康检查 |
-| GET | `/logs` | 最近 200 条记录（JSON） |
-| GET | `/download?date=YYYY-MM-DD` | 下载这一天的全部日志（含 `.1.jsonl` 分片） |
+| POST | 任意路径（如 `/upload`） | 接收日志并返回落盘文件名 |
+| GET | `/` | 日志查看页，支持应用筛选，每 30 秒刷新 |
+| GET | `/health` | 健康检查，包含应用列表 |
+| GET | `/apps` | 已接入的应用及记录数 |
+| GET | `/logs` | 返回 JSON，默认最近 200 条，可传 `date`、`app`、`limit`。正数 `limit` 最大 5000，`0` 返回全部匹配记录 |
+| GET | `/download` | 下载文本日志，可传 `date` 和 `app` |
 
-每天自动归档：写入时按服务器日期落到 `logs/YYYY-MM-DD.jsonl`，
-跨天换新文件；单日超过 16MB 续写 `YYYY-MM-DD.1.jsonl`；
-超过 `LOG_KEEP_DAYS`（默认 30 天）的日期文件在每天第一次写入时删掉。
+`date=YYYY-MM-DD` 匹配该日主文件及所有分片，`date=YYYY-MM-DD.2` 可指定分片。`app` 按应用标识筛选。
 
 ## 部署
 
-单端口 HTTP 服务，仅依赖 Python 标准库：
-
-- 启动命令：`python server.py`
-- 必须读取环境变量 `PORT` 并绑定 `0.0.0.0`（已实现）
-- 持久化：`logs/` 目录下的 JSONL 文件
+- 运行 `python server.py`，将脚本所在目录的 `logs/` 挂载为持久化目录。
+- 服务绑定 `0.0.0.0`，从 `PORT` 读取端口，默认 8080。
+- 服务端未实现鉴权。查看、查询和下载接口可读取上传内容，部署时应限制读写访问。
 
 ## 车机侧配置
 
-CarDockBar → 设置 → 日志 → 上传地址，填部署后的地址（任意路径均可，
-推荐直接用根地址或 `/upload`），保存后点「测试上传」，随后刷新本页查看。
+在 Banana Dock 的「诊断与日志 → 高级排查 → 上传设置」填写接收地址，例如部署地址加 `/upload`。保存后在「诊断与日志」点「测试上传」，再查看服务端记录。其他应用见[客户端接入指南](INTEGRATE.md)。
 
-## 容量控制（环境变量，均有默认值，一般不调）
+## 容量和保留
 
-| 变量 | 默认 | 作用 |
+| 配置 | 默认 | 作用 |
 | --- | --- | --- |
-| `LOG_KEEP_DAYS` | `30` | 日志保留天数，超期每天自动清理；`0` = 全部保留 |
-| `LOG_SPLIT_BYTES` | `16777216`（16MB） | 单日文件上限，超出自动续写 `<日期>.1.jsonl` |
+| `LOG_KEEP_DAYS` | 30 天 | 启动时和跨天后首次写入时清理过期日志，`0` 表示全保留 |
+| `LOG_SPLIT_BYTES` | 16 MiB | 文件达到阈值后，下一条记录续写到 `.1.jsonl`、`.2.jsonl` 等分片 |
 
-App 端单条 payload 日志正文本身截断到 16000 字符（约 20-40KB），
-无上传频率限制，正常情况下永远碰不到分片；只有异常刷量时才会续写分片。
+服务端每次最多读取 8 MiB 请求正文。Banana Dock 和 `LogKit` 对超长日志正文保留合计最多 22,000 个原文字符，另插入省略标记。

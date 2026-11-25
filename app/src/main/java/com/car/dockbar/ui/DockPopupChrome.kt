@@ -25,17 +25,8 @@ object DockPopupChrome {
     private const val FADE_DURATION_MS = 180L
 
     /**
-     * 被「点外面」关掉后，片刻之内的 show() 一律忽略。
-     *
-     * 原因：弹窗带 FLAG_NOT_TOUCH_MODAL，同一根手指的 down 会让弹窗收到
-     * ACTION_OUTSIDE 而关闭，up 却照样落到 Dock 图标上再触发一次 show()，
-     * 不压制的话弹窗会立刻重新弹出来 —— 表现为「点了外面 / 再点图标关不掉」。
-     *
-     * ★ v1.5.8：500ms → **120ms**。
-     *   500ms 太长 —— 用户「快速连点」Dock 按钮时（两次点击间隔通常 200~400ms），
-     *   第二次点击正好落在抑制窗口里，被整条忽略 → 表现为「点了没反应」。
-     *   要压制的其实只是**同一根手指的 down→up**（一般 100ms 内），
-     *   120ms 足够吞掉它，又不会误伤正常的连点。
+     * 窗外点击的 ACTION_OUTSIDE 会关闭弹窗，同一手势的抬手仍可能触发 Dock 图标。
+     * 短时抑制再次打开，避免弹窗关闭后立即重弹。
      */
     private const val SUPPRESS_MS = 120L
 

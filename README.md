@@ -16,14 +16,7 @@ Banana Dock 是运行在 Android 车机上的悬浮 Dock 应用，提供常用�
 
 ## 项目构建
 
-### 构建环境
-
-- Android API：最低 28，compile/target SDK 34。
-- Java/Kotlin 编译目标：17；Gradle 运行需 JDK 17 或兼容版本（如 JDK 21），通过 `JAVA_HOME` 指定。CI 使用 JDK 17。
-- Android Gradle Plugin：8.7.3。
-- Kotlin：2.0.21。
-- Gradle Wrapper：8.9。
-- Native 构建使用 NDK `28.2.13676358`，目标 ABI 为 `arm64-v8a`、`armeabi-v7a`、`x86_64`。
+构建需 JDK 17 或兼容版本，使用 `JAVA_HOME` 指定。Android SDK、NDK 和 Gradle 版本见[构建环境](docs/build-and-release.md#1-本地环境)。
 
 ### 常用命令
 
@@ -43,22 +36,6 @@ Git Bash、Linux 或 macOS：
 ./gradlew :app:testDebugUnitTest
 ```
 
-### 本地构建产物
-
-- Debug：`app/build/outputs/apk/debug/Banana_Dock-4.5.0-debug.apk`
-- Release：`app/build/outputs/apk/release/Banana_Dock-4.5.0.apk`
-
-Release 构建启用代码和资源缩减；本地构建使用 Gradle 配置中的签名方式。发布到 GitHub 前，CI 会使用仓库 Secrets 对 APK 重签并校验。
-
-### GitHub Actions 发布
-
-发布 workflow 支持默认分支上以 `ci:` 开头、并包含「发布 / 新版」或英文 `release` / `new version` 的提交，以及手动触发。例如 `ci: 发布新版本 v4.5.6`、`ci: New version v4.5.6 released`。发布所需 Secrets：
-
-- `ANDROID_KEYSTORE_BASE64`
-- `ANDROID_KEYSTORE_PASSWORD`
-- `ANDROID_KEY_ALIAS`
-- `ANDROID_KEY_PASSWORD`
-
-不得将 keystore、密码或 Base64 内容提交到仓库。关键词触发的自动发布资产名为 `CarDockBar-<versionName>.apk`（当前版本形如 `CarDockBar-4.5.0.apk`）；手动触发仍为 `CarDockBar-<versionName>-r<run>.apk`（形如 `CarDockBar-4.5.0-r123.apk`）。两次发布都生成 `update.json` 和 `SHA256SUMS`。同一版本的自动 tag 不会被覆盖；手动发布每次使用新的运行号 tag，已发布的 APK 会保留。
+APK 路径、签名和 GitHub Actions 发布规则见[构建、测试与发布参考](docs/build-and-release.md)。
 
 开发协作与相关资料见 [AGENTS.md](AGENTS.md)。

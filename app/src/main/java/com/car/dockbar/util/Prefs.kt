@@ -285,7 +285,7 @@ object Prefs {
         sp(ctx).edit().putStringSet(HVAC_EVENT_KEYS_PREF, keys.filterTo(mutableSetOf()) {
             it in HVAC_EVENT_KEYS
         }).apply()
-    /** 用户在设置页明确恢复照片对应的默认选择；不自动覆盖显式空集合。 */
+    /** 应用用户在设置页主动选择的默认通道。 */
     fun resetHvacEventKeys(ctx: Context) = setHvacEventKeys(ctx, DEFAULT_HVAC_EVENT_KEYS)
 
     /** 有崩溃证据或早期连续异常时清空日常可选通道；稳定后无证据退出不改勾选。 */

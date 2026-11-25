@@ -14,11 +14,7 @@ class App : Application() {
     override fun onCreate() {
         super.onCreate()
 
-        // ---- 上传地址自愈：必须排在一切上传动作之前 ----
-        // Prefs 里存过的地址优先于 DEFAULT_URL。历史死链（webhook.site / 首个部署域）
-        // 会让「测试上传」永远失败——2026-10-19 平板上实测就是这个情况。
-        // 启动时发现存的是死链或空值，自动纠正回当前内置地址：
-        // 覆盖安装、清数据、换设备，打开就是对的那个。
+        // 在首次上传前处理为空或已知失效的旧地址。
         LogUploader.migrateEndpoint(this)
 
         // 封存上一进程会话，再收集崩溃证据。累计运行日志仅供本地诊断导出。

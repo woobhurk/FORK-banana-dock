@@ -1781,18 +1781,7 @@ object VehicleController {
     }
 
 
-    /**
-     * ★ v3.13.15：**严格按文档判定**读回来的循环状态。
-     *
-     * 文档原文：「内循环的判断条件是返回值**精确等于 0x10030101**；
-     * **未知或非激活值不应当作外循环确认**。」
-     *
-     * ⇒ 内循环 = 精确 0x10030101；外循环 = **精确裸值 0**；
-     *   其它（0xff / 0x10030100 / 1 / 10 / 11 …）一律 = **未知（null）**。
-     *
-     * ⚠ 与旧实现的差别：旧版按低字节判（low==0 → 外），会把 **0x10030100**
-     *   （低字节 0 但高位非零、HAL 根本不认的非激活值）误判成「外循环已生效」。
-     */
+    /** 内循环须精确匹配功能号高位和档值 1。外循环用裸值 0，其余值视为未知。 */
     private fun classifyRecirc(f: Int, raw: Int?): Boolean? {
         if (raw == null) return null
         if (raw == 0) return false                                  // 外循环（裸值 0）
@@ -1904,15 +1893,12 @@ object VehicleController {
     private fun readRecircState(ctx: Context): Boolean? {
         val f = VehicleChannels.funcOf(ctx, "recirc")
         if (f <= 0) return null
-        // ★ v3.13.15：优先用**文档口径的无 area 读** getFunctionValue(functionId)
+        // 优先使用无区域读取。
         VehicleBridge.readIntNoArea(f)?.let { return classifyRecirc(f, it) }
-        // ★ v3.13.6：recirc 的 zone 已是权威的全局 0x80000000（zoneOf 对 recirc 强制返回它），
-        //   这里仍保留 0x8 / 1 作兜底（万一某些车机版本读的是分区 zone）。
+        // 无区域读取缺少结果时，依次尝试全局区和旧固件兼容区。
         val zones = intArrayOf(ZONE_GLOBAL, 0x8, 1)
         for (z in zones) {
             val raw = VehicleBridge.readInt(f, z) ?: continue
-            // ★ v3.13.15：**严格判定**（文档口径）：只有精确 0 / 0x10030101 才算数，
-            //   其它值（0xff / 0x10030100 / 1 / 10 / 11 …）= 未知，继续试下一个 zone。
             val st = classifyRecirc(f, raw)
             if (st != null) return st
         }

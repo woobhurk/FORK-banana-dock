@@ -1,8 +1,3 @@
-// ┌──────────────────────────────────────────────────────────────┐
-// │ ★ 本弹窗的可见元素编号（纯注释，不影响任何运行逻辑）★           │
-// │  P09 起 —— 空调控制弹窗                                    │
-// └──────────────────────────────────────────────────────────────┘
-
 package com.car.dockbar.ui
 
 import android.content.Context
@@ -91,7 +86,6 @@ class HvacControlPopup(private val ctx: Context) {
         // 主驾温度行
         tvDriverTemp = valueText()
         card.addView(row(
-            // ── [P10] 主驾温度区 ────────────────────
             label = "主驾",
             minus = { VehicleController.tempStep(ctx, true, -1) },
             plus = { VehicleController.tempStep(ctx, true, 1) },
@@ -101,7 +95,6 @@ class HvacControlPopup(private val ctx: Context) {
         // 副驾温度行
         tvPassengerTemp = valueText()
         card.addView(row(
-            // ── [P11] 副驾温度区 ────────────────────
             label = "副驾",
             minus = { VehicleController.tempStep(ctx, false, -1) },
             plus = { VehicleController.tempStep(ctx, false, 1) },
@@ -113,7 +106,6 @@ class HvacControlPopup(private val ctx: Context) {
         // 风速行：− 值 +（值点击 = 切换 AUTO）
         tvFan = valueText()
         val fanRow = row(
-            // ── [P12] 风速区 ──────────────────────
             label = "风速",
             minus = { VehicleController.fanStep(ctx, -1) },
             plus = { VehicleController.fanStep(ctx, 1) },
@@ -159,7 +151,6 @@ class HvacControlPopup(private val ctx: Context) {
 
         // 提示行
         val hint = TextView(ctx).apply {
-            // ── [P13] 关闭提示 ─────────────────────
             text = "点击空白处关闭"
             setTextColor(DockPopupStyle.secondary)
             textSize = 11f

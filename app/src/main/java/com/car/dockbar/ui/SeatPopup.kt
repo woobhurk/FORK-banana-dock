@@ -1,8 +1,3 @@
-// ┌──────────────────────────────────────────────────────────────┐
-// │ ★ 本弹窗的可见元素编号（纯注释，不影响任何运行逻辑）★           │
-// │  P14 起 —— 座椅弹窗                                    │
-// └──────────────────────────────────────────────────────────────┘
-
 package com.car.dockbar.ui
 
 import android.content.Context
@@ -92,7 +87,7 @@ class SeatPopup(private val ctx: Context) {
         }
         seatButtons.clear()
         for (i in 0 until 3) {
-            // ── [P19] 记忆位按钮 ×3 ─────────────────
+            // 座椅记忆位
             val btn = DockPopupIconButton(
                 ctx, SCALE, R.drawable.ic_seat_open, "座椅记忆位置 ${i + 1}", "${i + 1}"
             ).apply {
@@ -143,7 +138,7 @@ class SeatPopup(private val ctx: Context) {
             gravity = Gravity.CENTER
         }
         this.ventRow = ventRow
-        // ── [P15] 主驾座椅通风 ───────────────────
+        // 主驾座椅通风
         btnVentDriver = DockPopupIconButton(
             ctx, SCALE, R.drawable.ic_seat_off, "主驾座椅通风关闭", "0", preserveIconColors = true
         ).apply {
@@ -157,7 +152,7 @@ class SeatPopup(private val ctx: Context) {
                 resetTimer()
             }
         }
-        // ── [P17] 副驾座椅通风 ───────────────────
+        // 副驾座椅通风
         btnVentPassenger = DockPopupIconButton(
             ctx, SCALE, R.drawable.ic_seat_off, "副驾座椅通风关闭", "0", preserveIconColors = true
         ).apply {
@@ -185,7 +180,7 @@ class SeatPopup(private val ctx: Context) {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
         }
-        // ── [P16] 主驾座椅加热 ───────────────────
+        // 主驾座椅加热
         btnHeatDriver = DockPopupIconButton(
             ctx, SCALE, R.drawable.ic_seat_off, "主驾座椅加热关闭", "0", preserveIconColors = true
         ).apply {
@@ -199,7 +194,7 @@ class SeatPopup(private val ctx: Context) {
                 resetTimer()
             }
         }
-        // ── [P18] 副驾座椅加热 ───────────────────
+        // 副驾座椅加热
         btnHeatPassenger = DockPopupIconButton(
             ctx, SCALE, R.drawable.ic_seat_off, "副驾座椅加热关闭", "0", preserveIconColors = true
         ).apply {

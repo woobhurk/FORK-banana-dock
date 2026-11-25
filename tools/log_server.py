@@ -1,24 +1,18 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-CarDockBar 日志接收服务（最小自建版，仅用 Python 标准库，无需 pip install）
+供局域网排障使用的日志接收脚本，仅使用 Python 标准库。
 
-做什么：
-  接收 App 的 LogUploader POST 上来的 JSON 日志，按「一天一个文件」追加落盘，
-  顺便在控制台打印一行摘要，方便肉眼确认「通了」。
+运行 python tools/log_server.py，使用脚本打印的接收地址。
+在 Banana Dock 的「诊断与日志 → 高级排查 → 上传设置」填写地址并保存，
+再回到「诊断与日志」点「测试上传」，通过控制台或查看页确认记录。
 
-怎么用：
-  1) 在本机运行：  python log_server.py            （默认 0.0.0.0:8080）
-  2) 看它打印的局域网地址，例如 http://192.168.124.9:8080/upload
-  3) 平板/车机上打开 CarDockBar → 设置 → 日志 → 上传地址，填这个地址 → 保存
-  4) 之后每次 App 启动 / 崩溃 / 点「测试上传」，这里就会收到一条
-
-日志落在： log_server_logs/YYYY-MM-DD.jsonl （一行一条 JSON，可直接用文本编辑器看）
+日志按天写入脚本所在目录的 log_server_logs/YYYY-MM-DD.jsonl。
 
 自检：
   curl -X POST -H "Content-Type: application/json" -d '{"kind":"probe"}' http://127.0.0.1:8080/upload
 
-停止： Ctrl+C 。它只监听局域网，不对外网暴露；用完建议直接关掉。
+通过 Ctrl+C 停止服务。访问范围由监听地址和部署网络决定。
 """
 
 import json

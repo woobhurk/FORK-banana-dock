@@ -20,14 +20,9 @@ package com.car.logkit
  * LogKit.uploadCrash("崩溃现场", throwable)  // 崩溃时调用
  * ```
  *
- * 与本项目 App 的关系：**互不影响**。本项目自己那份 LogUploader 不依赖本文件，
- * 它的日志仍然落在服务端 logs/ 根目录；只有显式带上 appId 的应用才会进子目录。
- *
- * 技术说明：
- *  - 只用 Android 框架 API + org.json，**不需要任何第三方库**
- *  - 上传走独立线程，绝不阻塞主线程
- *  - 没网 / 上传失败 → 落盘到 filesDir/logs/queue.txt，联网后自动补传
- *  - 单条日志正文截断到 22000 字符（保头 + 保尾，中间舍弃）
+ * 本模板在请求中附带 appId。Banana Dock 使用独立的 LogUploader 并省略该字段。
+ * 常规上传使用后台线程，崩溃上报可同步执行。失败日志保留在 filesDir/logs/queue.txt 供补传。
+ * 超长正文保留首尾，省略标记另计。
  */
 
 import android.content.Context
@@ -66,14 +61,14 @@ object LogKit {
     @Volatile
     var enabled: Boolean = true
 
-    /** 单条 payload 的日志正文上限（字符），超出按保头保尾截断。 */
+    /** 单次上传保留的原文字符预算，省略标记另计。 */
     private const val MAX_LOG_CHARS = 22_000
     private const val HEAD_KEEP_CHARS = 12_000
 
     /** HTTP 超时（毫秒）。 */
     private const val TIMEOUT_MS = 10_000
 
-    /** 攒批参数：1.5 秒或 40 行或 8000 字符，先到先发。 */
+    /** 收集日志最多等待 1.5 秒或 40 行，取出时以 8,000 字符为停止阈值。 */
     private const val FLUSH_MS = 1500L
     private const val FLUSH_LINES = 40
     private const val FLUSH_CHARS = 8000

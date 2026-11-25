@@ -112,14 +112,10 @@ class DockLayout @JvmOverloads constructor(
     private val sepPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { strokeWidth = 1f }
     private val rect = RectF()
 
-    /** 当前生效的渐变着色器，null 表示纯色模式 */
+    /** 当前渐变着色器。没有渐变填充时为 null。 */
     private var bgShader: Shader? = null
 
-    /**
-     * ★ v3.13.16：**毛玻璃底图**（PixelCopy 抓屏 + 降采样模糊的结果）。
-     * null = 不画毛玻璃层（其它三种形态）。
-     * 用 BitmapShader + drawRoundRect 绘制，自带圆角裁剪。
-     */
+    /** 可选的位图底层，随 Dock 圆角裁剪。常规外观更新会清空此层。 */
     var blurBitmap: android.graphics.Bitmap? = null
         set(v) { field = v; blurShader = v?.let { android.graphics.BitmapShader(it, android.graphics.Shader.TileMode.CLAMP, android.graphics.Shader.TileMode.CLAMP) }; invalidate() }
 
@@ -370,8 +366,6 @@ class DockLayout @JvmOverloads constructor(
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
 
-        // ⓿ ★ v3.13.16：**毛玻璃底图**（真实抓屏模糊结果）
-        //   绘制在最底层，随后再叠半透明色调层 → 这才是毛玻璃的正确层次。
         val bs = blurShader
         if (bs != null) {
             val cr = cornerRadius.coerceIn(0f, height / 2f)
@@ -382,7 +376,7 @@ class DockLayout @JvmOverloads constructor(
             blurPaint.shader = null
         }
 
-        // ① 底色：★ v3.13.0 玻璃样式已移除，现在只有「渐变 / 纯色」两条路
+        // 绘制纯色或渐变填充。
         val gradientVisible = bgShader != null &&
             (bgColors?.any { Color.alpha(it) > 0 } == true)
         if (gradientVisible || Color.alpha(bgColor) > 0) {

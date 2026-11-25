@@ -1,6 +1,6 @@
-# Dock 纯黑名单显隐逻辑 Implementation Plan
+# Dock 纯黑名单显隐逻辑实施计划
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> 历史实施记录（2026-11-13）。步骤、路径和验证结果保留当时的语境。现行显隐规则见[项目实现与源码索引](../project-reference.md#45-dock-显隐与临时显示当前)。
 
 **Goal:** 将 Dock 前台应用显隐收敛为单一 `dock_hide_apps` 黑名单，并在 APK 升级时保留旧版本用户的实际显隐结果。
 
@@ -8,7 +8,7 @@
 
 **Tech Stack:** Kotlin 2.0.21、Android API 28–34、SharedPreferences、JUnit 4.13.2、Gradle 8.9、JDK 17/21。
 
-**Spec:** `docs/superpowers/specs/2026-11-13-dock-blacklist-design.md`
+对应设计见 [Dock 纯黑名单显隐逻辑设计](2026-11-13-dock-blacklist-design.md)。
 
 ## Global Constraints
 

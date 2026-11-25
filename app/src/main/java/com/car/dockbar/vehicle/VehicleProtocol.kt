@@ -43,14 +43,7 @@ object VehicleProtocol {
     const val CMD_SEAT_VENT = "seatVent"
     const val CMD_SEAT_HEAT = "seatHeat"
 
-    /**
-     * 车控进程自己的刷新周期。
-     *
-     * ★ v1.4.97 #2：2500ms → 1000ms。
-     *   车机上（实体按键 / 原厂空调界面）改了风速后，Dock 要等一整个轮询周期才跟上，
-     *   2.5 秒的滞后在车上是明显能感觉到的「读取延迟很高」。1 秒足够快，
-     *   又不至于把 binder 打满（一次轮询 = 14 个通道读 + 2 次 ISensor）。
-     */
+    /** 独立车控服务实验路径的刷新周期。常态车控由 [VehicleRefreshQueue] 分组调度。 */
     const val REFRESH_MS = 1000L
 
     // =====================================================================

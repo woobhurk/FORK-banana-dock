@@ -1,37 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-CarDockBar 日志接收服务（线上部署版，仅 Python 标准库，零依赖）
+日志接收服务，使用 Python 标准库。按应用和日期将上传内容存为 JSONL。
 
-用途：接收车机 App（CarDockBar LogUploader）POST 上来的 JSON 日志，
-按「一天一个文件」落盘成 JSONL，并提供健康检查 / 查看 / 下载接口，
-用来回答一个问题：**车机那边的日志到底传没传出来。**
-
-与根目录 log_server.py（局域网自用版）的区别：
-  - 线上部署平台通过环境变量 PORT 下发监听端口，本服务必须读它；
-  - 只绑 0.0.0.0（容器里没有"局域网地址"可打印，也不需要 IPv6 探测）；
-  - 增加 /health /logs /download 接口，便于远程确认链路、取回日志。
-
-运行：
-  PORT=8080 python server.py        # 不传 PORT 时默认 8080（本地调试用）
-
-接口：
-  POST  任意路径            接收日志（App 直接 POST JSON，路径随意，/upload 只是习惯）
-  GET   /                   迷你查看页（最近记录表格，30 秒自动刷新）
-  GET   /health             健康检查 -> {"ok": true}
-  GET   /logs               最近 200 条记录（JSON，?date=YYYY-MM-DD 可指定某天）
-  GET   /download           全部日志（纯文本，按天分隔；?date=YYYY-MM-DD 只下一天）
-  GET   /favicon.ico        204
-
-落盘位置：./logs/YYYY-MM-DD.jsonl（一行一条 JSON）。这就是按天归档：
-跨天自动换新文件，同一天超过 16MB 续写 YYYY-MM-DD.1.jsonl，
-超过 LOG_KEEP_DAYS（默认 30 天）的日期文件自动删除。
-
-容量控制（车机日志特别多也不怕）：
-  - App 端单条 payload 的日志正文已截断到 16000 字符，单条约 20-40KB；
-  - 单文件超过 LOG_SPLIT_BYTES（默认 16MB）自动续写到 <日期>.1.jsonl / <日期>.2.jsonl ……
-  - 超过 LOG_KEEP_DAYS（默认 30 天）的日志每天自动清理一次（LOG_KEEP_DAYS=0 则全部保留）；
-  - 无上传频率限制；总量只受部署沙箱磁盘配额约束，按正常排查用量远够。
+通过 PORT 指定端口，默认 8080。部署、接口和日志保留参数见同目录 README.md。
 """
 
 import json
@@ -52,15 +24,8 @@ MAX_BODY = 8 * 1024 * 1024          # 单条 payload 上限 8MB，防御性限�
 KEEP_DAYS = int(os.environ.get("LOG_KEEP_DAYS") or "30")   # 日志保留天数，超期自动清理
 SPLIT_BYTES = int(os.environ.get("LOG_SPLIT_BYTES") or str(16 * 1024 * 1024))  # 单文件上限，超出续写 .1/.2
 
-# ---------------------------------------------------------------- 多应用支持
-#
-# 设计原则：**老客户端零改动**。
-#   - payload 里带 "appId"（或 "app_id"）→ 该应用的日志落盘到 logs/<appId>/<日期>.jsonl
-#   - 不带 → 落盘到 logs/<日期>.jsonl（与改造前完全一致，CarDockBar 走这条路）
-# 所以 CarDockBar 这个 App 的代码一行都不用改，它的历史日志也原样保留。
-#
-# appId 会变成目录名，必须严格校验（只允许字母数字 . _ -，长度 ≤ 64），
-# 否则会出现 "../xxx" 之类的路径穿越。
+# 有效 appId 用作日志子目录名。来自旧客户端或无有效标识的记录写入 logs 根目录。
+# 目录名仅接受以字母或数字开头的字母、数字、点、下划线和连字符，长度最多 64。
 APP_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
 os.makedirs(LOG_DIR, exist_ok=True)

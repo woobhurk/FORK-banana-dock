@@ -1,8 +1,3 @@
-// ┌──────────────────────────────────────────────────────────────┐
-// │ ★ 本弹窗的可见元素编号（纯注释，不影响任何运行逻辑）★           │
-// │  P01 起 —— 温度弹窗                                    │
-// └──────────────────────────────────────────────────────────────┘
-
 package com.car.dockbar.ui
 
 import android.content.Context
@@ -371,21 +366,13 @@ class TemperaturePopup(
     private fun render(st: VehicleController.State) {
         val isDriver = zone == ZONE_DRIVER
         val current = if (isDriver) st.driverTempC else st.passengerTempC
-        // ★ 程序侧温度变化（± 按钮 / 双温同步 / 极速降温）且用户没在滚动 → 滚轮平滑对齐到新温度；
-        //   用户滚动中则不打断（静止后吸附，遮罩与蓝字自然对准）
+        // 用户滚动期间保持滚轮位置，停稳后再吸附。
         if (current != lastRenderedTemp) {
             if (!userScrolling && current != null) {
                 val itemH = dp(44)
                 val idx = tempCells.indexOfFirst { kotlin.math.abs(it.first - current) < 0.24f }
                 if (idx >= 0) {
-                    // ★★ v1.4.76：改用 **scrollTo（瞬时定位）**，不用 smoothScrollTo。
-                    //   原因：smoothScrollTo 是动画滚动，每一帧都触发 onScrollChanged →
-                    //     → onTempScrolled 把 userScrolling 置 true → 300ms 后
-                    //       onScrollSettled 又 smoothScrollTo 吸附 → 又是滚动事件
-                    //     → **无限循环**（表现：弹窗自己一直往上/往下滚）。
-                    //   而且原来的目标公式 `(idx * itemH - wheelPadY)` 与吸附公式
-                    //   `centerIdx * itemH` 差了一个 wheelPadY，两处打架 → 抖动。
-                    //   现在统一成 `idx * itemH`（与 onScrollSettled 一致）。
+                    // 程序更新与停稳吸附使用同一坐标和瞬时定位方式。
                     val sc = tempScroll
                     if (sc != null) {
                         val maxScroll = (tempCells.size * itemH + 2 * wheelPadY - sc.height).coerceAtLeast(0)
@@ -498,17 +485,14 @@ class TemperaturePopup(
         val itemH = dp(44)
         val centerIdx = ((sc.scrollY + sc.height / 2 - wheelPadY) / itemH).toInt()
             .coerceIn(0, tempCells.size - 1)
-        // ★ 吸附：项 i 居中时 scrollY = i×itemH（推导：pad + i×itemH + itemH/2 = scrollY + h/2，
-        //   而 pad = wheelPadY = h/2 − itemH/2）—— v1.4.42 旧公式多减了 wheelPadY，
-        //   每次吸附都会往上拉 2 格（「一直往上吸」的根因）；并钳制在滚动范围内
+        // 上下填充已将第 0 项居中，第 i 项的目标偏移为 i * itemH。
         val maxScroll = (tempCells.size * itemH + 2 * wheelPadY - sc.height).coerceAtLeast(0)
         val targetY = (centerIdx * itemH).coerceIn(0, maxScroll)
         Logx.d(
             "温度滚轮吸附：scrollY=${sc.scrollY} h=${sc.height} pad=$wheelPadY " +
                 "idx=$centerIdx target=$targetY（max=$maxScroll）"
         )
-        // ★ v1.4.76：吸附也改成瞬时 scrollTo —— smoothScrollTo 的动画会再触发
-        //   onScrollChanged → onTempScrolled → settle → 又吸附 → 循环。
+        // 瞬时定位避免动画再次触发滚动监听，形成重复吸附。
         if (sc.scrollY != targetY) {
             autoScrolling = true
             sc.scrollTo(0, targetY)

@@ -197,10 +197,7 @@ class DockOverlayService : Service() {
     private var seatClimatePopup: SeatClimatePopup? = null
     private var volumePop: VolumePopup? = null
 
-    // --- Dock 上方常驻状态小字（显示长按类功能的当前状态，如双温同步） ---
     private var statusLabel: DockStatusLabel? = null
-    /** 上一次观测到的 AC 开关状态（用于只在真正变化时弹一次状态小字） */
-    // （v1.4.44 已移除 lastAcOn：AC 变化不再触发 Dock 上方状态小字）
 
     /** 淡入淡出进行中标记，避免动画重入 */
     private var animating = false
@@ -687,11 +684,9 @@ class DockOverlayService : Service() {
             attached = true
             lastError = ""
             Logx.d("Dock 已挂载：${if (dw > 0) dw else "MATCH_PARENT"}×$dh @ y=${p.y}")
-            // ★ v1.4.93：反射截屏已删除，反色只按墙纸底色算（不再受安全等级影响）
             startContrast()
             setupStateMachine()
             refreshLyricIcons()
-            // Dock 上方状态小字：只在长按切换时弹一次（5s 后自动消失），这里不预显示
             statusLabel = DockStatusLabel(this)
             runCatching { bindVehicle() }
             runCatching { bindMedia(MediaBridge.info) }
@@ -1369,22 +1364,8 @@ class DockOverlayService : Service() {
     }
 
     /**
-     * 计算 dock 条带亮度，回到主线程统一换色。
-     *
-     * ★★ v1.4.93：**反射截屏功能已整体删除**（用户要求）。
-     *   原实现会反射调用 `SurfaceControl.screenshot` 截取 dock 条带的真实像素，
-     *   是 2026-10-20 那次 SIGABRT 闪退的真凶；而且普通 debug 签名根本拿不到
-     *   截屏特权，实际一直走的是下面的墙纸底色分支。
-     *   现在：**只按墙纸底色反色**，不再碰任何隐藏 API。
-     */
-    /**
-     * 反色采样（每秒一次）。
-     *
-     * ★ v3.4.2：**日夜跟随开启时直接按系统深浅色判定**，不再用「渐变平均色 + 墙纸」猜。
-     *   原因：白天渐变的平均 alpha 只有 0x66（40% 白），盖在暗墙纸上亮度会掉到 0.45~0.55
-     *   的迟滞带里甚至更低 → 被误判成暗背景 → 该用黑字/深色图标的时候用了白字
-     *   （用户实锤：「白天座椅通风图标还是白色的」）。
-     *   底色本身就是按 `isNightMode()` 选的，图标颜色必须跟同一个信号，否则必然对不上。
+     * 日夜跟随开启时沿用底色的系统深浅色信号。
+     * 其他情况下按 Dock 底色与系统墙纸的合成亮度选择配色。
      */
     private fun sampleContrast() {
         if (Prefs.bgFollowNight(this)) {
@@ -1400,7 +1381,7 @@ class DockOverlayService : Service() {
     private fun onSampledLuminance(lum: Float, viaScreen: Boolean) {
         if (!viaScreen && !contrastHintShown) {
             contrastHintShown = true
-            Logx.w("反色：实时截屏不可用（需 platform 签名重签 APK，与车控白名单同一套办法），已退回按墙纸底色反色，仍每秒轮询。车载 launcher 多以墙纸作 dock 背景，体验一致。")
+            Logx.w("反色：使用 Dock 底色与系统墙纸估算背景亮度。")
         }
         // 迟滞：亮度 0.45~0.55 之间保持现状，避免临界背景来回闪
         val wantDark = when {
@@ -1411,9 +1392,8 @@ class DockOverlayService : Service() {
         setPalette(wantDark)
     }
 
-    /** 兜底：按系统墙纸亮度给初始调色板（首帧 / 截屏不可用时用） */
+    /** 确定 Dock 首帧使用的配色。 */
     private fun initialLightBackground(ctx: Context): Boolean {
-        // ★ v3.4.2：日夜跟随开启时直接用系统深浅色，跟底色选择保持同一个信号
         val light = if (Prefs.bgFollowNight(ctx)) {
             !Prefs.isNightMode(ctx)
         } else {
@@ -1423,7 +1403,7 @@ class DockOverlayService : Service() {
             luminance(blend(bg, wall, a)) > 0.5f
         }
         // 不把离屏预览写进运行中的主栏调色板。
-        Logx.d("反色：${if (Prefs.bgFollowNight(ctx)) "跟随系统" else "按墙纸"} → ${if (light) "黑字" else "白字"}（等待真实背景采样校正）")
+        Logx.d("反色：${if (Prefs.bgFollowNight(ctx)) "跟随系统" else "按墙纸"} → ${if (light) "黑字" else "白字"}")
         return light
     }
 

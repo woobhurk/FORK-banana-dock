@@ -43,7 +43,6 @@ class AppDrawerPopup(
     var isShowing: Boolean = false
         private set
 
-    // ===== ★ v1.4.97 #11：长按拖动换位（6 个槽位） =====
     /** 6 个槽位当前放的应用（null = 空位） */
     private val slotApps = MutableList<AppDrawerApp?>(AppDrawerApps.MAX_APPS) { null }
     /** 6 个槽位对应的 View，用于换算手指落在哪个槽 */
@@ -53,16 +52,13 @@ class AppDrawerPopup(
     private var dragFrom = -1
     private var dragTo = -1
 
-    /** 弹窗关闭回调（v1.4.67：用于释放「Dock 常驻」标志） */
+    /** 弹窗关闭后通知 Dock 恢复临时显示计时。 */
     var onDismissed: (() -> Unit)? = null
 
     /**
      * @param anchor 触发面板的 Dock 图标，用于把面板贴在它附近；为空时退回 Dock 上方居中
      */
     fun show(anchor: View? = null) {
-        // ★★ v1.4.67：抑制「同一手势的收尾」——
-        //   弹窗带 FLAG_NOT_TOUCH_MODAL：点 Dock 图标时 down 让弹窗收到 ACTION_OUTSIDE
-        //   而关闭，up 却照样落到图标上再触发一次 show() → 弹窗关了又立刻弹回来。
         if (DockPopupChrome.shouldSuppressShow()) return
         if (isShowing) {
             dismiss()
@@ -143,14 +139,7 @@ class AppDrawerPopup(
         }
     }
 
-    /**
-     * ★ v1.4.97 #11：长按某个应用 → 进入拖动态，手指移到哪个槽就高亮哪个槽，
-     * 松手落到那个槽，立刻保存。
-     *
-     * ★ v1.4.98：落位改成**两个槽对调**（A ↔ B），不再是「抽出来插进去」把中间的应用
-     *   整体挤开一位 —— 只有被拖的和落点这两个位置的应用互换，其它槽保持不动。
-     *   拖到空位上就是单纯搬过去（空位那个槽变成空的）。
-     */
+    /** 长按后拖向目标槽，松手时交换两个槽位并保存。 */
     private fun setupSlotDrag(v: View, index: Int) {
         DockDragLongPress.attach(v, onDragTouch = { ev ->
             if (dragFrom == index) {

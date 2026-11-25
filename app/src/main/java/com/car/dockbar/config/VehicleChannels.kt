@@ -202,10 +202,6 @@ object VehicleChannels {
             "seat_heat_passenger", "副驾座椅加热", FUNC_SEAT_HEAT, ZONE_SEAT_PASSENGER, 0, 3,
             "★已修正：functionId=0x10050200 + zone=4（副驾）"
         ),
-        // ★ v1.4.97 #1（P04 方向盘加热设置不了）：
-        //   `steering_heat` 这个 key **从来没进过这张表** → `funcOf()` 返回 -1
-        //   → `writeChannel()` 第一行 `if (f <= 0) return false` 直接静默返回，
-        //   于是点了 P04 车机没反应、日志里也什么都不打。补进来即可。
         VehicleChannel(
             "steering_heat", "方向盘加热", FUNC_STEERING_WHEEL_HEAT, 1, 0, 3,
             "functionId=0x10090100（HVAC_FUNC_STEERING_WHEEL_HEAT），zone=1（主驾），取值 func+0..3"

@@ -39,16 +39,11 @@ android {
             minifyEnabled false
         }
         release {
-            // ★ v3.13.6：**开启 R8 混淆 + 资源混淆**，防止 APK 被反编译看到接口实现。
-            //   minifyEnabled    → 类名/方法名/字段名全部重命名（a/b/c…），
-            //                      反编译出来是一堆看不懂的符号，看不到业务逻辑。
-            //   shrinkResources  → 删除未引用的资源，资源表体积变小、布局文件名变短。
-            //   注意：本项目**大量使用反射**访问车机 SDK（com.ecarx.* / com.geely.os.*），
-            //   对应 keep 规则见 proguard-rules.pro，漏一条就会运行期崩。
+            // Release 启用代码缩减、混淆和资源缩减。反射和 JNI 保留规则见 proguard-rules.pro。
             minifyEnabled true
             shrinkResources true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
-            // 车机 sideload 用 debug 签名即可，避免额外配 keystore
+            // 本地 Release 使用 Debug 签名，GitHub Actions 发布前重新签名。
             signingConfig signingConfigs.debug
         }
     }

@@ -3,22 +3,8 @@ package com.car.dockbar.ui.state
 import android.os.Handler
 
 /**
- * Dock 显示/隐藏状态机 —— 对齐吉利 oneOS Dock 的 dockstate 包设计：
- *
- *   Showing / ShowingImmediate / ShowingTemp / DragShowing
- *   Hiding / DragHiding / Hidden
- *
- * 本实现把它压成 6 个状态 + 一个定时器，行为一致：
- *
- *      HIDDEN ──requestShowImmediate()──▶ SHOWING ──onShowAnimEnd()──▶ SHOWN
- *      HIDDEN ──requestTempShow(d)──▶ TEMP_SHOW ──(d 到点)──▶ HIDING ──onHideAnimEnd()──▶ HIDDEN
- *      SHOWN  ──requestTempShow(d)──▶ TEMP_SHOW（开始倒计时）
- *      SHOWN  ──requestDragShow()──▶ DRAG_SHOW（拖拽/交互期间常驻，取消倒计时）
- *      任意态 ──requestHide()──▶ HIDING
- *
- * 真正的淡入淡出动画由调用方（DockOverlayService）执行，
- * 动画结束回调 onShowAnimEnd() / onHideAnimEnd() 后状态机才推进，
- * 保证"动画中"和"已隐藏"不会重入。
+ * 管理 Dock 显隐、手势拖动和临时显示。调用方执行动画，并在动画完成后通知状态机推进。
+ * 手指离开或弹窗关闭后启动临时显示计时，到期时根据前台应用的黑名单命中状态决定是否收起。
  */
 class DockStateMachine(
     private val main: Handler,
@@ -46,22 +32,10 @@ class DockStateMachine(
     var state: DockState = DockState.HIDDEN
         private set
 
-    /**
-     * ★★ v1.4.71：true = 前台应用命中「**打开时隐藏 Dock**」名单 → Dock 强制隐藏。
-     *
-     * v1.4.71 之前这里是 `keepShownByApp`（语义相反：命中就常驻），
-     * 且还配着一整套「空闲自动隐藏」倒计时 —— 两者都按用户要求删掉了。
-     */
+    /** 当前前台应用是否命中 Dock 隐藏黑名单。 */
     var hiddenByApp: Boolean = false
 
-    /**
-     * ★ v1.4.73：**临时显示**的倒计时（只对 TEMP_SHOW 生效）。
-     *
-     * ⚠ 这**不是**已删除的「空闲自动隐藏」：
-     *   - 空闲自动隐藏：常驻态（SHOWN）也会因无操作而消失 → 已按用户要求删除
-     *   - 临时显示倒计时：从底部上滑唤出 Dock 后，5 秒自动收起 → 本次新增
-     * 状态为 SHOWN（常驻）时**永远不倒计时**，只有 requestTempShow 进来的才倒。
-     */
+    /** 只对 TEMP_SHOW 计时，到期后按当前前台规则收起或转为 SHOWN。 */
     private val hideRunnable = Runnable { onTempShowTimeout() }
     private var hideAtMs: Long = 0L
     /** 这次临时显示要用的时长。倒计时不在唤起时启动，等 [onUserIdle]。 */
@@ -211,7 +185,7 @@ class DockStateMachine(
     }
 
     // ------------------------------------------------------------------
-    // 临时显示倒计时（v1.4.73）
+    // 临时显示倒计时
     // ------------------------------------------------------------------
 
     private fun scheduleTempHide(delayMs: Long) {
