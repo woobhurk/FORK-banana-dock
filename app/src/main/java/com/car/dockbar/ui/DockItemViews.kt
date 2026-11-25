@@ -138,13 +138,16 @@ class VolumeDockButton(context: Context, private val iconPx: Int) : FrameLayout(
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        val width = sizeLimit(widthMeasureSpec)
         val height = sizeLimit(heightMeasureSpec)
-        val iconSize = minOf(iconPx, sizeLimit(widthMeasureSpec), height)
+        val iconSize = minOf(iconPx, width, height)
         icon.setIconSizePx(iconSize)
         val textSize = minOf(iconSize, DockMetrics.FAN_COMBO_VALUE_PX) * DockMetrics.LEVEL_TEXT_SCALE
         if (level.textSize != textSize) level.setTextSize(TypedValue.COMPLEX_UNIT_PX, textSize)
         (level.layoutParams as LayoutParams).apply {
-            marginEnd = (iconSize * 0.04f).roundToInt() + 3
+            val iconEndSpace = if (MeasureSpec.getMode(widthMeasureSpec) == MeasureSpec.EXACTLY) (width - iconSize) / 2 else 0
+            marginEnd = iconEndSpace + (iconSize / 8f).roundToInt()
+            resolveLayoutDirection(this@VolumeDockButton.layoutDirection)
             bottomMargin = if (MeasureSpec.getMode(heightMeasureSpec) == MeasureSpec.EXACTLY) (height - iconSize) / 2 else 0
         }
         super.onMeasure(widthMeasureSpec, heightMeasureSpec)
