@@ -6,6 +6,7 @@ import android.graphics.Paint
 import android.view.View
 import androidx.core.content.ContextCompat
 import com.car.dockbar.R
+import com.car.dockbar.dock.DockMetrics
 
 /** 风量组合的中间触控区；整组图形与角标一起缩放，不侵占两侧箭头。 */
 internal class FanDockButton(context: Context, private val iconPx: Int) : View(context) {
@@ -17,7 +18,7 @@ internal class FanDockButton(context: Context, private val iconPx: Int) : View(c
     }
     private val number = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         textAlign = Paint.Align.CENTER
-        textSize = 18f
+        textSize = 64f * DockMetrics.LEVEL_TEXT_SCALE
         typeface = AppFont.bold(context)
     }
     private var shownLevel = "0"

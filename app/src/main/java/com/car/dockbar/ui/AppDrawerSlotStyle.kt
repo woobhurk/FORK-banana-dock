@@ -15,9 +15,9 @@ import kotlin.math.roundToInt
 
 /** 槽位视觉相同，点击与保存仍分别属于弹窗和图标管理页。 */
 internal object AppDrawerSlotStyle {
-    fun label(view: TextView, caption: String, color: Int, scale: Float = 1f) = with(view) {
+    fun label(view: TextView, caption: String, color: Int, textSizeSp: Float = 13f) = with(view) {
         text = caption
-        textSize = 13f * scale
+        textSize = textSizeSp
         typeface = AppFont.regular(context)
         setTextColor(color)
         gravity = Gravity.CENTER

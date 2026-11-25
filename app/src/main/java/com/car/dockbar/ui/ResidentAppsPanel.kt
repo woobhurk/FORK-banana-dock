@@ -2,7 +2,6 @@ package com.car.dockbar.ui
 
 import android.app.Activity
 import android.content.Context
-import android.graphics.drawable.InsetDrawable
 import android.text.Editable
 import android.text.TextWatcher
 import android.view.Gravity
@@ -26,7 +25,7 @@ internal class ResidentAppsPanel(
     addButton: Button,
     private val detectionButton: Button
 ) {
-    private val tiles = LinkedHashMap<String, ResidentAppTile>()
+    private val tiles = LinkedHashMap<String, SettingsAppTile>()
     private val selectedCount = text("", 21f).apply { typeface = AppFont.bold(activity) }
     private val systemCount = text("", 13f, true)
     private val personalCount = text("", 13f, true)
@@ -51,7 +50,7 @@ internal class ResidentAppsPanel(
         val info = column()
         info.addView(selectedCount)
         info.addView(text("列表中均为隐藏黑名单应用", 14f, true), lp(12))
-        info.addView(text("点击应用下方按钮删除，修改立即生效", 13f, true), lp(8))
+        info.addView(text("点击应用右上角 × 删除，修改立即生效", 13f, true), lp(8))
         addButton.text = "＋ 从已安装应用中选择"
         addButton.textSize = 16f
         addButton.minWidth = 0
@@ -166,7 +165,9 @@ internal class ResidentAppsPanel(
                 val grid = ResidentAppGrid(activity)
                 body.addView(grid, lp())
                 for (app in list) {
-                    val tile = ResidentAppTile(activity, app) { onRemove(app.pkg) }
+                    val tile = SettingsAppTile(activity, app.label).apply {
+                        addRemoveButton(removeDescription(app)) { onRemove(app.pkg) }
+                    }
                     tiles[app.pkg] = tile
                     bindIcon(app.pkg, tile.icon)
                     grid.addView(tile)
@@ -177,13 +178,15 @@ internal class ResidentAppsPanel(
             populate(personalBody, personalApps)
         } else {
             // 后台补全应用名称时，仅更新标签，保留当前滚动位置。
-            apps.forEach { tiles[it.pkg]?.updateLabel(it.label) }
+            apps.forEach { app -> tiles[app.pkg]?.updateLabel(app.label, removeDescription(app)) }
         }
         selectedCount.text = if (loading) "正在读取黑名单应用…" else "黑名单共 ${apps.size} 个应用"
         val systemSize = visible.count { it.system }
         systemCount.text = "$systemSize 个应用"
         personalCount.text = "${visible.size - systemSize} 个应用"
     }
+
+    private fun removeDescription(app: ResidentAppItem) = "从黑名单中删除 ${app.label}（${app.pkg}）"
 
     private fun column() = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
     private fun card() = column().apply {
@@ -206,108 +209,29 @@ internal class ResidentAppsPanel(
 private class ResidentAppGrid(context: Context) : ViewGroup(context) {
     private val density = resources.displayMetrics.density
     private val gap = (8 * density).toInt()
-    private val minTileWidth = (64 * density).toInt()
-    private val maxTileWidth = (112 * density).toInt()
-    private val fourColumnWidth = (300 * density).toInt()
-    private val fiveColumnWidth = (450 * density).toInt()
+    private val minTileWidth = (112 * density).toInt()
+    private val tileHeight = (SettingsAppTile.HEIGHT_DP * density).toInt()
     private var columns = 1
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val width = MeasureSpec.getSize(widthMeasureSpec)
-        val maxColumns = when {
-            width >= fiveColumnWidth -> 5
-            width >= fourColumnWidth -> 4
-            else -> 3
-        }
-        columns = ((width + gap) / (minTileWidth + gap)).coerceIn(1, maxColumns)
-        val cellWidth = minOf(maxTileWidth, (width - gap * (columns - 1)) / columns)
+        columns = ((width + gap) / (minTileWidth + gap)).coerceIn(1, 3)
+        val cellWidth = (width - gap * (columns - 1)) / columns
         val widthSpec = MeasureSpec.makeMeasureSpec(cellWidth, MeasureSpec.EXACTLY)
-        val naturalHeight = MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED)
-        var height = 0
-        for (start in 0 until childCount step columns) {
-            val end = minOf(start + columns, childCount)
-            var rowHeight = 0
-            for (index in start until end) {
-                val tile = getChildAt(index)
-                tile.measure(widthSpec, naturalHeight)
-                rowHeight = maxOf(rowHeight, tile.measuredHeight)
-            }
-            val rowSpec = MeasureSpec.makeMeasureSpec(rowHeight, MeasureSpec.EXACTLY)
-            for (index in start until end) {
-                val tile = getChildAt(index)
-                if (tile.measuredHeight != rowHeight) tile.measure(widthSpec, rowSpec)
-            }
-            if (start != 0) height += gap
-            height += rowHeight
-        }
+        val heightSpec = MeasureSpec.makeMeasureSpec(tileHeight, MeasureSpec.EXACTLY)
+        for (index in 0 until childCount) getChildAt(index).measure(widthSpec, heightSpec)
+        val rows = (childCount + columns - 1) / columns
+        val height = rows * tileHeight + (rows - 1).coerceAtLeast(0) * gap
         setMeasuredDimension(width, resolveSize(height, heightMeasureSpec))
     }
 
     override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
-        var y = 0
-        for (start in 0 until childCount step columns) {
-            val end = minOf(start + columns, childCount)
-            val rowHeight = getChildAt(start).measuredHeight
-            var x = 0
-            for (index in start until end) {
-                val tile = getChildAt(index)
-                tile.layout(x, y, x + tile.measuredWidth, y + rowHeight)
-                x += tile.measuredWidth + gap
-            }
-            y += rowHeight + gap
+        val cellWidth = getChildAt(0)?.measuredWidth ?: return
+        for (index in 0 until childCount) {
+            val x = index % columns * (cellWidth + gap)
+            val y = index / columns * (tileHeight + gap)
+            getChildAt(index).layout(x, y, x + cellWidth, y + tileHeight)
         }
     }
 }
 
-private class ResidentAppTile(
-    context: Context,
-    private val app: ResidentAppItem,
-    onRemove: () -> Unit
-) : LinearLayout(context) {
-    private var appLabel = app.label
-    val icon = ImageView(context).apply {
-        scaleType = ImageView.ScaleType.FIT_CENTER
-        setImageResource(R.drawable.ic_apps)
-    }
-    private val name = TextView(context).apply {
-        text = app.label
-        textSize = 12f
-        gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-        maxLines = 2
-        ellipsize = android.text.TextUtils.TruncateAt.END
-        includeFontPadding = false
-        setTextColor(ContextCompat.getColor(context, R.color.settings_text))
-    }
-    private val removeButton = Button(context).apply {
-        text = "删除"
-        textSize = 12f
-        minWidth = dp(56)
-        minimumWidth = dp(56)
-        val inset = dp(4)
-        background = InsetDrawable(ContextCompat.getDrawable(context, R.drawable.bg_settings_secondary_button),
-            0, inset, 0, inset)
-        setPadding(0, 0, 0, 0)
-        setTextColor(ContextCompat.getColor(context, R.color.settings_error))
-        setOnClickListener { onRemove() }
-    }
-
-    init {
-        orientation = VERTICAL
-        gravity = Gravity.CENTER_HORIZONTAL
-        val inset = dp(8)
-        setPadding(inset, inset, inset, inset)
-        background = ContextCompat.getDrawable(context, R.drawable.bg_field)
-        addView(icon, LayoutParams(dp(38), dp(38)))
-        addView(name, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT, 1f).apply {
-            topMargin = dp(3)
-        })
-        addView(removeButton, LayoutParams(LayoutParams.WRAP_CONTENT, dp(44)).apply { topMargin = dp(3) })
-        updateDescription()
-    }
-
-    fun updateLabel(value: String) { appLabel = value; name.text = value; updateDescription() }
-    private fun updateDescription() {
-        removeButton.contentDescription = "从黑名单中删除 $appLabel（${app.pkg}）"
-    }
-    private fun dp(n: Int) = (n * resources.displayMetrics.density).toInt()
-}

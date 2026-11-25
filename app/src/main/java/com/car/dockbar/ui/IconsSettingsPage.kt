@@ -11,7 +11,6 @@ import android.view.ViewGroup
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
-import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -232,8 +231,7 @@ class IconsSettingsPage(activity: MainActivity, root: LinearLayout) :
             repeat(3) { colIndex ->
                 val slot = rowIndex * 3 + colIndex
                 val app = apps.getOrNull(slot)
-                val tile = FrameLayout(this).apply {
-                    setBackgroundResource(R.drawable.bg_settings_choice)
+                val tile = SettingsAppTile(this, app?.label).apply {
                     AppDrawerSlotStyle.applyDragOutline(this,
                         ContextCompat.getColor(this@IconsSettingsPage, R.color.settings_accent))
                     isClickable = true
@@ -271,53 +269,18 @@ class IconsSettingsPage(activity: MainActivity, root: LinearLayout) :
                     }
                 }
                 slotViews.add(tile)
-                val body = LinearLayout(this).apply {
-                    orientation = LinearLayout.VERTICAL
-                    gravity = Gravity.CENTER
-                    setPadding(dp(4), dp(8), dp(4), dp(8))
-                }
-                tile.addView(body, FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
-                val secondary = ContextCompat.getColor(this, R.color.settings_secondary)
-                val iconSize = dp(42)
-                val icon = ImageView(this).apply {
-                    scaleType = ImageView.ScaleType.FIT_CENTER
-                    if (app == null) {
-                        AppDrawerSlotStyle.emptyIcon(this, iconSize, secondary)
-                    } else {
-                        setImageResource(R.drawable.ic_car)
-                        loadAppIconAsync(app.packageName, this)
-                    }
-                }
-                body.addView(icon, LinearLayout.LayoutParams(iconSize, iconSize))
-                val label = TextView(this)
-                AppDrawerSlotStyle.label(label, app?.label ?: "空位",
-                    if (app == null) secondary else ContextCompat.getColor(this, R.color.settings_text))
-                body.addView(label, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(7) })
-                if (app != null) tile.addView(Button(this).apply {
-                    text = "×"
-                    textSize = 22f
-                    gravity = Gravity.CENTER
-                    setTextColor(ContextCompat.getColor(this@IconsSettingsPage, R.color.settings_error))
-                    includeFontPadding = false
-                    minWidth = 0
-                    minHeight = 0
-                    minimumWidth = 0
-                    minimumHeight = 0
-                    setBackgroundResource(R.drawable.bg_settings_nav_idle)
-                    setPadding(0, 0, 0, 0)
-                    contentDescription = "清除快捷应用 ${app.label}"
-                    setOnClickListener {
-                        val current = AppDrawerApps.loadSlots(this@IconsSettingsPage).toMutableList()
+                if (app != null) {
+                    loadAppIconAsync(app.packageName, tile.icon)
+                    tile.addRemoveButton("清除快捷应用 ${app.label}") {
+                        val current = AppDrawerApps.loadSlots(this).toMutableList()
                         if (current[slot]?.packageName == app.packageName) {
                             current[slot] = null
-                            AppDrawerApps.saveSlots(this@IconsSettingsPage, current)
+                            AppDrawerApps.saveSlots(this, current)
                         }
                         refreshAppDrawerSelectionLabel()
                     }
-                }, FrameLayout.LayoutParams(dp(40), dp(40), Gravity.TOP or Gravity.END))
-                row.addView(tile, LinearLayout.LayoutParams(0, dp(98), 1f).apply {
+                }
+                row.addView(tile, LinearLayout.LayoutParams(0, dp(SettingsAppTile.HEIGHT_DP), 1f).apply {
                     if (colIndex > 0) marginStart = dp(8)
                 })
             }

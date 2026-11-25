@@ -33,6 +33,7 @@ class AppDrawerPopup(
         const val CELL_HEIGHT_DP = 64
         const val CELL_VERTICAL_MARGIN_DP = 2
         const val CELL_ICON_SPACE_DP = 30
+        const val LABEL_SIZE_SP = 11f
     }
 
     private val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
@@ -222,7 +223,7 @@ class AppDrawerPopup(
         }
         val title = TextView(context)
         AppDrawerSlotStyle.label(title, app?.label ?: "空位",
-            if (app == null) DockPopupStyle.secondary else DockPopupStyle.text, scale)
+            if (app == null) DockPopupStyle.secondary else DockPopupStyle.text, LABEL_SIZE_SP * scale)
         if (app == null) {
             AppDrawerSlotStyle.emptyIcon(icon, iconSize, DockPopupStyle.secondary)
         } else {

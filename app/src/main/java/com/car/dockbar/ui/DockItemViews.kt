@@ -22,6 +22,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.annotation.DrawableRes
 import com.car.dockbar.R
+import com.car.dockbar.dock.DockMetrics
 import com.car.dockbar.util.Prefs
 import kotlin.math.roundToInt
 
@@ -109,17 +110,10 @@ class DockIconView @JvmOverloads constructor(
     }
 }
 
-/**
- * 音量按钮：喇叭缩到原来的 0.8，右下角用剩下的 0.2 显示媒体档位。
- */
-class VolumeDockButton(context: Context, iconPx: Int) : FrameLayout(context) {
-    private val icon = DockIconView(
-        context,
-        R.drawable.ic_volume,
-        (iconPx * 0.8f).roundToInt().coerceAtLeast(1)
-    )
+/** 音量按钮：喇叭沿用主栏图标尺寸，媒体档位显示在右下角。 */
+class VolumeDockButton(context: Context, private val iconPx: Int) : FrameLayout(context) {
+    private val icon = DockIconView(context, R.drawable.ic_volume, iconPx)
     private val level = TextView(context).apply {
-        setTextSize(TypedValue.COMPLEX_UNIT_PX, iconPx * 0.2f * 2f)
         setTextColor(DockBarPalette.DEFAULT.text)
         typeface = AppFont.bold(context)
         includeFontPadding = false
@@ -140,12 +134,24 @@ class VolumeDockButton(context: Context, iconPx: Int) : FrameLayout(context) {
         icon.isClickable = false
         icon.background = null
         addView(icon, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
-        val inset = (iconPx * 0.04f).roundToInt()
-        addView(level, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.END).apply {
-            marginEnd = inset + 3
-            bottomMargin = inset + 25
-        })
+        addView(level, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.END))
     }
+
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        val height = sizeLimit(heightMeasureSpec)
+        val iconSize = minOf(iconPx, sizeLimit(widthMeasureSpec), height)
+        icon.setIconSizePx(iconSize)
+        val textSize = minOf(iconSize, DockMetrics.FAN_COMBO_VALUE_PX) * DockMetrics.LEVEL_TEXT_SCALE
+        if (level.textSize != textSize) level.setTextSize(TypedValue.COMPLEX_UNIT_PX, textSize)
+        (level.layoutParams as LayoutParams).apply {
+            marginEnd = (iconSize * 0.04f).roundToInt() + 3
+            bottomMargin = if (MeasureSpec.getMode(heightMeasureSpec) == MeasureSpec.EXACTLY) (height - iconSize) / 2 else 0
+        }
+        super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+    }
+
+    private fun sizeLimit(spec: Int): Int =
+        if (MeasureSpec.getMode(spec) == MeasureSpec.UNSPECIFIED) iconPx else MeasureSpec.getSize(spec)
 
     fun setLevel(n: Int) {
         shownLevel = n

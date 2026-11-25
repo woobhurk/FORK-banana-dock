@@ -61,6 +61,8 @@ object DockMetrics {
     const val FAN_COMBO_VALUE_PX = 80
     /** 风速组合总宽 = 两侧点击列 + 数值列。 */
     const val FAN_COMBO_FIXED_WIDTH_PX = FAN_COMBO_ARROW_HIT_PX * 2 + FAN_COMBO_VALUE_PX
+    /** 主栏档位数字相对于图标边长的字号比例。 */
+    internal const val LEVEL_TEXT_SCALE = 18f / 64f
     const val SLOT_FIXED_PX = 98
     const val SPAN3_FIXED_PX = 290
     const val MUSIC_MIN_WIDTH_PX = 295
