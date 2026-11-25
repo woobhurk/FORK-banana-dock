@@ -108,22 +108,24 @@ Banana Dock 是面向 Android 车机的悬浮 Dock 应用，`namespace` 和 `app
 
 ## 4. Dock 条目、默认布局和交互
 
-### 4.1 当前默认十项
+### 4.1 默认布局（12 项）
 
 默认只在首次使用或恢复默认时生效，升级不能覆盖用户自定义顺序。`DockEntry.kt` 中的当前顺序是：
 
 1. `HOME`：返回桌面。
-2. `MUSIC`：音乐信息卡。
-3. `SETTINGS`：车机设置。
-4. `APP_DRAWER`：快捷应用。
-5. `TEMP_DRIVER_COMBO`：主驾温度组合。
-6. `AIR`：空调风向。
+2. `SETTINGS`：车机设置。
+3. `APP_DRAWER`：快捷应用。
+4. `MUSIC`：音乐信息卡。
+5. `VOLUME`：音量。
+6. `TEMP_DRIVER_COMBO`：主驾温度组合。
 7. `FAN_COMBO`：风速组合。
-8. `RECIRC`：内外循环。
-9. `SEAT`：座椅设置。
-10. `TEMP_PASSENGER_COMBO`：副驾温度组合。
+8. `TEMP_PASSENGER_COMBO`：副驾温度组合。
+9. `AIR`：空调风向。
+10. `VENT`：主驾座椅通风。
+11. `RECIRC`：内外循环。
+12. `SEAT`：座椅设置。
 
-歌词、音量、座椅通风/加热、前后挡、方向盘加热等可从图标管理中手动添加，不要把它们写成当前默认项。
+歌词、主驾座椅加热、前后挡除霜、方向盘加热等可从图标管理中手动添加。
 
 ### 4.2 当前尺寸模型
 

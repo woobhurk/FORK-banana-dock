@@ -153,15 +153,17 @@ object DockEntries {
 
     private fun defaults(): List<DockEntry> = listOf(
         DockEntry("b_home", "builtin", Builtin.HOME.action, Builtin.HOME.label, span = 1),
-        DockEntry("b_music", "builtin", Builtin.MUSIC.action, Builtin.MUSIC.label, span = 3),
         DockEntry("b_settings", "builtin", Builtin.SETTINGS.action, Builtin.SETTINGS.label),
         DockEntry("b_app_drawer", "builtin", Builtin.APP_DRAWER.action, Builtin.APP_DRAWER.label),
+        DockEntry("b_music", "builtin", Builtin.MUSIC.action, Builtin.MUSIC.label, span = 3),
+        DockEntry("b_volume", "builtin", Builtin.VOLUME.action, Builtin.VOLUME.label),
         DockEntry("b_temp_driver_combo", "builtin", Builtin.TEMP_DRIVER_COMBO.action, Builtin.TEMP_DRIVER_COMBO.label, span = Builtin.TEMP_DRIVER_COMBO.span),
-        DockEntry("b_air", "builtin", Builtin.AIR.action, Builtin.AIR.label),
         DockEntry("b_fan_combo", "builtin", Builtin.FAN_COMBO.action, Builtin.FAN_COMBO.label, span = Builtin.FAN_COMBO.span),
+        DockEntry("b_temp_passenger_combo", "builtin", Builtin.TEMP_PASSENGER_COMBO.action, Builtin.TEMP_PASSENGER_COMBO.label, span = Builtin.TEMP_PASSENGER_COMBO.span),
+        DockEntry("b_air", "builtin", Builtin.AIR.action, Builtin.AIR.label),
+        DockEntry("b_vent", "builtin", Builtin.VENT.action, Builtin.VENT.label),
         DockEntry("b_recirc", "builtin", Builtin.RECIRC.action, Builtin.RECIRC.label),
-        DockEntry("b_seat", "builtin", Builtin.SEAT.action, Builtin.SEAT.label),
-        DockEntry("b_temp_passenger_combo", "builtin", Builtin.TEMP_PASSENGER_COMBO.action, Builtin.TEMP_PASSENGER_COMBO.label, span = Builtin.TEMP_PASSENGER_COMBO.span)
+        DockEntry("b_seat", "builtin", Builtin.SEAT.action, Builtin.SEAT.label)
     )
 
     fun defaultsMutable(): MutableList<DockEntry> = defaults().toMutableList()
