@@ -142,7 +142,7 @@ class ResidentSettingsPage(activity: MainActivity, root: LinearLayout) :
             image.setImageDrawable(cached.newDrawable(resources))
             return
         }
-        image.setImageResource(R.drawable.ic_car)
+        image.setImageResource(R.drawable.ic_app_missing)
         val revision = iconRevisions[pkg]
         val pm = packageManager
         iconExecutor.execute {

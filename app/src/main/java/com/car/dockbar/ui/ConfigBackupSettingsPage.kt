@@ -13,6 +13,10 @@ import androidx.core.content.ContextCompat
 import com.car.dockbar.R
 import com.car.dockbar.config.BackupGroup
 import com.car.dockbar.config.ConfigBackupFormat
+import com.car.dockbar.util.Logx
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 internal class ConfigBackupSettingsPage(activity: MainActivity, root: LinearLayout) :
     SettingsPage(activity, MainActivity.SECTION_BACKUP, root) {
@@ -41,8 +45,16 @@ internal class ConfigBackupSettingsPage(activity: MainActivity, root: LinearLayo
         state.message?.let { message ->
             parent.addView(label(message, 16f).apply { accessibilityLiveRegion = ACCESSIBILITY_LIVE_REGION_POLITE }, params(18))
         }
+        val left = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val right = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        parent.addView(settingsColumns(this, left, right, gapDp = 12), params())
+        val importing = card(left, "导入")
+        importing.addView(button("选择配置文件") {
+            launchPicker { activity.configImport.launch(arrayOf("*/*")) }
+        }.apply { isEnabled = !state.recoveryAvailable }, params(12))
+
         if (state.recoveryAvailable) {
-            val recovery = card(parent, "本机恢复点")
+            val recovery = card(left, "本机恢复点")
             recovery.addView(label("有一份导入前的配置可恢复。", 15f), params(10))
             recovery.addView(button("恢复导入前的配置") {
                 restoreDialog = AlertDialog.Builder(activity)
@@ -53,18 +65,21 @@ internal class ConfigBackupSettingsPage(activity: MainActivity, root: LinearLayo
                     .show()
             }, params(12))
         }
-        val importing = card(parent, "导入")
-        importing.addView(button("选择配置文件") {
-            launchPicker { activity.configImport.launch(arrayOf("*/*")) }
-        }.apply { isEnabled = !state.recoveryAvailable }, params(12))
 
-        val exporting = card(parent, "导出")
+        val exporting = card(right, "导出")
         val action = button("导出所选配置") {
             session.pendingExport = session.exportGroups.toSet()
-            launchPicker { activity.configExport.launch("Banana_Dock-config-v${ConfigBackupFormat.VERSION}.json") }
+            val timestamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
+            Logx.d("配置导出：打开保存位置选择器")
+            launchPicker { activity.configExport.launch("${ConfigBackupFormat.ID}-$timestamp.json") }
         }.apply { isEnabled = session.exportGroups.isNotEmpty() }
-        for (group in BackupGroup.entries) {
-            exporting.addView(choice(group.title, group in session.exportGroups) { checked ->
+        val firstOptions = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val secondOptions = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        exporting.addView(settingsColumns(this, firstOptions, secondOptions, minWidthDp = 260, gapDp = 8), params())
+        val firstColumnSize = (BackupGroup.entries.size + 1) / 2
+        for ((index, group) in BackupGroup.entries.withIndex()) {
+            val column = if (index < firstColumnSize) firstOptions else secondOptions
+            column.addView(choice(group.title, group in session.exportGroups) { checked ->
                 if (checked) session.exportGroups.add(group) else session.exportGroups.remove(group)
                 action.isEnabled = session.exportGroups.isNotEmpty()
             }, params())

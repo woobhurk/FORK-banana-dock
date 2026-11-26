@@ -59,16 +59,32 @@ internal class ConfigBackupSession(app: Application) : AndroidViewModel(app) {
     fun write(uri: Uri?) {
         val groups = pendingExport
         pendingExport = null
-        if (uri == null) return
+        if (uri == null) {
+            Logx.d("配置导出：文件选择器未返回保存位置")
+            return
+        }
         if (groups.isNullOrEmpty()) {
+            Logx.w("配置导出：已收到保存位置，但没有待导出的配置组")
             current.value = State.Ready("请重新选择要导出的配置组。", store.hasRecovery())
             return
         }
-        submit("正在导出配置…", "写入文件失败，请选择可写位置。") {
-            val data = store.export(groups)
-            val stream = resolver.openOutputStream(uri, "wt") ?: throw IOException()
-            stream.use { it.write(data) }
-            State.Ready("配置已导出。", store.hasRecovery())
+        Logx.d("配置导出：已收到保存位置，正在生成 ${groups.size} 组配置")
+        submit("正在导出配置…", "写入文件失败。目标文件可能不完整，请选择可写位置重新导出。") {
+            try {
+                val data = store.export(groups)
+                Logx.d("配置导出：已生成 ${data.size} 字节，正在打开目标文件")
+                // 与诊断 ZIP 一样用通用写入模式，兼容只支持 w 的文档提供器。
+                val stream = resolver.openOutputStream(uri, "w") ?: throw IOException("系统未提供文档写入流")
+                stream.use {
+                    Logx.d("配置导出：目标文件已打开，正在写入")
+                    it.write(data)
+                }
+                Logx.d("配置导出：写入完成（${data.size} 字节）")
+                State.Ready("配置已导出。", store.hasRecovery())
+            } catch (e: Exception) {
+                Logx.e("配置导出失败（${e.javaClass.simpleName}）")
+                throw e
+            }
         }
     }
 

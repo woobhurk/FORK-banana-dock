@@ -32,8 +32,6 @@ internal class SettingsAppTile(context: Context, caption: String?) : FrameLayout
         val secondary = ContextCompat.getColor(context, R.color.settings_secondary)
         if (caption == null) {
             AppDrawerSlotStyle.emptyIcon(icon, iconSize, secondary)
-        } else {
-            icon.setImageResource(R.drawable.ic_car)
         }
         body.addView(icon, LinearLayout.LayoutParams(iconSize, iconSize))
         AppDrawerSlotStyle.label(label, caption ?: "空位",

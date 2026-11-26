@@ -40,6 +40,14 @@ internal object AppDrawerSlotStyle {
         ellipsize = TextUtils.TruncateAt.END
     }
 
+    fun appIcon(view: ImageView, icon: Drawable?) {
+        if (icon == null) {
+            view.setImageResource(R.drawable.ic_app_missing)
+        } else {
+            view.setImageDrawable(icon)
+        }
+    }
+
     fun emptyIcon(view: ImageView, sizePx: Int, color: Int) = with(view) {
         setImageResource(R.drawable.ic_dock_apps)
         setColorFilter(color)

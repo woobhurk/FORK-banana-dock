@@ -362,9 +362,8 @@ class IconsSettingsPage(activity: MainActivity, root: LinearLayout) :
                 row.addView(ImageView(this).apply {
                     layoutParams = LinearLayout.LayoutParams(dp(34), dp(34))
                     scaleType = ImageView.ScaleType.FIT_CENTER
-                    runCatching {
-                        setImageDrawable(packageManager.getApplicationIcon(candidate.packageName))
-                    }.onFailure { setImageResource(R.drawable.ic_car) }
+                    val drawable = runCatching { packageManager.getApplicationIcon(candidate.packageName) }.getOrNull()
+                    AppDrawerSlotStyle.appIcon(this, drawable)
                 })
                 val check = CheckBox(this).apply {
                     text = "${candidate.label}\n${candidate.packageName}"
@@ -465,6 +464,7 @@ class IconsSettingsPage(activity: MainActivity, root: LinearLayout) :
     }
 
     private fun loadAppDisplay(pkg: String, tile: SettingsAppTile, generation: Int) {
+        tile.icon.setImageResource(R.drawable.ic_app_missing)
         appExecutor.execute {
             val display = AppDrawerSlotStyle.resolveApp(packageManager, pkg)
             main.post {

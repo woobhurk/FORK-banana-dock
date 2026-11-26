@@ -226,7 +226,7 @@ class AppDrawerPopup(
         } else {
             val display = AppDrawerSlotStyle.resolveApp(context.packageManager, pkg)
             AppDrawerSlotStyle.label(title, display.label, DockPopupStyle.text, LABEL_SIZE_SP * scale)
-            if (display.icon == null) icon.setImageResource(R.drawable.ic_car) else icon.setImageDrawable(display.icon)
+            AppDrawerSlotStyle.appIcon(icon, display.icon)
             cell.setOnClickListener {
                 // 拖动结束的抬手事件由拖动处理消化，只有单击才尝试启动应用。
                 dismiss()
