@@ -1,6 +1,6 @@
 package com.car.dockbar.util
 
-/** 新安装使用的当前默认黑名单；历史迁移数据由 DockBlacklistMigration 单独管理。 */
+/** 新安装使用的当前默认黑名单。 */
 internal object DockBlacklistDefaults {
     val apps: List<Pair<String, String>> = listOf(
         "com.ximalaya.ting.android.car" to "喜马拉雅车机版",

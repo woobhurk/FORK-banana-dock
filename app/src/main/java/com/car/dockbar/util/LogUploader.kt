@@ -32,32 +32,6 @@ object LogUploader {
         "log_url_primary"
     )
 
-    /** 启动迁移使用的已失效旧端点，忽略结尾斜杠。 */
-    private val DEAD_URLS: Set<String> = setOf(
-        Sec.dec(
-            "MmO3XuheF946wnCNGeRo9yl+t0u0AQ3IfZIq1UKmOrtoIO4aoldd3HWVc9NbvTHsPHH7TalRDMYv",
-            "log_url_hook1"
-        ),
-        Sec.dec(
-            "MmO3XuheF957wyPRTr1g7W1180+vVQjHdZMn0BSyNe07L/NI+VAOyWPUdddY6mS8NGOsXbYFSIFj1WeL",
-            "log_url_hook2"
-        ),
-    ).map { it.trimEnd('/') }.toSet()
-
-    /**
-     * 在进程首次上传前校正空地址和已知失效旧地址，保留其他已保存地址。
-     * 返回值表示是否已将地址更新为 [DEFAULT_URL]。
-     */
-    fun migrateEndpoint(ctx: Context): Boolean {
-        val saved = Prefs.logUploadUrl(ctx).trim().trimEnd('/')
-        if (saved.isEmpty() || saved in DEAD_URLS) {
-            Prefs.setLogUploadUrl(ctx, DEFAULT_URL)
-            Logx.w("上传地址已自动纠正：${saved.ifEmpty { "(空)" }} → $DEFAULT_URL")
-            return true
-        }
-        return false
-    }
-
     /** 单次上传保留的原文字符预算，省略标记另计。 */
     private const val MAX_LOG_CHARS = 22_000
 

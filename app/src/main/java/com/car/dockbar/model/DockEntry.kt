@@ -171,99 +171,21 @@ object DockEntries {
     fun load(ctx: Context): MutableList<DockEntry> {
         val raw = Prefs.entriesJson(ctx)
         if (raw.isBlank()) return defaultsMutable()
-        val loaded = runCatching {
+        return runCatching {
             val arr = JSONArray(raw)
             val out = ArrayList<DockEntry>(arr.length())
             for (i in 0 until arr.length()) {
                 arr.optJSONObject(i)?.let { out.add(DockEntry.fromJson(it)) }
             }
             out
-        }.getOrNull() ?: return defaultsMutable()
-        // v1.4.20 起「快捷应用」从车机设置按钮里独立成一个按钮（紧挨其后）。
-        // 老配置里没有这一条，升级时补插到车机设置后面，避免升级后入口消失。
-        val migrateMissingEntries = !Prefs.sp(ctx).getBoolean("dock_entries_explicit_layout", false) && loaded.isNotEmpty()
-        if (migrateMissingEntries && loaded.none { it.kind == "builtin" && it.action == Builtin.APP_DRAWER.action }) {
-            val entry = DockEntry(
-                "b_app_drawer", "builtin",
-                Builtin.APP_DRAWER.action, Builtin.APP_DRAWER.label
-            )
-            val at = loaded.indexOfFirst {
-                it.kind == "builtin" && it.action == Builtin.SETTINGS.action
-            }
-            if (at >= 0) loaded.add(at + 1, entry) else loaded.add(entry)
-            save(ctx, loaded)
-        }
-        if (migrateMissingEntries && loaded.none { it.kind == "builtin" && it.action == Builtin.VOLUME.action }) {
-            val entry = DockEntry(
-                "b_volume", "builtin",
-                Builtin.VOLUME.action, Builtin.VOLUME.label
-            )
-            val at = loaded.indexOfFirst {
-                it.kind == "builtin" && it.action == Builtin.LYRIC.action
-            }
-            if (at >= 0) loaded.add(at + 1, entry) else loaded.add(entry)
-            save(ctx, loaded)
-        }
-        // v1.4.24 起「主驾温度 / 副驾温度 / 风速」的「− 值 +」三件套融合成单个组合按钮。
-        // 老配置里是三条独立条目：把值条目原位替换成组合条目，并删掉两侧的 ± 条目。
-        var comboChanged = false
-        comboChanged = migrateCombo(loaded, Builtin.TEMP_DRIVER.action, Builtin.TEMP_DOWN_DRIVER.action, Builtin.TEMP_UP_DRIVER.action, Builtin.TEMP_DRIVER_COMBO) || comboChanged
-        comboChanged = migrateCombo(loaded, Builtin.FAN.action, Builtin.FAN_DOWN.action, Builtin.FAN_UP.action, Builtin.FAN_COMBO) || comboChanged
-        comboChanged = migrateCombo(loaded, Builtin.TEMP_PASSENGER.action, Builtin.TEMP_DOWN_PASSENGER.action, Builtin.TEMP_UP_PASSENGER.action, Builtin.TEMP_PASSENGER_COMBO) || comboChanged
-        if (comboChanged) save(ctx, loaded)
-        Prefs.sp(ctx).edit().putBoolean("dock_entries_explicit_layout", true).apply()
-
-        // v3.13.8：音乐卡宽度已与 span 解耦（弹性 295~500px），
-        // 3.13.7 曾把 span 迁到 5，这里无伤害地残留 5 也不影响布局，不再迁移。
-        return loaded
+        }.getOrNull() ?: defaultsMutable()
     }
 
-    /** 三件套 → 组合条目：值条目原位替换为 combo，± 条目删除；只有 ± 没有值时在 ± 处落位。返回是否发生了变更 */
-    private fun migrateCombo(
-        list: MutableList<DockEntry>,
-        valueAction: String,
-        minusAction: String,
-        plusAction: String,
-        combo: Builtin
-    ): Boolean {
-        val hasCombo = list.any { it.kind == "builtin" && it.action == combo.action }
-        val valueIdx = list.indexOfFirst { it.kind == "builtin" && it.action == valueAction }
-        val minusIdx = list.indexOfFirst { it.kind == "builtin" && it.action == minusAction }
-        val plusIdx = list.indexOfFirst { it.kind == "builtin" && it.action == plusAction }
-        if (hasCombo) {
-            // 已有组合条目：只清理残留的旧 ± 条目
-            val removed = list.removeAll {
-                it.kind == "builtin" && (it.action == minusAction || it.action == plusAction)
-            }
-            // v1.4.24 首版迁移出的 combo 是 1 槽，统一升到 combo.span（3 槽，与原三件套等宽）
-            val idx = list.indexOfFirst { it.kind == "builtin" && it.action == combo.action }
-            var spanFixed = false
-            if (idx >= 0 && list[idx].span < combo.span) {
-                list[idx] = list[idx].copy(span = combo.span)
-                spanFixed = true
-            }
-            return removed || spanFixed
-        }
-        val at = if (valueIdx >= 0) valueIdx else maxOf(minusIdx, plusIdx)
-        if (at < 0) return false // 三件套都没有，无需迁移
-        val old = list[at]
-        list[at] = DockEntry(
-            "b_${combo.action}", "builtin",
-            combo.action, combo.label,
-            // 组合按钮占 3 槽（与原三件套等宽）；用户若手动加宽过值条目则尊重更大值
-            span = maxOf(old.span, combo.span)
-        )
-        list.removeAll {
-            it.kind == "builtin" && (it.action == minusAction || it.action == plusAction)
-        }
-        return true
-    }
 
     fun save(ctx: Context, list: List<DockEntry>) {
         val arr = JSONArray()
         list.forEach { arr.put(it.toJson()) }
         Prefs.setEntriesJson(ctx, arr.toString())
-        Prefs.sp(ctx).edit().putBoolean("dock_entries_explicit_layout", true).apply()
     }
 
     fun reset(ctx: Context) = save(ctx, defaults())

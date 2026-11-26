@@ -90,14 +90,6 @@ internal class RuntimeLogStore(logDir: File) : Closeable {
             val bytes = file.length()
             if (bytes == 0L) emptyParts += file else retain(Part(file, id, bytes))
         }
-        for (name in listOf("prev.log", "session.log")) {
-            val legacy = File(logDir, name)
-            if (!legacy.isFile) continue
-            val bytes = legacy.length()
-            val target = partFile(++latest, 0)
-            Files.move(legacy.toPath(), target.toPath())
-            if (bytes == 0L) emptyParts += target else retain(Part(target, latest, bytes))
-        }
         previousSession = latest
         session = latest + 1
         evictOverBudget()

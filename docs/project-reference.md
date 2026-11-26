@@ -58,9 +58,9 @@ Banana Dock 是面向 Android 车机的悬浮 Dock 应用，`namespace` 和 `app
 | 原车接口验证会话与结果报告 | `vehicle/HvacDiagnostics.kt`、`ui/LogsSettingsPage.kt` |
 | 传感器 | `vehicle/SensorBridge.kt` |
 | 日志、崩溃和上传 | `util/Logx.kt`、`util/RuntimeLogStore.kt`、`util/LogUploader.kt`、`util/DiagnosticLogExporter.kt`、`util/NativeCrashHandler.kt` |
-| 偏好设置兼容入口与启动 | `util/Prefs.kt`、`App.kt` |
-| Dock 黑名单默认值、迁移与存储 | `util/DockBlacklistDefaults.kt`、`util/DockBlacklistMigration.kt`、`util/DockBlacklistPreferences.kt`、`util/DockBlacklistRules.kt` |
-| 规则、迁移与控件单元测试 | `app/src/test/java/com/car/dockbar/util/`、`app/src/test/java/com/car/dockbar/dock/` |
+| 偏好设置与启动 | `util/Prefs.kt`、`App.kt` |
+| Dock 黑名单默认值与存储 | `util/DockBlacklistDefaults.kt`、`util/DockBlacklistPreferences.kt`、`util/DockBlacklistRules.kt` |
+| 规则与控件单元测试 | `app/src/test/java/com/car/dockbar/util/`、`app/src/test/java/com/car/dockbar/dock/` |
 
 ## 3. 设置页和 UI 结构
 
@@ -110,7 +110,7 @@ Banana Dock 是面向 Android 车机的悬浮 Dock 应用，`namespace` 和 `app
 
 ### 4.1 默认布局（12 项）
 
-默认只在首次使用或恢复默认时生效，升级不能覆盖用户自定义顺序。`DockEntry.kt` 中的当前顺序是：
+未保存布局、保存的 JSON 无法解析或用户主动恢复默认时使用以下默认布局。已保存的自定义顺序和显式空布局不会在读取时改写。
 
 1. `HOME`：返回桌面。
 2. `SETTINGS`：车机设置。
@@ -150,7 +150,6 @@ Banana Dock 是面向 Android 车机的悬浮 Dock 应用，`namespace` 和 `app
 - 第三方应用走独立入口，系统/个人分类和搜索；删除入口不卸载应用。
 - 快捷应用是独立的 2×3 固定槽位数据。空位保留，替换不压缩其它位置，批量管理和 Dock 弹窗共用同一份槽位数据。
 - 快捷应用弹窗和图标管理的槽位共用应用名样式、空位标记与拖动落点描边。第三方应用保持原色，空位在弹窗中不启动应用，在管理页仍可点击添加。
-- `dock_entries_explicit_layout` 用于区分旧配置迁移和用户主动删除；用户清空或删除后不能每次读取又自动补回。
 
 ### 4.4 当前动作约束
 
@@ -181,7 +180,7 @@ Banana Dock 是面向 Android 车机的悬浮 Dock 应用，`namespace` 和 `app
 - 前台包名为空、空白或尚未取得（例如未开启无障碍）时，设置 `hiddenByApp=false`，不因前台应用隐藏 Dock。不存在“拿不到前台应用就交还全局空闲自动隐藏”的回退逻辑。
 - 全局空闲自动隐藏已经移除，`SHOWN` 状态不会因为无操作而倒计时消失；`pauseAutoHide()`、`onUserIdle()` 等沿用的名称不能作为该功能仍存在的依据。
 - 底部手势或弹窗触发的 `TEMP_SHOW` 临时显示倒计时仍保留。`DockStateMachine.onTempShowTimeout()` 到时仅在 `hiddenByApp=true` 时隐藏，否则转为 `SHOWN`，不得将其与已删除的全局空闲自动隐藏混淆。
-- 黑名单默认值和迁移分别见 `util/DockBlacklistDefaults.kt`、`util/DockBlacklistMigration.kt`；日常读写经 `Prefs` 转发至 `DockBlacklistPreferences`，不改变上述未知前台默认显示策略。
+- 尚未保存 `dock_hide_apps` 时使用 `util/DockBlacklistDefaults.kt` 的 29 项默认名单；保存后以所选名单为准，显式清空不会恢复默认。日常读写由 `Prefs` 转发至 `DockBlacklistPreferences`。
 
 ## 5. 音乐、歌词和权限
 

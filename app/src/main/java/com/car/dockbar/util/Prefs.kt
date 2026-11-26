@@ -35,16 +35,7 @@ object Prefs {
     fun setDockWidthPx(ctx: Context, v: Int) = sp(ctx).edit().putInt("dock_width_px", v).apply()
 
     /** 悬浮窗高度（px） */
-    fun dockHeightPx(ctx: Context): Int {
-        val s = sp(ctx)
-        if (!s.getBoolean("dock_height_default_128", false)) {
-            val cur = if (s.contains("dock_height_px")) s.getInt("dock_height_px", 128) else 128
-            val next = if (cur == 120) 128 else cur
-            s.edit().putInt("dock_height_px", next).putBoolean("dock_height_default_128", true).apply()
-            return next
-        }
-        return s.getInt("dock_height_px", 128)
-    }
+    fun dockHeightPx(ctx: Context): Int = sp(ctx).getInt("dock_height_px", 128)
     fun setDockHeightPx(ctx: Context, v: Int) = sp(ctx).edit().putInt("dock_height_px", v).apply()
 
     /** 底部 / 顶部的偏移量（px） */
@@ -248,7 +239,6 @@ object Prefs {
         sp(ctx).edit().putBoolean("vehicle_temp_watcher_enabled", v).apply()
 
     private const val HVAC_EVENT_KEYS_PREF = "hvac_event_keys"
-    private const val HVAC_SEAT_DEFAULTS_MIGRATED = "hvac_seat_defaults_migrated"
 
     internal val SEAT_CLIMATE_EVENT_KEYS = setOf("seat_vent", "seat_heat", "seat_heat_passenger")
 
@@ -263,20 +253,7 @@ object Prefs {
         "seat_vent_passenger", "defrost_front", "defrost_rear", "steering_heat"
     ) + SEAT_CLIMATE_EVENT_KEYS
 
-
-    /** 升级时只补入旧版还没有的座椅选项，显式全关和崩溃熔断清空的配置继续保留。 */
-    internal fun migrateHvacSeatEventDefaults(ctx: Context) {
-        val prefs = sp(ctx)
-        if (prefs.getBoolean(HVAC_SEAT_DEFAULTS_MIGRATED, false)) return
-        val saved = prefs.getStringSet(HVAC_EVENT_KEYS_PREF, null)
-        val edit = prefs.edit().putBoolean(HVAC_SEAT_DEFAULTS_MIGRATED, true)
-        if (saved != null && saved.any { it in HVAC_EVENT_KEYS } && saved.none { it in SEAT_CLIMATE_EVENT_KEYS }) {
-            edit.putStringSet(HVAC_EVENT_KEYS_PREF, saved + SEAT_CLIMATE_EVENT_KEYS)
-        }
-        edit.apply()
-    }
-
-    /** 未保存时使用默认通道；已保存的选择由设置页和启动迁移维护。 */
+    /** 未保存时使用默认通道；已保存的选择由设置页维护。 */
     fun hvacEventKeys(ctx: Context): Set<String> =
         sp(ctx).getStringSet(HVAC_EVENT_KEYS_PREF, DEFAULT_HVAC_EVENT_KEYS).orEmpty()
             .filterTo(mutableSetOf()) { it in HVAC_EVENT_KEYS }
@@ -589,32 +566,11 @@ object Prefs {
         )
     }
 
-    /**
-     * ★ v3.13.1：纯色模式开关。
-     *
-     * false = 默认，渐变模式（整条高度连续爬升，顶部最透 → 底部最浓）
-     * true  = **纯色模式**，整条 Dock 一个颜色：
-     *         白天纯白 0xFFFFFF / 夜间纯黑 0x000000（跟随系统日夜），
-     *         不透明度同样由「底色透明度」滑杆控制。
-     */
-    fun bgSolidMode(ctx: Context) = sp(ctx).getBoolean("bg_solid_mode", false)
-    fun setBgSolidMode(ctx: Context, v: Boolean) =
-        sp(ctx).edit().putBoolean("bg_solid_mode", v).apply()
-
-    /**
-     * ★ v3.13.16：**背景形态（四选一互斥）**。
-     *
-     * 迁移：老版本只有「纯色模式」开关（bg_solid_mode），
-     *   开 = SOLID，关 = GRADIENT；首次读到本项时按老开关推导。
-     */
+    /** 背景形态（四选一互斥）；未保存时默认为渐变。 */
     fun bgMode(ctx: Context): com.car.dockbar.ui.BgMode {
         val saved = sp(ctx).getString("bg_mode", null)
-        if (!saved.isNullOrEmpty()) return com.car.dockbar.ui.BgMode.of(saved)
-        return if (sp(ctx).getBoolean("bg_solid_mode", false)) {
-            com.car.dockbar.ui.BgMode.SOLID
-        } else {
-            com.car.dockbar.ui.BgMode.GRADIENT
-        }
+        return if (!saved.isNullOrEmpty()) com.car.dockbar.ui.BgMode.of(saved)
+        else com.car.dockbar.ui.BgMode.GRADIENT
     }
 
     fun setBgMode(ctx: Context, m: com.car.dockbar.ui.BgMode) {

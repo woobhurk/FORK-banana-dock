@@ -1259,7 +1259,6 @@ class DockOverlayService : Service() {
         if (Prefs.bgMode(ctx) == BgMode.SOLID) {
             return if (onSystemHome()) 0 else Prefs.solidBgColor(ctx)
         }
-        if (Prefs.bgSolidMode(ctx)) return Prefs.solidBgColor(ctx)
         val colors = Prefs.currentGradientColors(ctx)
         return averageColor(colors)
     }
