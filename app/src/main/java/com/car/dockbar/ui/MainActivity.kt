@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.res.ColorStateList
 import android.content.res.Configuration
 import android.graphics.Outline
+import android.os.Build
 import android.os.Bundle
 import android.view.Gravity
 import android.view.View
@@ -80,7 +81,11 @@ class MainActivity : AppCompatActivity() {
     internal val configImport = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) configBackup.read(uri)
     }
-    internal val configExport = registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+    internal val configExport = registerForActivityResult(
+        ActivityResultContracts.CreateDocument(
+            if (Build.VERSION.SDK_INT == Build.VERSION_CODES.P) "application/octet-stream" else "application/json",
+        ),
+    ) { uri ->
         configBackup.write(uri)
     }
     private val configBackupListener: (Set<BackupGroup>) -> Unit = { groups ->

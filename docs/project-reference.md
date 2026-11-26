@@ -111,6 +111,7 @@ Banana Dock 是面向 Android 车机的悬浮 Dock 应用，`namespace` 和 `app
 
 - 「设置 → 配置备份」在可用宽度充足时左列显示导入和本机恢复点、右列显示导出，窄屏纵向排列。导入先预览变更及无法启动的应用，再勾选并确认。布局、快捷应用槽位、黑名单按整组替换，其他设置按文件中给出的字段覆盖。缺装应用仍保留原位置。
 - 勾选配置组后，通过系统文件选择器保存 UTF-8 JSON，默认文件名为 `banana-dock-config-yyyyMMdd-HHmmss.json`（本机时间）。导出成功以文件写入并关闭为准；诊断日志记录选择结果、生成字节数和写入阶段，不记录配置内容或文件路径。
+- Android 9 向系统文件选择器请求通用文件类型（`application/octet-stream`），保留 `.json` 扩展名和 UTF-8 JSON 内容；Android 10 及以上仍请求 `application/json`。
 - 备份包含 Dock 顺序与手势、六个快捷应用槽位、黑名单及上滑显隐、背景与图文缩放、交互时长和歌词显示样式。屏幕与窗口尺寸、位置、圆角、原厂 Dock 选择、权限、车控保护、日志和歌词联网及启动设置由本机管理。备份会包含所选应用的包名，分享前可取消勾选相关组。
 - 文件标识 `format` 为 `banana-dock-config`。初始 `schemaVersion` 为 `5`，`sourceAppVersion` 用于展示来源。今后文件结构或语义发生变化时，在 `ConfigBackupFormat` 添加从当前版本到下一版的迁移，再提高版本号。现版拒绝 V1–V4 和 V6 以上的文件。应用自身的 `versionCode` 不参与文件迁移。
 - 缺少字段时保留目标车机的配置。源端未保存黑名单时，导出省略 `visibility.hiddenPackages`。显式清空则导出 `[]`。`layout.entries: []` 表示空布局，`layout.entries: null` 表示跟随目标版本默认布局。`quickApps.slots` 与本机 `app_drawer_apps_json` 使用相同的六槽结构：非空槽写 `{"package":"…"}`，空槽写 `null`。手势中的 `null` 表示禁用该动作，省略单个手势则继承控件默认。
