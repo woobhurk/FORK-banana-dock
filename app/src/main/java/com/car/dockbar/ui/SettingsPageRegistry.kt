@@ -35,6 +35,19 @@ internal class SettingsPageRegistry(
         return next
     }
 
+    /** 已创建的控件可能持有旧值，销毁后按正常初始化顺序重读。 */
+    fun invalidate(keys: Set<String>) {
+        val visible = current?.key?.takeIf { it in keys }
+        for (key in keys) created.remove(key)?.let { page ->
+            page.onDestroy()
+            content.removeView(page.root)
+        }
+        if (visible != null) {
+            current = null
+            show(visible)
+        }
+    }
+
     fun onResume() {
         current?.onResume()
     }

@@ -24,6 +24,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.app.NotificationCompat
 import com.car.dockbar.R
+import com.car.dockbar.config.BackupGroup
 import com.car.dockbar.media.LrcParser
 import com.car.dockbar.media.LyricMonitor
 import com.car.dockbar.util.Logx
@@ -130,6 +131,10 @@ class LyricOverlayService : Service(), LyricMonitor.Callback {
         }
     }
 
+    private val configBackupListener: (Set<BackupGroup>) -> Unit = { groups ->
+        if (BackupGroup.LYRICS in groups && attached) applyPrefs()
+    }
+
     // ---------------------------------------------------------------- 生命周期
 
     override fun onCreate() {
@@ -139,6 +144,7 @@ class LyricOverlayService : Service(), LyricMonitor.Callback {
         notifyState()
         startForegroundCompat()
         registerCmdReceiver()
+        ConfigBackupUpdates.add(configBackupListener)
         LyricMonitor.init(this, this)
         LyricMonitor.start()
         buildWindow()
@@ -166,6 +172,7 @@ class LyricOverlayService : Service(), LyricMonitor.Callback {
     override fun onBind(intent: Intent): IBinder? = null
 
     override fun onDestroy() {
+        ConfigBackupUpdates.remove(configBackupListener)
         Logx.d("LyricOverlayService onDestroy")
         alive = false
         attached = false

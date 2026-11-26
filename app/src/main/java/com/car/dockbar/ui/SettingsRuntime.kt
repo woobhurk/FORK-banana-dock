@@ -20,6 +20,7 @@ internal class SettingsRuntime(
 ) {
     private val main = Handler(Looper.getMainLooper())
     private var destroyed = false
+    private var started = false
     private var notifWasOk = false
     private var lastToastMs = 0L
     private val refreshStatus = Runnable { if (!destroyed) refresh() }
@@ -30,6 +31,8 @@ internal class SettingsRuntime(
     private val selectionListener: () -> Unit = { refreshStatus.run() }
 
     fun start() {
+        if (started) return
+        started = true
         DockOverlayService.addDockSelectionListener(selectionListener)
         val context = activity.applicationContext
         Thread {
@@ -54,6 +57,8 @@ internal class SettingsRuntime(
         main.removeCallbacks(retryDock)
         main.postDelayed(retryDock, 1500)
     }
+
+    fun cancelDockRetry() { main.removeCallbacks(retryDock) }
 
     fun onDestroy() {
         destroyed = true

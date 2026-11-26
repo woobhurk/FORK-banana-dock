@@ -9,9 +9,9 @@ import android.view.WindowManager
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.widget.Toast
 import com.car.dockbar.R
 import com.car.dockbar.dock.DockMetrics
-import com.car.dockbar.model.AppDrawerApp
 import com.car.dockbar.model.AppDrawerApps
 import com.car.dockbar.util.IntentLauncher
 import com.car.dockbar.util.Logx
@@ -45,7 +45,7 @@ class AppDrawerPopup(
         private set
 
     /** 6 个槽位当前放的应用（null = 空位） */
-    private val slotApps = MutableList<AppDrawerApp?>(AppDrawerApps.MAX_APPS) { null }
+    private val slotApps = MutableList<String?>(AppDrawerApps.MAX_APPS) { null }
     /** 6 个槽位对应的 View，用于换算手指落在哪个槽 */
     private val slotViews = arrayOfNulls<View>(AppDrawerApps.MAX_APPS)
     /** 2×3 网格的宿主容器（换位是局部重建，不重建整个窗口） */
@@ -106,7 +106,7 @@ class AppDrawerPopup(
         val panel = DockPopupStyle.card(context, scale, "快捷应用")
 
         val selected = AppDrawerApps.loadSlots(context)
-        for (i in 0 until AppDrawerApps.MAX_APPS) slotApps[i] = selected.getOrNull(i)
+        for (i in slotApps.indices) slotApps[i] = selected[i]
 
         gridHost = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
         panel.addView(gridHost, LinearLayout.LayoutParams(
@@ -161,7 +161,7 @@ class AppDrawerPopup(
                 dragTo = index
                 v.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
                 highlightDrag()
-                Logx.d("快捷应用：长按槽位 $index（${slotApps[index]?.label}），进入拖动")
+                Logx.d("快捷应用：长按槽位 $index（${slotApps[index]}），进入拖动")
             }
         }
     }
@@ -201,16 +201,14 @@ class AppDrawerPopup(
             slotApps[from] = b
             slotApps[to] = a
             AppDrawerApps.saveSlots(context, slotApps)
-            val whoA = a?.label ?: "空位"
-            val whoB = b?.label ?: "空位"
-            Logx.d("快捷应用：槽位 $from（$whoA）↔ 槽位 $to（$whoB）互换，已保存")
+            Logx.d("快捷应用：槽位 $from（${a ?: "空位"}）↔ 槽位 $to（${b ?: "空位"}）互换，已保存")
         }
         renderGrid()
     }
 
     /** @param index 槽位 0..5（[slotApps] 里为 null 就是空位） */
     private fun appCell(index: Int, iconSize: Int): View {
-        val app = slotApps.getOrNull(index)
+        val pkg = slotApps[index]
         val cell = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
@@ -222,23 +220,21 @@ class AppDrawerPopup(
             scaleType = ImageView.ScaleType.FIT_CENTER
         }
         val title = TextView(context)
-        AppDrawerSlotStyle.label(title, app?.label ?: "空位",
-            if (app == null) DockPopupStyle.secondary else DockPopupStyle.text, LABEL_SIZE_SP * scale)
-        if (app == null) {
+        if (pkg == null) {
+            AppDrawerSlotStyle.label(title, "空位", DockPopupStyle.secondary, LABEL_SIZE_SP * scale)
             AppDrawerSlotStyle.emptyIcon(icon, iconSize, DockPopupStyle.secondary)
         } else {
-            runCatching { icon.setImageDrawable(context.packageManager.getApplicationIcon(app.packageName)) }
-                .onFailure { icon.setImageResource(R.drawable.ic_car) }
+            val display = AppDrawerSlotStyle.resolveApp(context.packageManager, pkg)
+            AppDrawerSlotStyle.label(title, display.label, DockPopupStyle.text, LABEL_SIZE_SP * scale)
+            if (display.icon == null) icon.setImageResource(R.drawable.ic_car) else icon.setImageDrawable(display.icon)
             cell.setOnClickListener {
-                // ★ 拖动刚结束的那一次 UP 已被 onTouch 消费，不会走到这里
+                // 拖动结束的抬手事件由拖动处理消化，只有单击才尝试启动应用。
                 dismiss()
                 onInteraction()
-                IntentLauncher.launch(
-                    context,
-                    app.label,
-                    IntentLauncher.Target(pkg = app.packageName, cls = app.activityName),
-                    emptyList()
+                val launched = IntentLauncher.launch(
+                    context, display.label, IntentLauncher.Target(pkg = pkg), emptyList(),
                 )
+                if (launched == null) Toast.makeText(context, "无法启动 ${display.label}", Toast.LENGTH_SHORT).show()
             }
             setupSlotDrag(cell, index)
         }

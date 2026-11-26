@@ -40,6 +40,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.car.dockbar.App
 import com.car.dockbar.R
+import com.car.dockbar.config.BackupGroup
 import com.car.dockbar.config.VehicleChannels
 import com.car.dockbar.media.CabinVolume
 import com.car.dockbar.media.MediaBridge
@@ -316,6 +317,7 @@ class DockOverlayService : Service() {
                 Logx.e("$lastError → 降级为普通服务继续运行（可能被系统回收）")
             }
         registerReceiver()
+        ConfigBackupUpdates.add(::applyImportedConfig)
         VehicleController.addListener(vehicleListener)
         MediaBridge.addListener(mediaListener)
         LyricOverlayService.addStateListener(lyricStateListener)
@@ -539,6 +541,7 @@ class DockOverlayService : Service() {
         alive = false
         attached = false
         main.removeCallbacks(ticker)
+        ConfigBackupUpdates.remove(::applyImportedConfig)
         stopContrast()
         stopWork()
         VehicleController.removeListener(vehicleListener)
@@ -634,22 +637,7 @@ class DockOverlayService : Service() {
                 if (down) stateMachine?.pauseAutoHide() else stateMachine?.onUserIdle()
             }
         }
-        layout.applyAppearance(onSystemHome = onSystemHome())
-
-        // 按用户配置的条目动态构建（支持自定义应用增删、排序）
-        val host = ServiceDockHost()
-        val iconPx = DockMetrics.iconSizePx(ctx)
-        val entries: List<DockEntry> = DockEntries.load(ctx)
-        for (e in entries) {
-            val mounted = DockCatalog.mount(ctx, e, host, attachGestures = true, iconPx = iconPx)
-            layout.addItem(
-                mounted.view, mounted.span, mounted.separator,
-                mounted.fixedWidthPx, mounted.flexMinPx, mounted.flexMaxPx
-            )
-            mountedEntries += mounted
-        }
-        layout.applyPalette(DockBarPalette(darkIcons = !darkText, accent = Prefs.accentColor(ctx)))
-        Logx.d("Dock 条目数：${entries.size}（含自定义应用）")
+        populateDock(layout)
 
         // --- 窗口参数：窗体级透明（PixelFormat.TRANSLUCENT = 每像素 Alpha） ---
         val dw = Prefs.dockWidthPx(ctx)
@@ -697,6 +685,45 @@ class DockOverlayService : Service() {
             Logx.e("Dock 挂载失败：$lastError")
             Logx.e("如果是 'permission denied for window type 2038'，说明悬浮窗权限没给或车机有签名白名单限制")
         }
+    }
+
+    private fun populateDock(layout: DockLayout) {
+        layout.applyAppearance(onSystemHome = onSystemHome())
+        val host = ServiceDockHost()
+        val iconPx = DockMetrics.iconSizePx(this)
+        val entries: List<DockEntry> = DockEntries.load(this)
+        for (entry in entries) {
+            val mounted = DockCatalog.mount(this, entry, host, attachGestures = true, iconPx = iconPx)
+            layout.addItem(
+                mounted.view, mounted.span, mounted.separator,
+                mounted.fixedWidthPx, mounted.flexMinPx, mounted.flexMaxPx,
+            )
+            mountedEntries += mounted
+        }
+        layout.applyPalette(DockBarPalette(darkIcons = !darkText, accent = Prefs.accentColor(this)))
+        Logx.d("Dock 条目数：${entries.size}（含自定义应用）")
+    }
+
+    private fun applyImportedConfig(groups: Set<BackupGroup>) {
+        val layout = root ?: return
+        if (BackupGroup.LAYOUT in groups || BackupGroup.APPEARANCE in groups) {
+            // 保留既有窗口和显隐状态，只重建配置相关的视图。
+            layout.removeAllViews()
+            mountedEntries.clear()
+            lastBoundSnapshot = null
+            darkText = !initialLightBackground(this)
+            populateDock(layout)
+            rebind()
+        }
+        if (BackupGroup.LAYOUT in groups || BackupGroup.APPEARANCE in groups || BackupGroup.QUICK_APPS in groups) {
+            appDrawerPop?.destroy()
+        }
+        if (BackupGroup.VISIBILITY in groups) {
+            applyKeepShownForForeground()
+            if (!Prefs.swipeShowDockEnabled(this)) detachGestureStrip()
+            else if (stateMachine?.state == DockState.HIDDEN) attachGestureStrip()
+        }
+        if (BackupGroup.INTERACTION in groups) DockMusicView.refreshScrollHold()
     }
 
     // =====================================================================

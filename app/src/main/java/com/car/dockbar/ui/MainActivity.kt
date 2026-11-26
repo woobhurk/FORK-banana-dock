@@ -16,7 +16,9 @@ import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.ViewModelProvider
 import com.car.dockbar.R
+import com.car.dockbar.config.BackupGroup
 import com.car.dockbar.util.CrashHandler
 import com.car.dockbar.util.Logx
 import com.car.dockbar.util.Prefs
@@ -26,12 +28,15 @@ class MainActivity : AppCompatActivity() {
     companion object {
         private const val UI_SCALE = 0.9f
         private const val STATE_SECTION = "settings_section"
+        private const val STATE_BACKUP_GROUPS = "pending_backup_groups"
+        private const val STATE_EXPORT_SELECTION = "backup_export_selection"
         const val EXTRA_SECTION = "section"
         const val SECTION_OVERLAY = "overlay"
         const val SECTION_APPEARANCE = "appearance"
         const val SECTION_ICONS = "icons"
         const val SECTION_LYRIC = "lyric"
         const val SECTION_APPS = "apps"
+        internal const val SECTION_BACKUP = "backup"
         const val SECTION_LOGS = "logs"
         const val EXTRA_PICK_APP_DRAWER = "pick_app_drawer"
 
@@ -57,6 +62,7 @@ class MainActivity : AppCompatActivity() {
         PageSpec(SECTION_ICONS, "Dock 图标管理", R.drawable.ic_nav_grid, 0, ::IconsSettingsPage),
         PageSpec(SECTION_LYRIC, "歌词悬浮窗", R.drawable.ic_nav_doc, 0, ::LyricsSettingsPage),
         PageSpec(SECTION_APPS, "隐藏 Dock 应用", R.drawable.ic_nav_list, R.layout.settings_page_resident, ::ResidentSettingsPage),
+        PageSpec(SECTION_BACKUP, "配置备份", R.drawable.ic_nav_doc, 0, ::ConfigBackupSettingsPage),
         PageSpec(SECTION_LOGS, "诊断与日志", R.drawable.ic_nav_pulse, R.layout.settings_page_logs, ::LogsSettingsPage),
     )
     private class NavRow(val container: View, val bar: View, val icon: ImageView, val label: TextView)
@@ -68,6 +74,26 @@ class MainActivity : AppCompatActivity() {
     internal val diagnosticExport = registerForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
         val page = if (uri != null) pages.requirePage(SECTION_LOGS) else pages.createdPage(SECTION_LOGS)
         (page as? LogsSettingsPage)?.onExportResult(uri)
+    }
+    private val configBackupModel = lazy { ViewModelProvider(this)[ConfigBackupSession::class.java] }
+    internal val configBackup by configBackupModel
+    internal val configImport = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) configBackup.read(uri)
+    }
+    internal val configExport = registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        configBackup.write(uri)
+    }
+    private val configBackupListener: (Set<BackupGroup>) -> Unit = { groups ->
+        val affected = buildSet {
+            if (BackupGroup.LAYOUT in groups || BackupGroup.QUICK_APPS in groups || BackupGroup.INTERACTION in groups) add(SECTION_ICONS)
+            if (BackupGroup.APPEARANCE in groups || BackupGroup.INTERACTION in groups) add(SECTION_APPEARANCE)
+            if (BackupGroup.VISIBILITY in groups) {
+                (pages.createdPage(SECTION_OVERLAY) as? FloatingDockSettingsPage)?.refreshVisibilitySettings()
+                add(SECTION_APPS)
+            }
+            if (BackupGroup.LYRICS in groups) add(SECTION_LYRIC)
+        }
+        pages.invalidate(affected)
     }
 
     override fun attachBaseContext(newBase: Context) {
@@ -105,22 +131,36 @@ class MainActivity : AppCompatActivity() {
             CrashHandler.clear(this, clearExportArchive = false)
             Logx.e("检测到上次闪退，已归档 Java 堆栈")
         }
+        savedInstanceState?.getStringArrayList(STATE_BACKUP_GROUPS)?.let { ids ->
+            configBackup.pendingExport = BackupGroup.entries.filterTo(mutableSetOf()) { it.id in ids }
+        }
+        savedInstanceState?.getStringArrayList(STATE_EXPORT_SELECTION)?.let { ids ->
+            configBackup.exportGroups.clear()
+            BackupGroup.entries.filterTo(configBackup.exportGroups) { it.id in ids }
+        }
+        ConfigBackupUpdates.add(configBackupListener)
         val target = intent?.getStringExtra(EXTRA_SECTION)?.takeUnless { it.isBlank() }
         showPage(savedInstanceState?.getString(STATE_SECTION) ?: target ?: SECTION_OVERLAY)
         if (savedInstanceState == null && target == null && intent?.getBooleanExtra(EXTRA_PICK_APP_DRAWER, false) == true) {
             (pages.requirePage(SECTION_ICONS) as IconsSettingsPage).requestAppDrawerPicker()
         }
-        runtime.start()
     }
 
     override fun onResume() {
         super.onResume()
-        runtime.onResume()
+        // 从系统文件选择器返回时，继续备份流程，避免附带启动悬浮窗或触发权限恢复。
+        if (currentPage != SECTION_BACKUP) runtime.onResume()
         if (::pages.isInitialized) pages.onResume()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putString(STATE_SECTION, currentPage)
+        if (configBackupModel.isInitialized()) {
+            outState.putStringArrayList(STATE_EXPORT_SELECTION, configBackup.exportGroups.mapTo(ArrayList()) { it.id })
+            configBackup.pendingExport?.let { groups ->
+                outState.putStringArrayList(STATE_BACKUP_GROUPS, groups.mapTo(ArrayList()) { it.id })
+            }
+        }
         super.onSaveInstanceState(outState)
     }
 
@@ -130,6 +170,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        ConfigBackupUpdates.remove(configBackupListener)
         runtime.onDestroy()
         if (::pages.isInitialized) pages.onDestroy()
         super.onDestroy()
@@ -141,8 +182,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showPage(key: String) {
+        if (currentPage == SECTION_BACKUP && key != SECTION_BACKUP && configBackup.writingPreferences) return
         val page = pages.show(key)
         currentPage = page.key
+        if (currentPage == SECTION_BACKUP) runtime.cancelDockRetry()
+        else runtime.start()
         val label = pageSpecs.first { it.key == currentPage }.label
         title = "设置 · $label"
         updateNavSelection()
@@ -283,6 +327,10 @@ class MainActivity : AppCompatActivity() {
             LinearLayout.LayoutParams.WRAP_CONTENT).apply {
             setMargins(dp(8), dp(16), dp(8), dp(12))
         })
+    }
+
+    internal fun updateBackupNavigation(writingPreferences: Boolean) {
+        for ((key, row) in navButtons) row.container.isEnabled = !writingPreferences || key == SECTION_BACKUP
     }
 
     private fun updateNavSelection() {

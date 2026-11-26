@@ -26,6 +26,7 @@ class FloatingDockSettingsPage(activity: MainActivity, root: LinearLayout) :
     private lateinit var bananaDockSwitch: SwitchCompat
     private lateinit var originalDockSwitch: SwitchCompat
     private lateinit var originalDockResult: TextView
+    private lateinit var swipeSettings: LinearLayout
     private var updatingDockSwitches = false
     internal fun refreshStatus() {
         refreshDockSwitches()
@@ -69,13 +70,19 @@ class FloatingDockSettingsPage(activity: MainActivity, root: LinearLayout) :
         findViewById<Button>(R.id.btnGrantOverlay).setOnClickListener { IntentLauncher.requestOverlayPermission(this) }
         findViewById<Button>(R.id.btnGrantNotif).setOnClickListener { IntentLauncher.requestNotificationAccess(this) }
         findViewById<Button>(R.id.btnGrantAccessibilityDock).setOnClickListener { openAccessibilitySettings() }
-        val overlaySide = findViewById<LinearLayout>(R.id.colOverlaySide)
+        swipeSettings = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        findViewById<LinearLayout>(R.id.colOverlaySide).addView(swipeSettings)
+        refreshVisibilitySettings()
+    }
+
+    internal fun refreshVisibilitySettings() {
+        swipeSettings.removeAllViews()
         addSwitchRow(
-            overlaySide, "底部上滑临时显示 Dock",
+            swipeSettings, "底部上滑临时显示 Dock",
             Prefs.swipeShowDockEnabled(this)
         ) { Prefs.setSwipeShowDockEnabled(this, it) }
         addSeekRow(
-            overlaySide, "上滑后 Dock 显示时长",
+            swipeSettings, "上滑后 Dock 显示时长",
             (Prefs.swipeShowDockMs(this) / 1000L).toInt(), 30,
             { "%d 秒".format(it) },
             onChange = { Prefs.setSwipeShowDockMs(this, it * 1000L) }

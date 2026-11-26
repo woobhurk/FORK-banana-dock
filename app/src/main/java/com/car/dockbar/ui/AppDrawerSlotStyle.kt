@@ -1,7 +1,10 @@
 package com.car.dockbar.ui
 
+import android.content.pm.ApplicationInfo
+import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
+import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.StateListDrawable
 import android.text.TextUtils
@@ -15,6 +18,18 @@ import kotlin.math.roundToInt
 
 /** 槽位视觉相同，点击与保存仍分别属于弹窗和图标管理页。 */
 internal object AppDrawerSlotStyle {
+    data class AppDisplay(val label: String, val icon: Drawable?)
+
+    fun resolveApp(pm: PackageManager, pkg: String): AppDisplay {
+        val info = runCatching { pm.getApplicationInfo(pkg, 0) }.getOrNull()
+            ?: return AppDisplay(pkg, null)
+        return AppDisplay(appLabel(pm, info), runCatching { pm.getApplicationIcon(info) }.getOrNull())
+    }
+
+    fun appLabel(pm: PackageManager, info: ApplicationInfo): String =
+        runCatching { pm.getApplicationLabel(info).toString() }.getOrDefault(info.packageName)
+            .ifBlank { info.packageName }
+
     fun label(view: TextView, caption: String, color: Int, textSizeSp: Float = 13f) = with(view) {
         text = caption
         textSize = textSizeSp

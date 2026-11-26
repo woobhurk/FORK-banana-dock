@@ -13,6 +13,16 @@ object Prefs {
     fun sp(ctx: Context): SharedPreferences =
         ctx.applicationContext.getSharedPreferences(NAME, Context.MODE_PRIVATE)
 
+    // 与配置导入共用同一把锁，防止单项保存插入校验、提交或还原之间。
+    internal val portableWriteLock = Any()
+    private inline fun editPortable(ctx: Context, change: SharedPreferences.Editor.() -> Unit) {
+        synchronized(portableWriteLock) {
+            val editor = sp(ctx).edit()
+            editor.change()
+            editor.apply()
+        }
+    }
+
     // ---------------- 悬浮窗 ----------------
     fun overlayEnabled(ctx: Context) = sp(ctx).getBoolean("overlay_enabled", true)
     fun setOverlayEnabled(ctx: Context, v: Boolean) = sp(ctx).edit().putBoolean("overlay_enabled", v).apply()
@@ -60,15 +70,15 @@ object Prefs {
 
     /** 是否画分组竖分隔线 */
     fun showSeparators(ctx: Context) = sp(ctx).getBoolean("show_separators", true)
-    fun setShowSeparators(ctx: Context, v: Boolean) = sp(ctx).edit().putBoolean("show_separators", v).apply()
+    fun setShowSeparators(ctx: Context, v: Boolean) = editPortable(ctx) { putBoolean("show_separators", v) }
 
     /** 图标缩放系数（独立于文字） */
     fun iconScale(ctx: Context) = sp(ctx).getFloat("icon_scale", 1f)
-    fun setIconScale(ctx: Context, v: Float) = sp(ctx).edit().putFloat("icon_scale", v).apply()
+    fun setIconScale(ctx: Context, v: Float) = editPortable(ctx) { putFloat("icon_scale", v) }
 
     /** 文字缩放系数（独立于图标） */
     fun textScale(ctx: Context) = sp(ctx).getFloat("text_scale", 1f)
-    fun setTextScale(ctx: Context, v: Float) = sp(ctx).edit().putFloat("text_scale", v).apply()
+    fun setTextScale(ctx: Context, v: Float) = editPortable(ctx) { putFloat("text_scale", v) }
 
     /** 强调色（激活态，如内循环开启 / 通风开启） */
     fun accentColor(ctx: Context, fallback: Int = 0xFF4EA1FF.toInt()) = sp(ctx).getInt("accent_color", fallback)
@@ -379,7 +389,7 @@ object Prefs {
     // ---------------- Dock 条目（图标自定义增删） ----------------
     /** Dock 条目的 JSON 数组；空串 = 用默认布局 */
     fun entriesJson(ctx: Context) = sp(ctx).getString("dock_entries_json", "") ?: ""
-    fun setEntriesJson(ctx: Context, v: String) = sp(ctx).edit().putString("dock_entries_json", v).apply()
+    fun setEntriesJson(ctx: Context, v: String) = editPortable(ctx) { putString("dock_entries_json", v) }
 
     const val DOCK_LONG_PRESS_MIN_MS = 200L
     const val DOCK_LONG_PRESS_MAX_MS = 1000L
@@ -388,14 +398,14 @@ object Prefs {
         sp(ctx).getLong("dock_long_press_delay_ms", 350L)
             .coerceIn(DOCK_LONG_PRESS_MIN_MS, DOCK_LONG_PRESS_MAX_MS)
 
-    fun setDockLongPressDelayMs(ctx: Context, v: Long) = sp(ctx).edit()
-        .putLong("dock_long_press_delay_ms", v.coerceIn(DOCK_LONG_PRESS_MIN_MS, DOCK_LONG_PRESS_MAX_MS))
-        .apply()
+    fun setDockLongPressDelayMs(ctx: Context, v: Long) = editPortable(ctx) {
+        putLong("dock_long_press_delay_ms", v.coerceIn(DOCK_LONG_PRESS_MIN_MS, DOCK_LONG_PRESS_MAX_MS))
+    }
 
     /** 车机设置右侧应用面板的快捷应用 JSON 数组 */
     fun appDrawerAppsJson(ctx: Context) = sp(ctx).getString("app_drawer_apps_json", "") ?: ""
     fun setAppDrawerAppsJson(ctx: Context, v: String) =
-        sp(ctx).edit().putString("app_drawer_apps_json", v).apply()
+        editPortable(ctx) { putString("app_drawer_apps_json", v) }
 
     /**
      * ★ v1.4.97 #12：座椅记忆「当前在第几号位」的**本地记录**（1/2/3，0 = 还没选过）。
@@ -415,7 +425,7 @@ object Prefs {
      * 淡入淡出时长（ms）。对齐吉利 oneOS Dock 的 350ms。
      */
     fun fadeDurationMs(ctx: Context) = sp(ctx).getLong("fade_duration_ms", 350L)
-    fun setFadeDurationMs(ctx: Context, v: Long) = sp(ctx).edit().putLong("fade_duration_ms", v).apply()
+    fun setFadeDurationMs(ctx: Context, v: Long) = editPortable(ctx) { putLong("fade_duration_ms", v) }
 
     /**
      * 歌名和歌手滚到开头或结尾后，停住再反向的时间（毫秒）。
@@ -426,7 +436,7 @@ object Prefs {
     fun musicScrollHoldMs(ctx: Context) =
         sp(ctx).getLong("music_scroll_hold_ms", 2000L).coerceIn(0L, MUSIC_SCROLL_HOLD_MAX_MS)
     fun setMusicScrollHoldMs(ctx: Context, v: Long) =
-        sp(ctx).edit().putLong("music_scroll_hold_ms", v.coerceIn(0L, MUSIC_SCROLL_HOLD_MAX_MS)).apply()
+        editPortable(ctx) { putLong("music_scroll_hold_ms", v.coerceIn(0L, MUSIC_SCROLL_HOLD_MAX_MS)) }
 
     // ---------------- 底部上滑临时显示 Dock（v1.4.73） ----------------
     /**
@@ -437,12 +447,12 @@ object Prefs {
      */
     fun swipeShowDockEnabled(ctx: Context) = sp(ctx).getBoolean("swipe_show_dock", true)
     fun setSwipeShowDockEnabled(ctx: Context, v: Boolean) =
-        sp(ctx).edit().putBoolean("swipe_show_dock", v).apply()
+        editPortable(ctx) { putBoolean("swipe_show_dock", v) }
 
     /** 临时显示时长（ms），默认 5000 */
     fun swipeShowDockMs(ctx: Context) = sp(ctx).getLong("swipe_show_dock_ms", 5000L)
     fun setSwipeShowDockMs(ctx: Context, v: Long) =
-        sp(ctx).edit().putLong("swipe_show_dock_ms", v).apply()
+        editPortable(ctx) { putLong("swipe_show_dock_ms", v) }
 
     /** 手势条高度（px），默认 64 —— 会挡住该区域的点击，越小越好 */
     fun swipeShowDockStripPx(ctx: Context) = sp(ctx).getInt("swipe_show_dock_strip_px", 64)
@@ -458,8 +468,9 @@ object Prefs {
     fun dockHideApps(ctx: Context): Set<String> =
         DockBlacklistPreferences.read(sp(ctx))
 
-    fun setDockHideApps(ctx: Context, pkgs: Set<String>) =
+    fun setDockHideApps(ctx: Context, pkgs: Set<String>) = synchronized(portableWriteLock) {
         DockBlacklistPreferences.write(sp(ctx), pkgs)
+    }
 
     /** 该包名在前台时是否要**隐藏** Dock；v4 之后只看单一黑名单。 */
     fun isDockHideApp(ctx: Context, pkg: String): Boolean {
@@ -478,7 +489,7 @@ object Prefs {
     // ---------------- 底色与日夜模式 ----------------
     /** true = 跟随系统深浅色自动切换底色 */
     fun bgFollowNight(ctx: Context) = sp(ctx).getBoolean("bg_follow_night", true)
-    fun setBgFollowNight(ctx: Context, v: Boolean) = sp(ctx).edit().putBoolean("bg_follow_night", v).apply()
+    fun setBgFollowNight(ctx: Context, v: Boolean) = editPortable(ctx) { putBoolean("bg_follow_night", v) }
 
     /**
      * 白天底色透明度 0..100（0 = 完全不透明，100 = 完全透明）。
@@ -486,7 +497,7 @@ object Prefs {
      */
     fun dayBgTransparency(ctx: Context) = sp(ctx).getInt("bg_transparency_day", 30)
     fun setDayBgTransparency(ctx: Context, v: Int) =
-        sp(ctx).edit().putInt("bg_transparency_day", v.coerceIn(0, 100)).apply()
+        editPortable(ctx) { putInt("bg_transparency_day", v.coerceIn(0, 100)) }
 
     /**
      * 夜间底色透明度 0..100（0 = 完全不透明，100 = 完全透明）。
@@ -494,7 +505,7 @@ object Prefs {
      */
     fun nightBgTransparency(ctx: Context) = sp(ctx).getInt("bg_transparency_night", 15)
     fun setNightBgTransparency(ctx: Context, v: Int) =
-        sp(ctx).edit().putInt("bg_transparency_night", v.coerceIn(0, 100)).apply()
+        editPortable(ctx) { putInt("bg_transparency_night", v.coerceIn(0, 100)) }
 
     /**
      * 当前生效的底色 RGB（纯白 / 纯黑，跟随日夜）。
@@ -529,17 +540,15 @@ object Prefs {
         else com.car.dockbar.ui.BgMode.GRADIENT
     }
 
-    fun setBgMode(ctx: Context, m: com.car.dockbar.ui.BgMode) {
-        sp(ctx).edit().putString("bg_mode", m.key).apply()
-    }
+    fun setBgMode(ctx: Context, m: com.car.dockbar.ui.BgMode) = editPortable(ctx) { putString("bg_mode", m.key) }
 
     /** 透明叠层试验：灰度 0 = 黑，100 = 白；透明度 100 = 完全透明。 */
     fun overlayGrayLevel(ctx: Context) = sp(ctx).getInt("overlay_gray_level", 50).coerceIn(0, 100)
     fun setOverlayGrayLevel(ctx: Context, v: Int) =
-        sp(ctx).edit().putInt("overlay_gray_level", v.coerceIn(0, 100)).apply()
+        editPortable(ctx) { putInt("overlay_gray_level", v.coerceIn(0, 100)) }
     fun overlayTransparency(ctx: Context) = sp(ctx).getInt("overlay_transparency", 50).coerceIn(0, 100)
     fun setOverlayTransparency(ctx: Context, v: Int) =
-        sp(ctx).edit().putInt("overlay_transparency", v.coerceIn(0, 100)).apply()
+        editPortable(ctx) { putInt("overlay_transparency", v.coerceIn(0, 100)) }
 
     /**
      * 纯色模式下的底色 ARGB（整条一个颜色）。
@@ -570,21 +579,21 @@ object Prefs {
 
     /** 背景不透明度 0(全透明) ~ 100(全黑) */
     fun lyricAlpha(ctx: Context) = sp(ctx).getInt("lyric_alpha", 40)
-    fun setLyricAlpha(ctx: Context, v: Int) = sp(ctx).edit().putInt("lyric_alpha", v).apply()
+    fun setLyricAlpha(ctx: Context, v: Int) = editPortable(ctx) { putInt("lyric_alpha", v) }
 
     /** 歌词字号 sp */
     fun lyricTextSize(ctx: Context) = sp(ctx).getInt("lyric_text_size", 26)
-    fun setLyricTextSize(ctx: Context, v: Int) = sp(ctx).edit().putInt("lyric_text_size", v).apply()
+    fun setLyricTextSize(ctx: Context, v: Int) = editPortable(ctx) { putInt("lyric_text_size", v) }
 
     /** 普通行颜色 ARGB */
     fun lyricTextColor(ctx: Context) = sp(ctx).getInt("lyric_text_color", 0xFFE6E6E6.toInt())
     fun setLyricTextColor(ctx: Context, v: Int) =
-        sp(ctx).edit().putInt("lyric_text_color", v).apply()
+        editPortable(ctx) { putInt("lyric_text_color", v) }
 
     /** 当前行（高亮）颜色 ARGB */
     fun lyricHlColor(ctx: Context) = sp(ctx).getInt("lyric_hl_color", 0xFFFFD54F.toInt())
     fun setLyricHlColor(ctx: Context, v: Int) =
-        sp(ctx).edit().putInt("lyric_hl_color", v).apply()
+        editPortable(ctx) { putInt("lyric_hl_color", v) }
 
     /** 显示行数 1~10，默认 10 */
     fun lyricLineCount(ctx: Context): Int {
@@ -593,17 +602,17 @@ object Prefs {
     }
 
     fun setLyricLineCount(ctx: Context, v: Int) =
-        sp(ctx).edit().putInt("lyric_line_count", v.coerceIn(1, 10)).apply()
+        editPortable(ctx) { putInt("lyric_line_count", v.coerceIn(1, 10)) }
 
     /** 歌词时间轴偏移 ms（±3000，200 步进） */
     fun lyricOffsetMs(ctx: Context) = sp(ctx).getInt("lyric_offset_ms", 0)
     fun setLyricOffsetMs(ctx: Context, v: Int) =
-        sp(ctx).edit().putInt("lyric_offset_ms", v.coerceIn(-3000, 3000)).apply()
+        editPortable(ctx) { putInt("lyric_offset_ms", v.coerceIn(-3000, 3000)) }
 
     /** 锁定 = 整窗点击穿透（FLAG_NOT_TOUCHABLE），点窗口等于点它下面的内容 */
     fun lyricLocked(ctx: Context) = sp(ctx).getBoolean("lyric_locked", false)
     fun setLyricLocked(ctx: Context, v: Boolean) =
-        sp(ctx).edit().putBoolean("lyric_locked", v).apply()
+        editPortable(ctx) { putBoolean("lyric_locked", v) }
 
     /** 窗口宽度 dp 160~1200 */
     fun lyricWinW(ctx: Context): Int =

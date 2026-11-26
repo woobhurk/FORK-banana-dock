@@ -2,7 +2,6 @@ package com.car.dockbar.ui
 
 import android.content.Intent
 import android.content.pm.ApplicationInfo
-import android.graphics.drawable.Drawable
 import android.view.Gravity
 import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
@@ -18,23 +17,17 @@ import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import androidx.core.content.ContextCompat
 import com.car.dockbar.R
-import com.car.dockbar.model.AppDrawerApp
 import com.car.dockbar.model.AppDrawerApps
 import com.car.dockbar.model.DockEntries
 import com.car.dockbar.util.Logx
 import com.car.dockbar.util.Prefs
-import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
 /** 负责图标卡片、启动目标及快捷应用交互，不处理其他设置页面。 */
 class IconsSettingsPage(activity: MainActivity, root: LinearLayout) :
     SettingsPage(activity, MainActivity.SECTION_ICONS, root) {
-    companion object {
-        // 隐藏 Dock 应用页也需要加载图标；后续引入共享的已安装应用目录管理类时，
-        // 可将这些辅助方法迁入其中，无需宿主提供回调。
-        private val iconCache = HashMap<String, Drawable?>()
-        private val iconExecutor: ExecutorService = Executors.newSingleThreadExecutor()
-    }
+    private val appExecutor = Executors.newSingleThreadExecutor()
+    private var gridGeneration = 0
 
     private var destroyed = false
     private var tvAppDrawerSummary: TextView? = null
@@ -42,7 +35,7 @@ class IconsSettingsPage(activity: MainActivity, root: LinearLayout) :
     private var quickAppsGrid: LinearLayout? = null
     private val dialogs = mutableSetOf<AlertDialog>()
 
-    private data class AppDrawerCandidate(val app: AppDrawerApp, val isSystem: Boolean)
+    private data class AppDrawerCandidate(val packageName: String, val label: String, val isSystem: Boolean)
 
     override fun create() {
         root.id = R.id.settingsDockEntriesPage
@@ -90,7 +83,6 @@ class IconsSettingsPage(activity: MainActivity, root: LinearLayout) :
             orientation = LinearLayout.VERTICAL
         }
         root.addView(quickAppsGrid)
-        refreshAppDrawerSelectionLabel()
 
         val minDelay = Prefs.DOCK_LONG_PRESS_MIN_MS
         val delayStep = 50L
@@ -181,22 +173,24 @@ class IconsSettingsPage(activity: MainActivity, root: LinearLayout) :
 
     override fun onDestroy() {
         destroyed = true
+        appExecutor.shutdownNow()
         dialogs.toList().forEach { runCatching { it.dismiss() } }
         dialogs.clear()
         super.onDestroy()
     }
 
     private fun refreshAppDrawerSelectionLabel() {
-        val count = AppDrawerApps.load(this).size
+        val packages = AppDrawerApps.loadSlots(this)
+        val count = packages.count { it != null }
         tvAppDrawerSummary?.text = "已选择 $count / ${AppDrawerApps.MAX_APPS}"
         btnAppDrawerSelection?.text = "管理应用"
-        renderQuickAppsGrid()
+        renderQuickAppsGrid(packages)
     }
 
-    private fun renderQuickAppsGrid() {
+    private fun renderQuickAppsGrid(packages: List<String?>) {
         val grid = quickAppsGrid ?: return
         grid.removeAllViews()
-        val apps = AppDrawerApps.loadSlots(this)
+        val generation = ++gridGeneration
         val slotViews = mutableListOf<View>()
         var dragFrom = -1
         var dragTo = -1
@@ -214,7 +208,7 @@ class IconsSettingsPage(activity: MainActivity, root: LinearLayout) :
             if (commit && from in 0 until AppDrawerApps.MAX_APPS &&
                 to in 0 until AppDrawerApps.MAX_APPS && from != to) {
                 // 只交换两个固定槽位，空槽位也参与交换。
-                val slots = MutableList<AppDrawerApp?>(AppDrawerApps.MAX_APPS) { apps.getOrNull(it) }
+                val slots = packages.toMutableList()
                 val old = slots[from]
                 slots[from] = slots[to]
                 slots[to] = old
@@ -230,17 +224,17 @@ class IconsSettingsPage(activity: MainActivity, root: LinearLayout) :
             ).apply { if (rowIndex > 0) topMargin = dp(8) })
             repeat(3) { colIndex ->
                 val slot = rowIndex * 3 + colIndex
-                val app = apps.getOrNull(slot)
-                val tile = SettingsAppTile(this, app?.label).apply {
+                val pkg = packages[slot]
+                val tile = SettingsAppTile(this, pkg).apply {
                     AppDrawerSlotStyle.applyDragOutline(this,
                         ContextCompat.getColor(this@IconsSettingsPage, R.color.settings_accent))
                     isClickable = true
                     isFocusable = true
-                    contentDescription = if (app == null) "管理快捷应用 ${slot + 1}" else "替换快捷应用 ${app.label}"
+                    contentDescription = if (pkg == null) "管理快捷应用 ${slot + 1}" else "替换快捷应用 $pkg"
                     setOnClickListener {
-                        if (app == null) chooseAppDrawerApps() else chooseAppDrawerApps(slot)
+                        if (pkg == null) chooseAppDrawerApps() else chooseAppDrawerApps(slot)
                     }
-                    if (app != null) DockDragLongPress.attach(this, onDragTouch = drag@{ event ->
+                    if (pkg != null) DockDragLongPress.attach(this, onDragTouch = drag@{ event ->
                         if (dragFrom != slot) return@drag
                         when (event.actionMasked) {
                             MotionEvent.ACTION_MOVE -> {
@@ -269,16 +263,16 @@ class IconsSettingsPage(activity: MainActivity, root: LinearLayout) :
                     }
                 }
                 slotViews.add(tile)
-                if (app != null) {
-                    loadAppIconAsync(app.packageName, tile.icon)
-                    tile.addRemoveButton("清除快捷应用 ${app.label}") {
+                if (pkg != null) {
+                    tile.addRemoveButton("清除快捷应用 $pkg") {
                         val current = AppDrawerApps.loadSlots(this).toMutableList()
-                        if (current[slot]?.packageName == app.packageName) {
+                        if (current[slot] == pkg) {
                             current[slot] = null
                             AppDrawerApps.saveSlots(this, current)
                         }
                         refreshAppDrawerSelectionLabel()
                     }
+                    loadAppDisplay(pkg, tile, generation)
                 }
                 row.addView(tile, LinearLayout.LayoutParams(0, dp(SettingsAppTile.HEIGHT_DP), 1f).apply {
                     if (colIndex > 0) marginStart = dp(8)
@@ -294,33 +288,29 @@ class IconsSettingsPage(activity: MainActivity, root: LinearLayout) :
             .create()
         loading.show()
         loading.applyDockSafe()
-        Thread {
+        appExecutor.execute {
             val pm = packageManager
             val items = runCatching {
                 pm.queryIntentActivities(
                     Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0
                 ).asSequence()
-                    .mapNotNull { it.activityInfo }
+                    .mapNotNull { it.activityInfo?.applicationInfo }
+                    .distinctBy { it.packageName }
                     .map { info ->
-                        val appInfo = info.applicationInfo
                         AppDrawerCandidate(
-                            app = AppDrawerApp(
-                                label = info.loadLabel(pm).toString(),
-                                packageName = info.packageName,
-                                activityName = info.name
-                            ),
-                            isSystem = (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0
+                            info.packageName, AppDrawerSlotStyle.appLabel(pm, info),
+                            (info.flags and ApplicationInfo.FLAG_SYSTEM) != 0,
                         )
                     }
-                    .distinctBy { it.app.packageName }
-                    .sortedBy { it.app.label.lowercase() }
+                    .sortedBy { it.label.lowercase() }
                     .toList()
             }.getOrDefault(emptyList())
             main.post {
+                if (destroyed) return@post
                 runCatching { loading.dismiss() }
                 if (slot == null) showAppDrawerPicker(items) else showAppDrawerSlotPicker(items, slot)
             }
-        }.start()
+        }
     }
 
     private fun showAppDrawerPicker(items: List<AppDrawerCandidate>) {
@@ -328,12 +318,9 @@ class IconsSettingsPage(activity: MainActivity, root: LinearLayout) :
             toastOnce("没有读到可启动的应用")
             return
         }
-        val availablePackages = items.map { it.app.packageName }.toSet()
-        val selected = LinkedHashMap<String, AppDrawerApp>()
-        AppDrawerApps.load(this)
-            .filter { it.packageName in availablePackages }
-            .take(AppDrawerApps.MAX_APPS)
-            .forEach { selected[it.packageName] = it }
+        val availablePackages = items.mapTo(HashSet()) { it.packageName }
+        val selected = AppDrawerApps.loadSlots(this).filterNotNullTo(linkedSetOf())
+        val unavailableCount = selected.count { it !in availablePackages }
 
         val list = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -348,6 +335,9 @@ class IconsSettingsPage(activity: MainActivity, root: LinearLayout) :
         ).apply { bottomMargin = dp(6) })
         fun refreshCount() {
             countLabel.text = "已选 ${selected.size}/${AppDrawerApps.MAX_APPS}（面板按 2 行 × 3 列排列）"
+            if (unavailableCount > 0) {
+                countLabel.append("\n其中 $unavailableCount 个应用不在可启动列表，仍占用原槽，可在快捷应用卡片中移除或替换。")
+            }
         }
         refreshCount()
 
@@ -373,14 +363,14 @@ class IconsSettingsPage(activity: MainActivity, root: LinearLayout) :
                     layoutParams = LinearLayout.LayoutParams(dp(34), dp(34))
                     scaleType = ImageView.ScaleType.FIT_CENTER
                     runCatching {
-                        setImageDrawable(packageManager.getApplicationIcon(candidate.app.packageName))
+                        setImageDrawable(packageManager.getApplicationIcon(candidate.packageName))
                     }.onFailure { setImageResource(R.drawable.ic_car) }
                 })
                 val check = CheckBox(this).apply {
-                    text = "${candidate.app.label}\n${candidate.app.packageName}"
+                    text = "${candidate.label}\n${candidate.packageName}"
                     textSize = 14f
                     setTextColor(ContextCompat.getColor(this@IconsSettingsPage, R.color.settings_text))
-                    isChecked = candidate.app.packageName in selected
+                    isChecked = candidate.packageName in selected
                 }
                 lateinit var listener: android.widget.CompoundButton.OnCheckedChangeListener
                 listener = android.widget.CompoundButton.OnCheckedChangeListener { button, checked ->
@@ -391,8 +381,7 @@ class IconsSettingsPage(activity: MainActivity, root: LinearLayout) :
                         toastOnce("快捷应用最多选择 ${AppDrawerApps.MAX_APPS} 个")
                         return@OnCheckedChangeListener
                     }
-                    if (checked) selected[candidate.app.packageName] = candidate.app
-                    else selected.remove(candidate.app.packageName)
+                    if (checked) selected.add(candidate.packageName) else selected.remove(candidate.packageName)
                     refreshCount()
                 }
                 check.setOnCheckedChangeListener(listener)
@@ -416,7 +405,7 @@ class IconsSettingsPage(activity: MainActivity, root: LinearLayout) :
             .setView(scroll)
             .setNegativeButton("取消", null)
             .setPositiveButton("保存") { _, _ ->
-                AppDrawerApps.save(this, selected.values.toList())
+                AppDrawerApps.saveSelection(this, availablePackages, selected)
                 refreshAppDrawerSelectionLabel()
                 Logx.d("快捷应用面板已更新：${selected.size} 个应用")
             }
@@ -433,13 +422,13 @@ class IconsSettingsPage(activity: MainActivity, root: LinearLayout) :
             toastOnce("没有读到可启动的应用")
             return
         }
-        val labels = items.map { "${it.app.label}\n${it.app.packageName}" }.toTypedArray()
+        val labels = items.map { "${it.label}\n${it.packageName}" }.toTypedArray()
         AlertDialog.Builder(this)
             .setTitle(if (AppDrawerApps.loadSlots(this).getOrNull(slot) != null) "替换快捷应用" else "添加快捷应用")
             .setItems(labels) { _, index ->
-                val chosen = items[index].app
+                val chosen = items[index].packageName
                 val apps = AppDrawerApps.loadSlots(this).toMutableList()
-                val existing = apps.indexOfFirst { it?.packageName == chosen.packageName }
+                val existing = apps.indexOf(chosen)
                 if (existing >= 0 && existing != slot) apps[existing] = apps[slot]
                 apps[slot] = chosen
                 AppDrawerApps.saveSlots(this, apps)
@@ -475,20 +464,14 @@ class IconsSettingsPage(activity: MainActivity, root: LinearLayout) :
         return col to body
     }
 
-    private fun loadAppIconAsync(pkg: String, iv: ImageView) {
-        synchronized(iconCache) {
-            if (iconCache.containsKey(pkg)) {
-                iconCache[pkg]?.let { iv.setImageDrawable(it) }
-                return
-            }
-        }
-        iv.tag = pkg
-        iconExecutor.execute {
-            val d = runCatching { packageManager.getApplicationIcon(pkg) }.getOrNull()
-            synchronized(iconCache) { iconCache[pkg] = d }
+    private fun loadAppDisplay(pkg: String, tile: SettingsAppTile, generation: Int) {
+        appExecutor.execute {
+            val display = AppDrawerSlotStyle.resolveApp(packageManager, pkg)
             main.post {
-                // tag 仍是这个包名才贴（列表重建 / 行被复用时不贴错图标）
-                if (iv.tag == pkg && d != null) iv.setImageDrawable(d)
+                if (destroyed || generation != gridGeneration) return@post
+                tile.contentDescription = "替换快捷应用 ${display.label}"
+                tile.updateLabel(display.label, "清除快捷应用 ${display.label}")
+                display.icon?.let(tile.icon::setImageDrawable)
             }
         }
     }

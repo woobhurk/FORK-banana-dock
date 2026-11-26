@@ -37,7 +37,7 @@ Banana Dock 是面向 Android 车机的悬浮 Dock 应用，`namespace` 和 `app
 | 隐藏 Dock 应用（黑名单）页面 | `ui/ResidentSettingsPage.kt` |
 | 诊断与日志页面 | `ui/LogsSettingsPage.kt`、`ui/LogsSettingsLayout.kt` |
 | Dock 条目模型与默认布局 | `model/DockEntry.kt` |
-| 快捷应用固定槽位持久化 | `model/AppDrawerApp.kt` |
+| 快捷应用固定槽位持久化 | `model/AppDrawerApps.kt` |
 | 控件目录、尺寸和挂载 | `dock/DockCatalog.kt`、`dock/DockWidget.kt`、`dock/widgets/BuiltinWidgets.kt` |
 | 动作分发 | `dock/DockActions.kt` |
 | 悬浮 Dock 服务和窗口 | `ui/DockOverlayService.kt`、`ui/DockLayout.kt` |
@@ -64,16 +64,17 @@ Banana Dock 是面向 Android 车机的悬浮 Dock 应用，`namespace` 和 `app
 
 ## 3. 设置页和 UI 结构
 
-### 3.1 六个独立页面
+### 3.1 七个独立页面
 
-`MainActivity.pageSpecs` 当前注册以下六页，顺序也是左侧导航顺序：
+`MainActivity.pageSpecs` 按以下顺序注册左侧导航。
 
 1. 悬浮 Dock 栏：`FloatingDockSettingsPage`。
 2. 外观与风格：`AppearanceSettingsPage`。
 3. Dock 图标管理：`IconsSettingsPage`。
 4. 歌词悬浮窗：`LyricsSettingsPage`。
 5. 隐藏 Dock 应用：`ResidentSettingsPage`。
-6. 诊断与日志：`LogsSettingsPage`。
+6. 配置备份：`ConfigBackupSettingsPage`。
+7. 诊断与日志：`LogsSettingsPage`。
 
 `MainActivity` 先创建左侧导航和目标页，普通入口默认显示「悬浮 Dock 栏」。`SettingsPageRegistry` 在首次进入页面时构建并挂载其控件，同一设置窗口内复用已创建的页面。诊断导出结果注册与 Dock、歌词等服务恢复由宿主管理，不依赖提前创建对应页面。
 
@@ -105,6 +106,28 @@ Banana Dock 是面向 Android 车机的悬浮 Dock 应用，`namespace` 和 `app
 - 主栏音量按钮沿用标准喇叭图标尺寸，媒体音量数字贴在喇叭右下角，字号比例与风量档位相同。
 - 「隐藏 Dock 应用」首次打开时在后台按已保存的包名查找已安装条目，仍按系统／个人分组，支持应用名或包名搜索。添加应用弹窗按需枚举全部已安装应用，窗口内重用目录，收到安装、卸载、变更或更新广播时使缓存失效。候选列表使用 `RecyclerView`，宽版等宽双列并留出 24dp 的左右内边距，窄版单列并留出 16dp。已选条目在各组优先显示，右侧打勾，底部的说明和取消按钮不随列表滚动。加入名单后，该应用在前台时隐藏 Dock；移除后恢复默认显示。
 - 黑名单复用快捷应用设置的应用卡片。卡片高 98dp，居中显示 42dp 图标和 13sp 单行应用名称，右上角的 × 用于移除。系统和个人分组各按可用宽度排布，最多三列，超出可视高度时在各自分组内滚动。
+
+### 3.3 配置备份
+
+- 在「设置 → 配置备份」选择配置组，通过系统文件选择器导出 UTF-8 JSON。导入先预览变更及无法启动的应用，再勾选并确认。布局、快捷应用槽位、黑名单按整组替换，其他设置按文件中给出的字段覆盖。缺装应用仍保留原位置。
+- 备份包含 Dock 顺序与手势、六个快捷应用槽位、黑名单及上滑显隐、背景与图文缩放、交互时长和歌词显示样式。屏幕与窗口尺寸、位置、圆角、原厂 Dock 选择、权限、车控保护、日志和歌词联网及启动设置由本机管理。备份会包含所选应用的包名，分享前可取消勾选相关组。
+- 文件标识 `format` 为 `banana-dock-config`。初始 `schemaVersion` 为 `5`，`sourceAppVersion` 用于展示来源。今后文件结构或语义发生变化时，在 `ConfigBackupFormat` 添加从当前版本到下一版的迁移，再提高版本号。现版拒绝 V1–V4 和 V6 以上的文件。应用自身的 `versionCode` 不参与文件迁移。
+- 缺少字段时保留目标车机的配置。源端未保存黑名单时，导出省略 `visibility.hiddenPackages`。显式清空则导出 `[]`。`layout.entries: []` 表示空布局，`layout.entries: null` 表示跟随目标版本默认布局。`quickApps.slots` 固定六槽，每槽写包名字符串，空槽写 `null`。手势中的 `null` 表示禁用该动作，省略单个手势则继承控件默认。
+- 配置读取上限为 256 KiB。预览跳过不再受支持的控件，并禁用不再受支持的显式动作。如果非空布局中的控件全被跳过，保留本机布局。确认后保存本机恢复点，一次提交选中项，写盘失败时回写旧值。回写仍失败时，可从「本机恢复点」重试。现有页面和窗口只在保存成功后重读。
+
+下面的 V5 备份片段将示例播放器放在第 2 槽。
+
+```json
+{
+  "format": "banana-dock-config",
+  "schemaVersion": 5,
+  "groups": {
+    "quickApps": {
+      "slots": [null, "com.example.player", null, null, null, null]
+    }
+  }
+}
+```
 
 ## 4. Dock 条目、默认布局和交互
 
@@ -148,8 +171,8 @@ Banana Dock 是面向 Android 车机的悬浮 Dock 应用，`namespace` 和 `app
 - 预览为离屏绘制，不把触摸转发给真实控件，因此编辑时不会写车控、播放媒体或启动应用。
 - 主副驾温度和风速均使用组合控件。音乐卡和这三种组合控件各按完整条目移动。
 - 第三方应用走独立入口，系统/个人分类和搜索；删除入口不卸载应用。
-- 快捷应用是独立的 2×3 固定槽位数据。空位保留，替换不压缩其它位置，批量管理和 Dock 弹窗共用同一份槽位数据。
-- 快捷应用弹窗和图标管理的槽位共用应用名样式、空位标记与拖动落点描边。第三方应用保持原色，空位在弹窗中不启动应用，在管理页仍可点击添加。
+- 快捷应用按 2×3 的固定位置保存。本机 `app_drawer_apps_json` 的非空项只写 `package`，空项写 `null`。旧对象按包名读取，首次保存时整数组重写，旧名称和 Activity 随之移除。批量保存保留不在可启动列表中的应用及其槽位。
+- 设置页和弹窗按包名读取系统当前的显示名称和图标，缺装时显示包名和占位图。弹窗点击应用时查找本机的默认启动入口。空槽用虚线标记，可在管理页点击添加。
 
 ### 4.4 当前动作约束
 
