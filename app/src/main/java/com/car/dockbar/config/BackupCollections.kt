@@ -63,15 +63,16 @@ internal class BackupCollections(private val available: (String, String) -> Bool
         val entries = value as? JSONArray ?: fail("快捷应用必须是槽位数组。")
         if (entries.length() != AppDrawerApps.MAX_APPS) fail("快捷应用必须包含 ${AppDrawerApps.MAX_APPS} 个槽位（含空位）。")
         val seen = HashSet<String>()
-        val slots = List(entries.length()) { i ->
-            if (entries.isNull(i)) null else {
-                val pkg = packageName(entries.get(i))
+        val slots = List(entries.length()) { index ->
+            if (entries.isNull(index)) null else {
+                val slot = entries.optJSONObject(index) ?: fail("快捷应用第 ${index + 1} 槽必须是包名对象或空位。")
+                val pkg = packageName(slot.opt("package"))
                 if (!seen.add(pkg)) fail("快捷应用包含重复的包名 $pkg。")
                 checkApp(pkg, "")
                 pkg
             }
         }
-        return AppDrawerApps.encodeSlots(slots)
+        return AppDrawerApps.encodeSlots(slots).toString()
     }
 
     fun hiddenPackages(value: Any): String {

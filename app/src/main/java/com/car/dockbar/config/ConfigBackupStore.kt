@@ -40,9 +40,7 @@ internal class ConfigBackupStore(context: Context) {
                         JSONArray().apply { DockEntries.load(ctx).forEach { put(it.toJson()) } }
                     values.put("entries", entries)
                 }
-                BackupGroup.QUICK_APPS -> values.put("slots", JSONArray().apply {
-                    AppDrawerApps.loadSlots(ctx).forEach { put(it ?: JSONObject.NULL) }
-                })
+                BackupGroup.QUICK_APPS -> values.put("slots", AppDrawerApps.encodeSlots(AppDrawerApps.loadSlots(ctx)))
                 BackupGroup.VISIBILITY -> if (stored.containsKey(DOCK_HIDE_APPS_KEY)) {
                     values.put("hiddenPackages", JSONArray(Prefs.dockHideApps(ctx)))
                 }

@@ -40,15 +40,15 @@ object AppDrawerApps {
     }
 
     fun saveSlots(ctx: Context, slots: List<String?>) =
-        Prefs.setAppDrawerAppsJson(ctx, encodeSlots(slots))
+        Prefs.setAppDrawerAppsJson(ctx, encodeSlots(slots).toString())
 
-    internal fun encodeSlots(slots: List<String?>): String {
+    internal fun encodeSlots(slots: List<String?>): JSONArray {
         val array = JSONArray()
         val seen = HashSet<String>()
         repeat(MAX_APPS) { i ->
             val pkg = slots.getOrNull(i)
             array.put(if (pkg != null && seen.add(pkg)) JSONObject().put("package", pkg) else JSONObject.NULL)
         }
-        return array.toString()
+        return array
     }
 }
