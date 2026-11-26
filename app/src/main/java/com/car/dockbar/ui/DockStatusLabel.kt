@@ -72,7 +72,6 @@ class DockStatusLabel(private val ctx: Context) {
         card.addView(tv)
         textView = tv
 
-        val atBottom = Prefs.dockAtBottom(ctx)
         val dockH = Prefs.dockHeightPx(ctx)
         val margin = Prefs.dockMarginPx(ctx)
         val p = WindowManager.LayoutParams(
@@ -83,8 +82,7 @@ class DockStatusLabel(private val ctx: Context) {
                     WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
             PixelFormat.TRANSLUCENT
         ).apply {
-            gravity = if (atBottom) Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-            else Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
             // 紧贴 Dock 内侧上方（与 Dock 之间留 6dp 间隙）
             y = (dockH + margin + dp(6)).coerceAtLeast(0)
             x = 0

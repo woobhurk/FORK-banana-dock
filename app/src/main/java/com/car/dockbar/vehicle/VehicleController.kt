@@ -1916,7 +1916,6 @@ object VehicleController {
         }
         scheduleRefresh(ctx, CLIMATE_GROUP)
     }
-    /** OFF 是明确绝对目标；关闭写入时不制造车辆状态。 */
     /** 只停风；恢复时使用同一车控连接内的原档位与风向，不切换 A/C 或 AUTO 总开关。 */
     fun toggleAirflow(ctx: Context) {
         if (Looper.myLooper() != main.looper) { main.post { toggleAirflow(ctx) }; return }
@@ -1965,18 +1964,6 @@ object VehicleController {
             }
             scheduleRefresh(ctx, groups)
         }
-    }
-
-    fun setFanOff(ctx: Context) {
-        if (Looper.myLooper() != main.looper) { main.post { setFanOff(ctx) }; return }
-        if (!Prefs.simulate(ctx) && !HvacCommands.canSubmit(ctx, "setFanOff")) return
-        HvacCommands.supersede("fan")
-        val sequence = preview(FAN_GROUP) { it.copy(fanLevel = 0, fanAuto = false, fanMax = 9) }
-        if (Prefs.simulate(ctx)) return
-        HvacCommands.submitLatest(ctx, "fan", sequence, { cancelTarget(sequence) }) {
-            HvacWriteActions.writeChannel(ctx, "fan_manual", 0)
-        }
-        scheduleRefresh(ctx, FAN_GROUP)
     }
 
     /** 风向循环切换（按 7 种组合位掩码循环） */

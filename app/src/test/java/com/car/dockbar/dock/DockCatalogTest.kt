@@ -16,7 +16,6 @@ class DockCatalogTest {
             assertEquals(builtin.label, spec.label)
             assertEquals(builtin.span, spec.span)
             assertEquals(builtin.separatorBefore, spec.separatorBefore)
-            assertEquals(builtin.hidden, spec.hidden)
         }
     }
 
@@ -38,15 +37,6 @@ class DockCatalogTest {
         val recirc = DockCatalog.of("recirc")!!.defaultGestures()[HitTargets.ROOT]!!
         assertEquals(DockAction.ToggleRecirc, recirc.tap)
         assertNull(recirc.longPress)
-    }
-
-    @Test
-    fun legacyTempAndComboUseTheirCurrentTemperatureGestures() {
-        val legacy = DockCatalog.of("temp_driver")!!.defaultGestures()[HitTargets.ROOT]!!
-        assertEquals(DockAction.ToggleAc, legacy.longPress)
-        val combo = DockCatalog.of("temp_driver_combo")!!.defaultGestures()[HitTargets.VALUE]!!
-        assertEquals(DockAction.ToggleAcFromDock, combo.tap)
-        assertEquals(DockAction.ShowPopup("temperatureDriver"), combo.longPress)
     }
 
     @Test
@@ -91,23 +81,12 @@ class DockCatalogTest {
             "temp_driver_combo" to "minus:tempStep:true:-1|plus:tempStep:true:1|value:toggleAcFromDock/long:showPopup:temperatureDriver",
             "temp_passenger_combo" to "minus:tempStep:false:-1|plus:tempStep:false:1|value:toggleAcFromDock/long:showPopup:temperaturePassenger",
             "fan_combo" to "minus:fanStep:-1|plus:fanStep:1|value:toggleFanAuto/long:openAirPanel",
-            "temp_down_driver" to "root:tempStep:true:-1",
-            "temp_up_driver" to "root:tempStep:true:1",
-            "temp_down_passenger" to "root:tempStep:false:-1",
-            "temp_up_passenger" to "root:tempStep:false:1",
-            "temp_driver" to "root:toggleHvacWindow/long:toggleAc",
-            "temp_passenger" to "root:toggleHvacWindow/long:toggleAc",
-            "fan_down" to "root:fanStep:-1",
-            "fan_up" to "root:fanStep:1",
-            "fan" to "root:toggleHvacWindow/long:fanOff",
             "music" to "root:openPlayer/long:toggleLyric|play:playPause|next:mediaNext",
         )
-        expected.forEach { (action, gestures) ->
-            assertEquals(gestures, describe(DockCatalog.of(action)!!.defaultGestures()))
+        val actual = DockCatalog.builtins().associate { widget ->
+            widget.spec.action to describe(widget.defaultGestures())
         }
-        DockCatalog.builtins().forEach { widget ->
-            assertTrue(widget.spec.action, widget.defaultGestures().values.any { it.tap != null || it.longPress != null })
-        }
+        assertEquals(expected, actual)
     }
 
     private fun describe(map: Map<String, GestureBinding>): String =
@@ -128,14 +107,11 @@ class DockCatalogTest {
         DockAction.OpenCarSettings -> "openCarSettings"
         DockAction.LaunchThisEntry -> "launchThisEntry"
         is DockAction.ShowPopup -> "showPopup:${action.popup}"
-        DockAction.ToggleHvacWindow -> "toggleHvacWindow"
-        DockAction.ToggleAc -> "toggleAc"
         DockAction.ToggleAcFromDock -> "toggleAcFromDock"
         DockAction.ToggleDualSyncFromDock -> "toggleDualSyncFromDock"
         is DockAction.TempStep -> "tempStep:${action.driver}:${action.delta}"
         is DockAction.FanStep -> "fanStep:${action.delta}"
         DockAction.ToggleFanAuto -> "toggleFanAuto"
-        DockAction.FanOff -> "fanOff"
         DockAction.ToggleAirflow -> "toggleAirflow"
         DockAction.ToggleRecirc -> "toggleRecirc"
         DockAction.ToggleDefrostFront -> "toggleDefrostFront"

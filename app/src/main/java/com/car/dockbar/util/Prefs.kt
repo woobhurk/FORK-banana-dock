@@ -26,10 +26,6 @@ object Prefs {
         .putBoolean("overlay_enabled", !useOriginal)
         .apply()
 
-    /** Dock 固定贴屏幕底部。保留旧键兼容，但不再提供顶部/底部切换。 */
-    fun dockAtBottom(ctx: Context) = true
-    fun setDockAtBottom(ctx: Context, v: Boolean) = sp(ctx).edit().putBoolean("dock_at_bottom", true).apply()
-
     /** 悬浮窗宽度（px）。0 = 自动铺满屏幕宽度 */
     fun dockWidthPx(ctx: Context) = sp(ctx).getInt("dock_width_px", 1920)
     fun setDockWidthPx(ctx: Context, v: Int) = sp(ctx).edit().putInt("dock_width_px", v).apply()
@@ -38,7 +34,7 @@ object Prefs {
     fun dockHeightPx(ctx: Context): Int = sp(ctx).getInt("dock_height_px", 128)
     fun setDockHeightPx(ctx: Context, v: Int) = sp(ctx).edit().putInt("dock_height_px", v).apply()
 
-    /** 底部 / 顶部的偏移量（px） */
+    /** Dock 到屏幕底边的偏移量（px） */
     fun dockMarginPx(ctx: Context) = sp(ctx).getInt("dock_margin_px", 0)
     fun setDockMarginPx(ctx: Context, v: Int) = sp(ctx).edit().putInt("dock_margin_px", v).apply()
 
@@ -54,14 +50,6 @@ object Prefs {
     fun setWindowAlpha(ctx: Context, v: Float) = sp(ctx).edit().putFloat("window_alpha", v).apply()
 
     // ---------------- Dock 外观 ----------------
-    /** 底色不透明度 0..255，0 = 完全透明（纯图标浮在桌面上） */
-    fun bgAlpha(ctx: Context) = sp(ctx).getInt("bg_alpha", 0x59)
-    fun setBgAlpha(ctx: Context, v: Int) = sp(ctx).edit().putInt("bg_alpha", v).apply()
-
-    /** 底色 RGB */
-    fun bgColor(ctx: Context) = sp(ctx).getInt("bg_color", 0x000000)
-    fun setBgColor(ctx: Context, v: Int) = sp(ctx).edit().putInt("bg_color", v).apply()
-
     /**
      * 圆角半径（px）。默认直角。
      * 换键以丢掉旧的 14px 默认值；外观页滑条仍可另存新值。
@@ -73,10 +61,6 @@ object Prefs {
     /** 是否画分组竖分隔线 */
     fun showSeparators(ctx: Context) = sp(ctx).getBoolean("show_separators", true)
     fun setShowSeparators(ctx: Context, v: Boolean) = sp(ctx).edit().putBoolean("show_separators", v).apply()
-
-    /** 图标/文字整体缩放系数（旧字段，保留兼容） */
-    fun uiScale(ctx: Context) = sp(ctx).getFloat("ui_scale", 1f)
-    fun setUiScale(ctx: Context, v: Float) = sp(ctx).edit().putFloat("ui_scale", v).apply()
 
     /** 图标缩放系数（独立于文字） */
     fun iconScale(ctx: Context) = sp(ctx).getFloat("icon_scale", 1f)
@@ -491,38 +475,10 @@ object Prefs {
     fun slideOffsetPx(ctx: Context) = sp(ctx).getInt("slide_offset_px", 24)
     fun setSlideOffsetPx(ctx: Context, v: Int) = sp(ctx).edit().putInt("slide_offset_px", v).apply()
 
-    // ---------------- 日夜模式背景（对齐吉利 setDockBg 日夜切换） ----------------
+    // ---------------- 底色与日夜模式 ----------------
     /** true = 跟随系统深浅色自动切换底色 */
     fun bgFollowNight(ctx: Context) = sp(ctx).getBoolean("bg_follow_night", true)
     fun setBgFollowNight(ctx: Context, v: Boolean) = sp(ctx).edit().putBoolean("bg_follow_night", v).apply()
-
-    /** 白天底色 RGB（跟随日夜时使用；关闭跟随则用 bgColor） */
-    fun dayBgColor(ctx: Context) = sp(ctx).getInt("day_bg_color", 0x000000)
-    fun setDayBgColor(ctx: Context, v: Int) = sp(ctx).edit().putInt("day_bg_color", v).apply()
-
-    /** 白天底色不透明度 0..255 */
-    fun dayBgAlpha(ctx: Context) = sp(ctx).getInt("day_bg_alpha", 0x59)
-    fun setDayBgAlpha(ctx: Context, v: Int) = sp(ctx).edit().putInt("day_bg_alpha", v).apply()
-
-    /** 夜间底色 RGB */
-    fun nightBgColor(ctx: Context) = sp(ctx).getInt("night_bg_color", 0x000000)
-    fun setNightBgColor(ctx: Context, v: Int) = sp(ctx).edit().putInt("night_bg_color", v).apply()
-
-    /** 夜间底色不透明度 0..255 */
-    fun nightBgAlpha(ctx: Context) = sp(ctx).getInt("night_bg_alpha", 0x8C)
-    fun setNightBgAlpha(ctx: Context, v: Int) = sp(ctx).edit().putInt("night_bg_alpha", v).apply()
-
-    // ---------------- 底色（★ v3.13.0：统一为一套纯白/纯黑 + 透明度） ----------------
-    //
-    // v3.13.0 取消了「磨砂玻璃」和「纯色/渐变二选一」两套开关，
-    // 现在只有**一套底色**：
-    //   白天 = 纯白 0xFFFFFF，夜间 = 纯黑 0x000000
-    //   不透明度由「底色透明度」滑杆控制（0% = 完全不透明，100% = 完全透明）
-    //   渲染方式是**整条高度连续爬升的透明→浓渐变**（顶部最透、底部最浓），
-    //   细节见 util/GradientSpec.kt。
-    //
-    // 旧 key（bg_glass_* / bg_gradient_enabled / day_gradient_* 等）保留在
-    // SharedPreferences 里不再读取，避免升级时数据残留造成困扰。
 
     /**
      * 白天底色透明度 0..100（0 = 完全不透明，100 = 完全透明）。
@@ -577,11 +533,6 @@ object Prefs {
         sp(ctx).edit().putString("bg_mode", m.key).apply()
     }
 
-    /** 模糊半径，0 = 只半透明不模糊，24 = 最糊。只在背景形态为「模糊」时使用。 */
-    fun blurRadius(ctx: Context) = sp(ctx).getInt("blur_radius", 12).coerceIn(0, 24)
-    fun setBlurRadius(ctx: Context, v: Int) =
-        sp(ctx).edit().putInt("blur_radius", v.coerceIn(0, 24)).apply()
-
     /** 透明叠层试验：灰度 0 = 黑，100 = 白；透明度 100 = 完全透明。 */
     fun overlayGrayLevel(ctx: Context) = sp(ctx).getInt("overlay_gray_level", 50).coerceIn(0, 100)
     fun setOverlayGrayLevel(ctx: Context, v: Int) =
@@ -599,14 +550,6 @@ object Prefs {
         val transparency = if (night) nightBgTransparency(ctx) else dayBgTransparency(ctx)
         val a = ((100 - transparency) * 255 / 100).coerceIn(0, 255)
         return (a shl 24) or rgb
-    }
-
-    /** 当前纯色底色（未启用渐变时用）：跟随日夜 or 固定 bgColor */
-    fun currentBgColor(ctx: Context): Int {
-        val night = bgFollowNight(ctx) && isNightMode(ctx)
-        val rgb = if (night) nightBgColor(ctx) else dayBgColor(ctx)
-        val a = if (night) nightBgAlpha(ctx) else dayBgAlpha(ctx)
-        return (a shl 24) or (rgb and 0xFFFFFF)
     }
 
     /** 系统是否处于深色（夜间）模式 */

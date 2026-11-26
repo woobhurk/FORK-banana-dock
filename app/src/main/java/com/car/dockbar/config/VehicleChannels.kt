@@ -30,8 +30,8 @@ import com.car.dockbar.util.Prefs
  *  ⚠️ 历史踩坑（已修）：本项目早期把座椅通风写成 0x10050000、座椅加热写成 0x10050100、
  *   且座椅沿用 zone=0x8，三项全错 → 座椅通风/加热读写无效。正确值见上表。
  *
- *  任何 ID / zone 都可在主界面「车控通道」里直接改数字保存（写进 SharedPreferences，无需重编译）覆盖默认值。
- *  实测方法：通道列表 → 点「读」看是否返回合理值 → 再用「写」试写看车机是否响应。
+ *  通道功能号和区域由 [VehicleChannels.funcOf] 和 [VehicleChannels.zoneOf] 读取已保存的覆盖值。
+ *  内外循环使用固定全局区。
  */
 data class VehicleChannel(
     val key: String,
@@ -71,13 +71,6 @@ object VehicleChannels {
      *   外循环 = **裸值 0**；内循环 = **复合 0x10030101**。
      */
     const val ZONE_RECIRC = -2147483648   // 0x80000000（整车级，与系统 Dock 一致）
-
-    /**
-     * 旧（错误）取值：0x8 = 前排全区。
-     * 历史上曾把 recirc 的 zone 设为 0x8，导致 HAL 静默丢弃所有写入 → 「内外循环都切不了」。
-     * 保留常量仅供迁移旧配置使用。
-     */
-    const val ZONE_RECIRC_LEGACY = 0x8
 
     /** 整车级 area（ZONE_ALL）—— 前挡 / ECO / 双温 / 空调电源都用它 */
     const val ZONE_GLOBAL = -2147483648   // 0x80000000
@@ -216,25 +209,11 @@ object VehicleChannels {
         return Prefs.sp(ctx).getInt("ch_func_$key", def)
     }
 
-    /** 读取用户校准后的 zone */
+    /** 读取用户配置的区域，内外循环固定使用全局区。 */
     fun zoneOf(ctx: Context, key: String): Int {
-        val def = byKey(key)?.defZone ?: ZONE_DRIVER
-        val sp = Prefs.sp(ctx)
-        // ★ v1.4.75：删掉 v1.4.13 那段「recirc 的 zone 自动改回 0x8」的迁移。
-        //   它的前提是「0x8 是权威写法」，但真车日志已证明**循环的真实 zone 是全局 0x80000000**：
-        //   ```
-        //   读 recirc：zone=0x8 读不到 → 改用 zone=0x-80000000 读到 0x10030101
-        //   HVAC_WRITE 0x10030100 zone=-2147483648 value=268632321 → true   ← 全局才写得进
-        //   ```
-        //   有了那段迁移就形成死循环：读一次把 zone 改回 0x8 → 写用 0x8 → HAL 静默丢弃
-        //   → 表现为「内外循环都切不了」。
-        //
-        // ★★★ v3.6：反过来做**一次性强制迁移** —— 老设备可能把 0x8 persist 在
-        //   `ch_zone_recirc` 里（或被 1.4.63 的 zone 记忆机制写成别的值），
-        //   而系统 Dock 的权威 zone 是**全局 0x80000000**。
-        //   → recirc 无条件用全局 zone，不吃 persist 的旧值。
         if (key == "recirc") return ZONE_RECIRC
-        return sp.getInt("ch_zone_$key", def)
+        val def = byKey(key)?.defZone ?: ZONE_DRIVER
+        return Prefs.sp(ctx).getInt("ch_zone_$key", def)
     }
 
     /** 状态读取、事件匹配与诊断共用同一功能号，不依赖写入路由。 */

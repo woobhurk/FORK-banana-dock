@@ -20,7 +20,7 @@ data class DockEntry(
     val id: String,
     /** "builtin" = 内置控件，"app" = 用户添加的应用 */
     val kind: String,
-    /** kind=builtin 时为 [Builtin.action]；kind=app 时为包名（兼容旧字段） */
+    /** kind=builtin 时为 [Builtin.action]，kind=app 时为包名。 */
     val action: String,
     val label: String,
     /** kind=app 的 Activity 全名，可为空（空则用 LAUNCHER intent 启动） */
@@ -56,7 +56,7 @@ data class DockEntry(
 /**
  * 内置控件清单。每个 action 对应一个 View，由 [com.car.dockbar.dock.DockCatalog] 生成。
  *
- * 顺序即默认 Dock 的默认排布，与原硬编码版本完全一致（音乐卡片占 3 槽）。
+ * 默认 Dock 排布由 [DockEntries] 定义。
  */
 enum class Builtin(
     val action: String,
@@ -64,8 +64,6 @@ enum class Builtin(
     val span: Int,
     val separatorBefore: Boolean,
     val hint: String = "",
-    /** true = 不在「添加内置控件」列表里出现（已被组合控件取代的旧条目） */
-    val hidden: Boolean = false
 ) {
     // ── [D01] 返回桌面 ─────────────────────────
     HOME("home", "返回桌面", 1, false, "单击返回桌面 · 长按打开最近任务（后台应用列表）"),
@@ -93,34 +91,16 @@ enum class Builtin(
     TEMP_PASSENGER_COMBO("temp_passenger_combo", "副驾温度", 3, true, "组合按钮：− 副驾温度 +，短按中间切换 A/C，长按打开温度弹窗"),
     // ── [D08] 风速 −值+ ───────────────────────
     FAN_COMBO("fan_combo", "风速", 3, false, "左右调档，短按风扇切换手动／AUTO，长按打开车机空调"),
-    // ── [D09] 主驾温度 −（旧独立） ──────────────────
-    TEMP_DOWN_DRIVER("temp_down_driver", "主驾温度-", 1, false, "主驾降温 1 档", hidden = true),
-    // ── [D10] 主驾温度值（旧独立） ───────────────────
-    TEMP_DRIVER("temp_driver", "主驾温度", 1, false, "显示/调节主驾温度", hidden = true),
-    // ── [D11] 主驾温度 +（旧独立） ──────────────────
-    TEMP_UP_DRIVER("temp_up_driver", "主驾温度+", 1, false, "主驾升温 1 档", hidden = true),
     // ── [D12] 空调风向 ─────────────────────────
     AIR("air", "空调风向", 1, true, "短按切换原厂空调电源，长按打开风向弹窗"),
     // ── [D13] 主驾座椅通风 ───────────────────────
     VENT("vent", "主驾座椅通风", 1, false, "短按关闭／3 档通风，长按打开主副驾座椅加热／通风面板"),
     // ── [D14] 主驾座椅加热 ───────────────────────
     SEAT_HEAT("seat_heat", "主驾座椅加热", 1, false, "单击降档，长按升档"),
-    // ── [D15] 风速 −（旧独立） ────────────────────
-    FAN_DOWN("fan_down", "风速-", 1, false, "手动风速 -1 档", hidden = true),
-    // ── [D16] 风速值（旧独立） ─────────────────────
-    FAN("fan", "风速", 1, false, "显示/调节风速档位", hidden = true),
-    // ── [D17] 风速 +（旧独立） ────────────────────
-    FAN_UP("fan_up", "风速+", 1, false, "手动风速 +1 档", hidden = true),
     // ── [D18] 内外循环 ─────────────────────────
     RECIRC("recirc", "内外循环", 1, true, "切换内/外循环"),
     // ── [D19] 座椅弹窗 ─────────────────────────
     SEAT("seat", "座椅设置", 1, true, "打开座椅/空调面板"),
-    // ── [D20] 副驾温度 −（旧独立） ──────────────────
-    TEMP_DOWN_PASSENGER("temp_down_passenger", "副驾温度-", 1, true, "副驾降温 1 档", hidden = true),
-    // ── [D21] 副驾温度值（旧独立） ───────────────────
-    TEMP_PASSENGER("temp_passenger", "副驾温度", 1, false, "显示/调节副驾温度", hidden = true),
-    // ── [D22] 副驾温度 +（旧独立） ──────────────────
-    TEMP_UP_PASSENGER("temp_up_passenger", "副驾温度+", 1, false, "副驾升温 1 档", hidden = true),
     // ── [D23] 前挡加热 ───────────────────────────
     // ★ v1.5.11 #13：**默认不在 Dock 里**（不写进 DockEntries.defaults()），
     //   需要用户在「Dock 图标设置 → 添加内置控件」里手动添加才会出现。
@@ -180,7 +160,6 @@ object DockEntries {
             out
         }.getOrNull() ?: defaultsMutable()
     }
-
 
     fun save(ctx: Context, list: List<DockEntry>) {
         val arr = JSONArray()

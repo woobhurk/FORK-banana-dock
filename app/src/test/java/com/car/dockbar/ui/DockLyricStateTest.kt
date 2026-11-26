@@ -251,7 +251,7 @@ class DockLyricStateTest {
         val bindings = mutableListOf<Binding>()
         override val spec = WidgetSpec(
             action = "lyric", label = "歌词", span = 1, separatorBefore = false,
-            hint = "", hidden = false, catalogIcon = 0, bindKind = BindKind.LYRIC,
+            hint = "", catalogIcon = 0, bindKind = BindKind.LYRIC,
         )
 
         override fun defaultGestures(): Map<String, GestureBinding> = emptyMap()

@@ -80,7 +80,7 @@
 重要纠偏：
 
 - AUTO 使用专用 `0x10020200` 通道和乱序映射，编码以 `HvacChannels.kt` 为准；历史“01…05 顺序映射”或“手动风量写 10”的说明不能覆盖当前执行逻辑。
-- 内外循环的旧 zone `0x8` 是已确认的错误配置；当前默认全局 zone 为 `0x80000000`。
+- 内外循环的写入区域固定为 `0x80000000`。支持无 area 重载时优先通过该重载写入同一目标。
 - `Prefs.tempCustomizeWriteEnabled` 默认true，常用设温和步进均先计算绝对目标后走已有GlyCar/Customize浮点写；整数兼容需显式选择，步进逐条执行，不合并、不在升温失败后尝试降温。旧整数绝对值按round(℃/0.2)编码；supported values里的[2]不解释为温度范围，接口接受不等于真车效果。
 - 旧文档中“开关统一为 10/11”是某次外部设备/历史日志的层级编码，不应替代当前 `HvacChannels`、`HvacWriteActions` 和 `VehicleChannels` 的实际值域。
 

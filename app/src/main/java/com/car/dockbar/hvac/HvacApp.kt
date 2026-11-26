@@ -79,15 +79,10 @@ object HvacApp {
         Logx.d("HvacApp.openActivity 失败：${it.javaClass.simpleName} ${it.message}")
     }.getOrElse { false }
 
-    /**
-     * 打开空调面板（可指定子页）。
-     * 主页优先走 ContentProvider 官方接口（与车机 launcher 一致）；
-     * 指定子页或 Provider 不可用时，退回直接启动 Activity 带深链 extra。
-     */
+    /** 优先显式启动指定子页，Activity 无法打开时使用 Provider 打开主面板。 */
     fun openPanel(ctx: Context, page: Int = PAGE_MAIN): Boolean {
         // ★ 主路径改为「显式启动 Activity」：显式 ComponentName 不受 Android 11+ 包可见性
         //   限制影响，是第三方 App 能拉起车机空调面板最可靠的一条路。
-        //   ContentProvider 仅供 getVisibility 使用（只读，失败无所谓）。
         if (openActivity(ctx, page)) {
             Logx.d("HvacApp 已打开空调面板（子页=$page）")
             return true
@@ -100,14 +95,4 @@ object HvacApp {
         Logx.e("HvacApp 打开空调面板失败：两条路都不通（App 未安装 / 包名或 Activity 名不对 / 被包可见性拦截）")
         return false
     }
-
-    /**
-     * 查询空调面板当前是否可见（best-effort）。
-     * 返回 null 表示查询失败（多为 HVAC App 进程未存活），true/false 表示面板可见状态。
-     */
-    fun isPanelVisible(ctx: Context): Boolean? = runCatching {
-        ctx.contentResolver.query(uri, arrayOf("getVisibility"), null, null, null)?.use { c ->
-            if (c.moveToFirst()) c.getLong(0) == 1L else null
-        }
-    }.getOrNull()
 }

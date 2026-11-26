@@ -292,13 +292,11 @@ class ResidentSettingsPage(activity: MainActivity, root: LinearLayout) :
 
 
     private fun AlertDialog.applyDockSafe(): AlertDialog {
-        if (Prefs.dockAtBottom(this@ResidentSettingsPage)) {
-            window?.decorView?.setPadding(
-                0, 0, 0,
-                Prefs.dockHeightPx(this@ResidentSettingsPage) +
-                    Prefs.dockMarginPx(this@ResidentSettingsPage) + dp(12)
-            )
-        }
+        window?.decorView?.setPadding(
+            0, 0, 0,
+            Prefs.dockHeightPx(this@ResidentSettingsPage) +
+                Prefs.dockMarginPx(this@ResidentSettingsPage) + dp(12)
+        )
         return this
     }
 

@@ -60,7 +60,6 @@ import com.car.dockbar.util.IntentLauncher
 import com.car.dockbar.util.LogUploader
 import com.car.dockbar.util.Logx
 import com.car.dockbar.vehicle.SensorBridge
-import com.car.dockbar.hvac.HvacApp
 import com.car.dockbar.util.Prefs
 import com.car.dockbar.vehicle.VehicleBridge
 import com.car.dockbar.vehicle.VehicleController
@@ -820,10 +819,7 @@ class DockOverlayService : Service() {
         Logx.d(if (clear) "纯色：系统桌面前台 → 底色透明" else "纯色：离开桌面 → 恢复纯色")
     }
 
-    private fun slideOffset(): Float {
-        val base = Prefs.slideOffsetPx(this).toFloat()
-        return if (Prefs.dockAtBottom(this)) base else -base
-    }
+    private fun slideOffset() = Prefs.slideOffsetPx(this).toFloat()
 
     /** 隐藏时一律向下移动至少一个屏幕高度，确保 Dock 完全离开可视区域。 */
     private fun slideOutOffset(v: View): Float {
@@ -1044,35 +1040,6 @@ class DockOverlayService : Service() {
         gestureForwarding = false
     }
 
-    /**
-     * 旧版独立「主驾温度 / 副驾温度」值控件短按时，开关系统原生的空调窗口
-     * （com.geely.hvac，即车机原本那个），而不是我们自绘的面板。
-     *
-     * 逻辑与之前一致：没开就打开主面板；已经开着时再点一次就关闭（回桌面收起）。
-     * 组合温度控件的短按／长按由默认手势分别负责切换 AC 和打开温度弹窗。
-     */
-
-    private fun toggleSystemHvacWindow() {
-        onUserInteraction()
-        if (isSystemHvacOpen()) {
-            IntentLauncher.goHome(this)
-            Logx.d("温度点击：系统空调窗口已开 → 关闭")
-        } else {
-            HvacApp.openPanel(this, HvacApp.PAGE_MAIN)
-            Logx.d("温度点击：打开系统空调窗口")
-        }
-    }
-
-    /**
-     * 系统空调窗口当前是否打开。
-     * 优先用 HVAC App 自己的 getVisibility 接口（ContentProvider），
-     * 查不到（App 进程未起 / provider 不可用）就退回前台包名判断。
-     */
-    private fun isSystemHvacOpen(): Boolean {
-        HvacApp.isPanelVisible(this)?.let { return it }
-        return ForegroundTracker.currentPackage == HvacApp.PACKAGE
-    }
-
     private fun showHvacPopup(anchor: View? = null) {
         pauseAutoHide()
         val pop = hvacPop ?: HvacControlPopup(this).also { p ->
@@ -1273,11 +1240,7 @@ class DockOverlayService : Service() {
     private fun computeY(height: Int): Int {
         val screenH = Prefs.screenHeightPx(this)
         val margin = Prefs.dockMarginPx(this)
-        return if (Prefs.dockAtBottom(this)) {
-            (screenH - height - margin).coerceAtLeast(0)
-        } else {
-            margin
-        }
+        return (screenH - height - margin).coerceAtLeast(0)
     }
 
     /** 建窗时打一次窗口几何信息（调试用，不参与高频轮询） */
@@ -1496,7 +1459,6 @@ class DockOverlayService : Service() {
                 "seatClimate" -> showSeatClimatePopup(anchor)
             }
         }
-        override fun toggleHvacWindow() = toggleSystemHvacWindow()
         override fun toggleAcFromDock() = this@DockOverlayService.toggleAcFromDock()
         override fun toggleDualSyncFromDock() = toggleDualSync()
     }

@@ -18,7 +18,6 @@ data class WidgetSpec(
     val span: Int,
     val separatorBefore: Boolean,
     val hint: String,
-    val hidden: Boolean,
     val catalogIcon: Int,
     val fixedWidthPx: Int = 0,
     val flexMinPx: Int = 0,

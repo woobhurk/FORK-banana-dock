@@ -44,7 +44,6 @@ private fun spec(
     span = builtin.span,
     separatorBefore = builtin.separatorBefore,
     hint = builtin.hint,
-    hidden = builtin.hidden,
     catalogIcon = catalogIcon,
     bindKind = bindKind,
     lockSpan = lockSpan,
@@ -101,23 +100,6 @@ private fun iconWidget(
     override fun create(ctx: Context, entry: DockEntry, iconPx: Int): MountedEntry {
         val view = DockIconView(ctx, spec.catalogIcon, iconPx.coerceAtLeast(1), spec.preserveColors, inactiveAlpha)
         return mounted(this, entry, view, linkedMapOf(HitTargets.ROOT to view), null)
-    }
-}
-
-private fun valueWidget(
-    builtin: Builtin,
-    gestures: Map<String, GestureBinding>,
-    bindKind: BindKind,
-): DockWidget = object : DockWidget {
-    override val spec = spec(builtin, iconFor(builtin.action), bindKind)
-    override fun bind(mounted: MountedEntry, snapshot: DockSnapshot) {
-        mounted.valueView?.let { paintValue(it, spec.bindKind, snapshot) }
-    }
-    override fun defaultGestures() = gestures
-    override fun create(ctx: Context, entry: DockEntry, iconPx: Int): MountedEntry {
-        val text = Prefs.textScale(ctx)
-        val view = DockValueView(ctx, 25f * text, 16f * text, 12f * text)
-        return mounted(this, entry, view, linkedMapOf(HitTargets.ROOT to view), view)
     }
 }
 
@@ -254,7 +236,7 @@ private object MusicWidget : DockWidget {
 internal object AppWidget : DockWidget {
     override val spec = WidgetSpec(
         action = "app", label = "", span = 1, separatorBefore = false, hint = "",
-        hidden = true, catalogIcon = R.drawable.ic_apps,
+        catalogIcon = R.drawable.ic_apps,
     )
     override fun defaultGestures() = root(tap(DockAction.LaunchThisEntry))
     override fun create(ctx: Context, entry: DockEntry, iconPx: Int): MountedEntry {
@@ -269,7 +251,7 @@ internal object AppWidget : DockWidget {
 internal class MissingWidget(action: String) : DockWidget {
     override val spec = WidgetSpec(
         action = action, label = "", span = 1, separatorBefore = false, hint = "",
-        hidden = true, catalogIcon = R.drawable.ic_dock_car,
+        catalogIcon = R.drawable.ic_dock_car,
     )
     override fun defaultGestures() = emptyMap<String, GestureBinding>()
     override fun create(ctx: Context, entry: DockEntry, iconPx: Int): MountedEntry {
@@ -307,20 +289,11 @@ internal object BuiltinWidgets {
             arrowPx = DockMetrics.FAN_COMBO_ARROW_PX,
             arrowHitPx = DockMetrics.FAN_COMBO_ARROW_HIT_PX,
         ),
-        iconWidget(Builtin.TEMP_DOWN_DRIVER, root(tap(DockAction.TempStep(true, -1)))),
-        valueWidget(Builtin.TEMP_DRIVER, root(tapLong(DockAction.ToggleHvacWindow, DockAction.ToggleAc)), BindKind.TEMP_DRIVER),
-        iconWidget(Builtin.TEMP_UP_DRIVER, root(tap(DockAction.TempStep(true, 1)))),
         iconWidget(Builtin.AIR, root(tapLong(DockAction.ToggleAirflow, DockAction.ShowPopup("airDirection"))), BindKind.AIR),
         iconWidget(Builtin.VENT, root(tapLong(DockAction.ToggleSeatVent, DockAction.ShowPopup("seatClimate"))), BindKind.VENT, preserveColors = true),
         iconWidget(Builtin.SEAT_HEAT, root(tapLong(DockAction.LevelBump("seatHeat", "down"), DockAction.LevelBump("seatHeat", "up"))), BindKind.SEAT_HEAT, preserveColors = true),
-        iconWidget(Builtin.FAN_DOWN, root(tap(DockAction.FanStep(-1)))),
-        valueWidget(Builtin.FAN, root(tapLong(DockAction.ToggleHvacWindow, DockAction.FanOff)), BindKind.FAN),
-        iconWidget(Builtin.FAN_UP, root(tap(DockAction.FanStep(1)))),
         iconWidget(Builtin.RECIRC, root(tap(DockAction.ToggleRecirc)), BindKind.RECIRC),
         iconWidget(Builtin.SEAT, root(tap(DockAction.ShowPopup("seat")))),
-        iconWidget(Builtin.TEMP_DOWN_PASSENGER, root(tap(DockAction.TempStep(false, -1)))),
-        valueWidget(Builtin.TEMP_PASSENGER, root(tapLong(DockAction.ToggleHvacWindow, DockAction.ToggleAc)), BindKind.TEMP_PASSENGER),
-        iconWidget(Builtin.TEMP_UP_PASSENGER, root(tap(DockAction.TempStep(false, 1)))),
         iconWidget(Builtin.DEFROST_FRONT, root(tap(DockAction.ToggleDefrostFront)), BindKind.DEFROST_FRONT),
         iconWidget(Builtin.DEFROST_REAR, root(tap(DockAction.ToggleDefrostRear)), BindKind.DEFROST_REAR),
         iconWidget(Builtin.STEERING_HEAT, root(tapLong(DockAction.LevelBump("steeringHeat", "down"), DockAction.LevelBump("steeringHeat", "up"))), BindKind.STEERING_HEAT, preserveColors = true, inactiveAlpha = 0.72f),

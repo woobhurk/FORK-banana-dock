@@ -500,12 +500,10 @@ class IconsSettingsPage(activity: MainActivity, root: LinearLayout) :
 
     /** 已 show 的对话框直接套用 Dock 让位 padding */
     private fun AlertDialog.applyDockSafe(): AlertDialog {
-        if (Prefs.dockAtBottom(this@IconsSettingsPage)) {
-            window?.decorView?.setPadding(
-                0, 0, 0,
-                Prefs.dockHeightPx(this@IconsSettingsPage) + Prefs.dockMarginPx(this@IconsSettingsPage) + dp(12)
-            )
-        }
+        window?.decorView?.setPadding(
+            0, 0, 0,
+            Prefs.dockHeightPx(this@IconsSettingsPage) + Prefs.dockMarginPx(this@IconsSettingsPage) + dp(12)
+        )
         return this
     }
 }

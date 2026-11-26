@@ -99,7 +99,6 @@ class FloatingDockSettingsPage(activity: MainActivity, root: LinearLayout) :
         Prefs.setDockWidthPx(this, w)
         Prefs.setDockHeightPx(this, h)
         Prefs.setDockMarginPx(this, m)
-        Prefs.setDockAtBottom(this, true)
         Prefs.setScreenHeightPx(
             this,
             findViewById<EditText>(R.id.etScreenH).text.toString().trim().toIntOrNull() ?: 1080

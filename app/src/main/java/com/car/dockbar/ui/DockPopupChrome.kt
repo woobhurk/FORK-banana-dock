@@ -109,18 +109,16 @@ object DockPopupChrome {
     /** 同一次打开共享锚点与可用区域，避免窗口靠边规则和内容缩放各算一套。 */
     internal fun placement(context: Context, anchor: View?): Placement {
         val dm = context.resources.displayMetrics
-        val bottom = Prefs.dockAtBottom(context)
-        val gravity = if (bottom) Gravity.BOTTOM else Gravity.TOP
         val edge = dp(context, 8)
         if (anchor == null || anchor.width == 0 || anchor.height == 0) {
             val offset = Prefs.dockHeightPx(context) + Prefs.dockMarginPx(context) + dp(context, 24)
-            return Placement(context, gravity or Gravity.CENTER_HORIZONTAL, offset, null, edge)
+            return Placement(context, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL, offset, null, edge)
         }
         val loc = IntArray(2)
         anchor.getLocationOnScreen(loc)
         val gap = dp(context, 10)
-        val offset = if (bottom) dm.heightPixels - loc[1] + gap else loc[1] + anchor.height + gap
-        return Placement(context, gravity or Gravity.START, offset.coerceAtLeast(0), loc[0] + anchor.width / 2, edge)
+        val offset = dm.heightPixels - loc[1] + gap
+        return Placement(context, Gravity.BOTTOM or Gravity.START, offset.coerceAtLeast(0), loc[0] + anchor.width / 2, edge)
     }
 
     internal class Placement(

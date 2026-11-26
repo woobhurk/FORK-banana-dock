@@ -11,14 +11,11 @@ sealed class DockAction {
     data object OpenCarSettings : DockAction()
     data object LaunchThisEntry : DockAction()
     data class ShowPopup(val popup: String) : DockAction()
-    data object ToggleHvacWindow : DockAction()
-    data object ToggleAc : DockAction()
     data object ToggleAcFromDock : DockAction()
     data object ToggleDualSyncFromDock : DockAction()
     data class TempStep(val driver: Boolean, val delta: Int) : DockAction()
     data class FanStep(val delta: Int) : DockAction()
     data object ToggleFanAuto : DockAction()
-    data object FanOff : DockAction()
     data object ToggleAirflow : DockAction()
     data object ToggleRecirc : DockAction()
     data object ToggleDefrostFront : DockAction()
@@ -42,14 +39,11 @@ object DockActionCodec {
         DockAction.OpenCarSettings -> simple("openCarSettings")
         DockAction.LaunchThisEntry -> simple("launchThisEntry")
         is DockAction.ShowPopup -> simple("showPopup").put("popup", action.popup)
-        DockAction.ToggleHvacWindow -> simple("toggleHvacWindow")
-        DockAction.ToggleAc -> simple("toggleAc")
         DockAction.ToggleAcFromDock -> simple("toggleAcFromDock")
         DockAction.ToggleDualSyncFromDock -> simple("toggleDualSyncFromDock")
         is DockAction.TempStep -> simple("tempStep").put("driver", action.driver).put("delta", action.delta)
         is DockAction.FanStep -> simple("fanStep").put("delta", action.delta)
         DockAction.ToggleFanAuto -> simple("toggleFanAuto")
-        DockAction.FanOff -> simple("fanOff")
         DockAction.ToggleAirflow -> simple("toggleAirflow")
         DockAction.ToggleRecirc -> simple("toggleRecirc")
         DockAction.ToggleDefrostFront -> simple("toggleDefrostFront")
@@ -76,8 +70,6 @@ object DockActionCodec {
             "openCarSettings" -> DockAction.OpenCarSettings
             "launchThisEntry" -> DockAction.LaunchThisEntry
             "showPopup" -> text(obj, "popup")?.let { DockAction.ShowPopup(it) }
-            "toggleHvacWindow" -> DockAction.ToggleHvacWindow
-            "toggleAc" -> DockAction.ToggleAc
             "toggleAcFromDock" -> DockAction.ToggleAcFromDock
             "toggleDualSyncFromDock" -> DockAction.ToggleDualSyncFromDock
             "tempStep" -> {
@@ -87,7 +79,6 @@ object DockActionCodec {
             }
             "fanStep" -> int(obj, "delta")?.let { DockAction.FanStep(it) }
             "toggleFanAuto" -> DockAction.ToggleFanAuto
-            "fanOff" -> DockAction.FanOff
             "toggleAirflow" -> DockAction.ToggleAirflow
             "toggleRecirc" -> DockAction.ToggleRecirc
             "toggleDefrostFront" -> DockAction.ToggleDefrostFront

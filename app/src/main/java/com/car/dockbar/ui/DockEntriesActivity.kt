@@ -251,7 +251,7 @@ class DockEntriesActivity : AppCompatActivity() {
         } else {
             val added = entries.filter { it.kind == "builtin" }.mapTo(HashSet()) { it.action }
             DockCatalog.builtins()
-                .filter { !it.spec.hidden && it.spec.action !in added }
+                .filter { it.spec.action !in added }
                 .map { widget ->
                     DockEntry("b_${widget.spec.action}", "builtin", widget.spec.action, widget.spec.label, span = widget.spec.span)
                 }
